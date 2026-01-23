@@ -42,7 +42,9 @@ export type CashflowPoint = {
   endingBalance?: number;
 };
 
-export function parseFrenchNumber(raw: string | undefined | null): number | null {
+export function parseFrenchNumber(
+  raw: string | undefined | null,
+): number | null {
   if (raw == null) return null;
   const s = String(raw)
     .trim()
@@ -69,7 +71,8 @@ export function parseAnyDate(raw: string | undefined | null): Date | null {
 }
 
 function groupStart(date: Date, g: TimeGranularity): Date {
-  if (g === "day") return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  if (g === "day")
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
   if (g === "week") return startOfWeek(date, { weekStartsOn: 1 });
   if (g === "month") return startOfMonth(date);
   return startOfYear(date);
@@ -87,25 +90,43 @@ export function getTimeBucketKey(date: Date, g: TimeGranularity): string {
   return groupKey(date, g);
 }
 
+// Helper to get case-insensitive column value
+function getColumnValue(row: Record<string, string>, key: string): string | undefined {
+  const lowerKey = key.toLowerCase();
+  // Try exact match first
+  if (row[key] !== undefined) return row[key];
+  // Try case-insensitive match
+  for (const k in row) {
+    if (k.toLowerCase() === lowerKey) return row[k];
+  }
+  return undefined;
+}
+
 export function parseBankCsvTransactions(csvText: string): ParsedTransaction[] {
   const parsed = parseCsv(csvText || "");
   const rows = parsed.rows;
 
   const txs: ParsedTransaction[] = [];
   for (const r of rows) {
+    // Use DATEOP as primary date column (case-insensitive)
     const date =
-      parseAnyDate(r.dateVal) ||
-      parseAnyDate(r.dateOp) ||
-      parseAnyDate(r.date) ||
+      parseAnyDate(getColumnValue(r, "DATEOP")) ||
+      parseAnyDate(getColumnValue(r, "dateOp")) ||
+      parseAnyDate(getColumnValue(r, "dateVal")) ||
+      parseAnyDate(getColumnValue(r, "date")) ||
       null;
-    const amount = parseFrenchNumber(r.amount);
+    const amount = parseFrenchNumber(
+      getColumnValue(r, "amount") || getColumnValue(r, "AMOUNT")
+    );
     if (!date || amount == null) continue;
 
     // IMPORTANT: only rely on AI categories from CSV (aiCategory/aiSubCategory)
-    const category = (r.aiCategory || "").trim() || "Non catégorisé";
-    const subCategory = (r.aiSubCategory || "").trim() || "Non catégorisé";
+    const category = (getColumnValue(r, "aiCategory") || "").trim() || "Non catégorisé";
+    const subCategory = (getColumnValue(r, "aiSubCategory") || "").trim() || "Non catégorisé";
 
-    const balance = parseFrenchNumber(r.accountbalance);
+    const balance = parseFrenchNumber(
+      getColumnValue(r, "accountbalance") || getColumnValue(r, "ACCOUNTBALANCE")
+    );
 
     txs.push({
       date,
@@ -113,9 +134,9 @@ export function parseBankCsvTransactions(csvText: string): ParsedTransaction[] {
       category,
       subCategory,
       accountBalance: balance ?? undefined,
-      label: (r.label || "").trim() || undefined,
-      supplierFound: (r.supplierFound || "").trim() || undefined,
-      comment: (r.comment || "").trim() || undefined,
+      label: (getColumnValue(r, "label") || "").trim() || undefined,
+      supplierFound: (getColumnValue(r, "supplierFound") || "").trim() || undefined,
+      comment: (getColumnValue(r, "comment") || "").trim() || undefined,
     });
   }
 
@@ -157,17 +178,53 @@ export function parsePeaCsvHoldings(csvText: string): PeaHolding[] {
 
 export function buildCashflowSeries(
   txs: ParsedTransaction[],
-  g: TimeGranularity
+  g: TimeGranularity,
 ): CashflowPoint[] {
-  const map = new Map<string, CashflowPoint>();
+  if (txs.length === 0) return [];
 
+  // Trouver la date la plus ancienne
+  const oldestDate = txs.reduce((oldest, t) => 
+    t.date < oldest ? t.date : oldest, txs[0].date
+  );
+
+  // Date de début : début de la période de la date la plus ancienne
+  const startDate = groupStart(oldestDate, g);
+  // Date de fin : aujourd'hui
+  const endDate = new Date();
+  // Date de fin : début de la période d'aujourd'hui (inclure la période actuelle)
+  const endPeriodStart = groupStart(endDate, g);
+
+  // Générer tous les buckets entre startDate et endPeriodStart
+  const map = new Map<string, CashflowPoint>();
+  const current = new Date(startDate);
+
+  while (current <= endPeriodStart) {
+    const key = groupKey(current, g);
+    const periodStart = new Date(groupStart(current, g));
+    
+    // Créer le bucket s'il n'existe pas déjà
+    if (!map.has(key)) {
+      map.set(key, { key, date: periodStart, income: 0, expenses: 0, net: 0 });
+    }
+
+    // Avancer à la période suivante selon la granularité
+    if (g === "day") {
+      current.setDate(current.getDate() + 1);
+    } else if (g === "week") {
+      current.setDate(current.getDate() + 7);
+    } else if (g === "month") {
+      current.setMonth(current.getMonth() + 1);
+    } else if (g === "year") {
+      current.setFullYear(current.getFullYear() + 1);
+    }
+  }
+
+  // Remplir les buckets avec les données des transactions
   for (const t of txs) {
     const key = groupKey(t.date, g);
-    const start = groupStart(t.date, g);
-    if (!map.has(key)) {
-      map.set(key, { key, date: start, income: 0, expenses: 0, net: 0 });
-    }
-    const p = map.get(key)!;
+    const p = map.get(key);
+    if (!p) continue; // Ne devrait pas arriver, mais sécurité
+
     if (t.amount >= 0) p.income += t.amount;
     else p.expenses += Math.abs(t.amount);
     p.net = p.income - p.expenses;
@@ -178,13 +235,21 @@ export function buildCashflowSeries(
     }
   }
 
-  return Array.from(map.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
+  return Array.from(map.values()).sort(
+    (a, b) => a.date.getTime() - b.date.getTime(),
+  );
 }
 
 export function aggregateByCategory(txs: ParsedTransaction[]) {
   const map = new Map<
     string,
-    { category: string; subCategory: string; income: number; expenses: number; net: number }
+    {
+      category: string;
+      subCategory: string;
+      income: number;
+      expenses: number;
+      net: number;
+    }
   >();
 
   for (const t of txs) {
@@ -214,5 +279,3 @@ export function latestBalance(txs: ParsedTransaction[]): number | null {
   }
   return null;
 }
-
-

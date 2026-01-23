@@ -88,7 +88,7 @@ const Dashboard: React.FC = () => {
   const [selectedBucketKey, setSelectedBucketKey] = useState<string>("");
   const [focusedCategory, setFocusedCategory] = useState<string | null>(null);
   const [focusedSubCategory, setFocusedSubCategory] = useState<string | null>(
-    null
+    null,
   );
   const [bankSummary, setBankSummary] = useState<{
     bankBalance: number | null;
@@ -134,7 +134,7 @@ const Dashboard: React.FC = () => {
     timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
     setAnimating: (v: boolean) => void,
     setShowCurrent: (v: boolean) => void,
-    next: boolean
+    next: boolean,
   ) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setAnimating(true);
@@ -188,7 +188,7 @@ const Dashboard: React.FC = () => {
 
     const handleInvestmentUpdate = async () => {
       console.log(
-        "🔄 Rechargement du dashboard après mise à jour des investissements"
+        "🔄 Rechargement du dashboard après mise à jour des investissements",
       );
       await loadInvestments();
     };
@@ -197,7 +197,7 @@ const Dashboard: React.FC = () => {
     const handlePriceUpdateDebug = (event: any) => {
       console.log(
         "📡 Événement investmentPricesUpdated reçu dans Dashboard:",
-        event.detail
+        event.detail,
       );
     };
 
@@ -210,7 +210,7 @@ const Dashboard: React.FC = () => {
       window.removeEventListener("investmentPricesUpdated", handlePriceUpdate);
       window.removeEventListener(
         "investmentPricesUpdated",
-        handlePriceUpdateDebug
+        handlePriceUpdateDebug,
       );
       window.removeEventListener("walletsUpdated", handleWalletUpdate);
       window.removeEventListener("investmentsUpdated", handleInvestmentUpdate);
@@ -228,10 +228,10 @@ const Dashboard: React.FC = () => {
           bankMetas.map(async (m) => {
             const u = await getBankCsvUploadById(m.id, currentUser);
             return u?.content || "";
-          })
+          }),
         );
         const bankTxs = bankContents.flatMap((c) =>
-          parseBankCsvTransactions(c)
+          parseBankCsvTransactions(c),
         );
 
         const series = buildCashflowSeries(bankTxs, cashGranularity);
@@ -252,7 +252,7 @@ const Dashboard: React.FC = () => {
           peaMetas.map(async (m) => {
             const u = await getBankCsvUploadById(m.id, currentUser);
             return u?.content || "";
-          })
+          }),
         );
         const peaHoldings = peaContents.flatMap((c) => parsePeaCsvHoldings(c));
         const peaBal =
@@ -306,7 +306,7 @@ const Dashboard: React.FC = () => {
           peeMetas.map(async (m) => {
             const u = await getBankCsvUploadById(m.id, currentUser);
             return u?.content || "";
-          })
+          }),
         );
         const peeHoldings = peeContents.flatMap((c) => parsePeaCsvHoldings(c));
         const peeBal =
@@ -315,7 +315,7 @@ const Dashboard: React.FC = () => {
             : (() => {
                 // Backward compatibility: if the user previously used PEE as a transactions CSV
                 const peeTxs = peeContents.flatMap((c) =>
-                  c ? parseBankCsvTransactions(c) : []
+                  c ? parseBankCsvTransactions(c) : [],
                 );
                 return latestBalance(peeTxs);
               })();
@@ -367,11 +367,12 @@ const Dashboard: React.FC = () => {
         setBankSeries(
           series.map((p) => ({
             key: p.key,
+            date: p.date,
             income: p.income,
             expenses: p.expenses,
             net: p.net,
             balance: p.endingBalance ?? null,
-          }))
+          })),
         );
         setBankCategoryRows(categories);
         setBankTxs(bankTxs);
@@ -401,21 +402,104 @@ const Dashboard: React.FC = () => {
     loadAccountCsv();
   }, [currentUser, cashGranularity]);
 
+  // Trier les séries par ordre décroissant (plus récentes en premier)
+  const sortedBankSeries = React.useMemo(() => {
+    return [...bankSeries].sort((a, b) => {
+      // Comparer les dates pour trier par ordre décroissant
+      const dateA = a.date ? new Date(a.date).getTime() : 0;
+      const dateB = b.date ? new Date(b.date).getTime() : 0;
+      return dateB - dateA; // Ordre décroissant
+    });
+  }, [bankSeries]);
+
+  // Filtrer les transactions pour le graphique "évolution du solde" selon le bucket sélectionné et la période
+  // Affiche chaque transaction avec son solde (ACCOUNTBALANCE) pour le bucket sélectionné
+  const balanceChartData = React.useMemo(() => {
+    if (!bankTxs.length) return [];
+
+    // Si pas de bucket sélectionné, afficher toutes les transactions avec leur solde
+    if (!selectedBucketKey) {
+      return bankTxs
+        .filter((t) => t.accountBalance != null)
+        .map((t) => ({
+          date: t.date,
+          key: getTimeBucketKey(t.date, cashGranularity),
+          balance: t.accountBalance!,
+          dateLabel: new Date(t.date).toLocaleDateString("fr-FR"),
+        }))
+        .sort((a, b) => a.date.getTime() - b.date.getTime());
+    }
+
+    // Filtrer les transactions du bucket sélectionné uniquement
+    const filtered = bankTxs
+      .filter((t) => {
+        const bucketKey = getTimeBucketKey(t.date, cashGranularity);
+        return bucketKey === selectedBucketKey && t.accountBalance != null;
+      })
+      .map((t) => ({
+        date: t.date,
+        key: getTimeBucketKey(t.date, cashGranularity),
+        balance: t.accountBalance!,
+        dateLabel: new Date(t.date).toLocaleDateString("fr-FR"),
+      }))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    return filtered;
+  }, [bankTxs, selectedBucketKey, cashGranularity]);
+
   useEffect(() => {
-    // Default bucket = latest
-    if (!bankSeries.length) {
+    // Default bucket = latest (première dans la liste triée)
+    if (!sortedBankSeries.length) {
       setSelectedBucketKey("");
       setFocusedCategory(null);
       setFocusedSubCategory(null);
       return;
     }
     setSelectedBucketKey(
-      (prev) => prev || bankSeries[bankSeries.length - 1].key
+      (prev) => prev || sortedBankSeries[0].key,
     );
     // keep last focused category (memory)
     setFocusedSubCategory(null);
-  }, [bankSeries]);
+  }, [sortedBankSeries]);
 
+  // Agréger les transactions selon la granularité (pour le graphique cashflow)
+  // Utilise toutes les transactions de toutes les périodes selon la granularité (comme le graphique évolution du solde)
+  // Le graphique se met à jour quand la granularité change car bankTxs est recalculé dans le useEffect
+  const expenseByCategoryForPeriod = React.useMemo(() => {
+    if (!bankTxs.length) return [];
+    const map = new Map<string, number>();
+    // Prendre toutes les transactions de toutes les périodes selon la granularité
+    // bankTxs est recalculé quand cashGranularity change via le useEffect
+    for (const t of bankTxs) {
+      if (t.amount >= 0) continue;
+      const cat = (t.category || "Non catégorisé").toString();
+      map.set(cat, (map.get(cat) || 0) + Math.abs(t.amount));
+    }
+    const result = Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    // Force le re-render en créant un nouveau tableau à chaque fois
+    return result;
+  }, [bankTxs, cashGranularity]);
+
+  const incomeByCategoryForPeriod = React.useMemo(() => {
+    if (!bankTxs.length) return [];
+    const map = new Map<string, number>();
+    // Prendre toutes les transactions de toutes les périodes selon la granularité
+    // bankTxs est recalculé quand cashGranularity change via le useEffect
+    for (const t of bankTxs) {
+      if (t.amount <= 0) continue;
+      const cat = (t.category || "Non catégorisé").toString();
+      map.set(cat, (map.get(cat) || 0) + Number(t.amount || 0));
+    }
+    const result = Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    // Force le re-render en créant un nouveau tableau à chaque fois
+    return result;
+  }, [bankTxs, cashGranularity]);
+
+  // Pour le détail par bucket (utilisé pour les autres graphiques)
   const expenseByCategoryForBucket = React.useMemo(() => {
     if (!selectedBucketKey) return [];
     const map = new Map<string, number>();
@@ -506,9 +590,28 @@ const Dashboard: React.FC = () => {
     return map;
   }, [incomeByCategoryForBucket]);
 
+  // Couleurs pour le graphique cashflow (basé sur le bucket sélectionné ou toutes les périodes)
+  const incomeColorMapForCashflow = React.useMemo(() => {
+    const data = selectedBucketKey ? incomeByCategoryForBucket : incomeByCategoryForPeriod;
+    const map: Record<string, string> = {};
+    data.forEach((c: any, idx: number) => {
+      map[String(c.name)] = PIE_COLORS[(idx + 2) % PIE_COLORS.length];
+    });
+    return map;
+  }, [selectedBucketKey, incomeByCategoryForBucket, incomeByCategoryForPeriod]);
+
+  const categoryColorMapForCashflow = React.useMemo(() => {
+    const data = selectedBucketKey ? expenseByCategoryForBucket : expenseByCategoryForPeriod;
+    const map: Record<string, string> = {};
+    data.forEach((c: any, idx: number) => {
+      map[String(c.name)] = PIE_COLORS[idx % PIE_COLORS.length];
+    });
+    return map;
+  }, [selectedBucketKey, expenseByCategoryForBucket, expenseByCategoryForPeriod]);
+
   const cashflowSpaghettiColorMap = React.useMemo(() => {
-    return { ...incomeColorMap, ...categoryColorMap };
-  }, [incomeColorMap, categoryColorMap]);
+    return { ...incomeColorMapForCashflow, ...categoryColorMapForCashflow };
+  }, [incomeColorMapForCashflow, categoryColorMapForCashflow]);
 
   const hexToRgb = (hex: string) => {
     const h = hex.replace("#", "").trim();
@@ -652,7 +755,7 @@ const Dashboard: React.FC = () => {
       value:
         (investments.reduce(
           (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0
+          0,
         ) +
           wallets.reduce(
             (sum, wallet) =>
@@ -662,9 +765,9 @@ const Dashboard: React.FC = () => {
                 .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
               (wallet.nfts || []).reduce(
                 (nftSum, nft) => nftSum + (nft.value || 0),
-                0
+                0,
               ),
-            0
+            0,
           )) *
         0.95,
     },
@@ -673,7 +776,7 @@ const Dashboard: React.FC = () => {
       value:
         (investments.reduce(
           (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0
+          0,
         ) +
           wallets.reduce(
             (sum, wallet) =>
@@ -683,9 +786,9 @@ const Dashboard: React.FC = () => {
                 .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
               (wallet.nfts || []).reduce(
                 (nftSum, nft) => nftSum + (nft.value || 0),
-                0
+                0,
               ),
-            0
+            0,
           )) *
         0.97,
     },
@@ -694,7 +797,7 @@ const Dashboard: React.FC = () => {
       value:
         (investments.reduce(
           (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0
+          0,
         ) +
           wallets.reduce(
             (sum, wallet) =>
@@ -704,9 +807,9 @@ const Dashboard: React.FC = () => {
                 .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
               (wallet.nfts || []).reduce(
                 (nftSum, nft) => nftSum + (nft.value || 0),
-                0
+                0,
               ),
-            0
+            0,
           )) *
         0.99,
     },
@@ -715,7 +818,7 @@ const Dashboard: React.FC = () => {
       value:
         (investments.reduce(
           (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0
+          0,
         ) +
           wallets.reduce(
             (sum, wallet) =>
@@ -725,9 +828,9 @@ const Dashboard: React.FC = () => {
                 .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
               (wallet.nfts || []).reduce(
                 (nftSum, nft) => nftSum + (nft.value || 0),
-                0
+                0,
               ),
-            0
+            0,
           )) *
         0.98,
     },
@@ -736,7 +839,7 @@ const Dashboard: React.FC = () => {
       value:
         investments.reduce(
           (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0
+          0,
         ) +
         wallets.reduce(
           (sum, wallet) =>
@@ -746,9 +849,9 @@ const Dashboard: React.FC = () => {
               .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
             (wallet.nfts || []).reduce(
               (nftSum, nft) => nftSum + (nft.value || 0),
-              0
+              0,
             ),
-          0
+          0,
         ),
     },
   ];
@@ -761,10 +864,10 @@ const Dashboard: React.FC = () => {
 
   // Séparer les wallets Binance des autres wallets
   const binanceWallets = wallets.filter(
-    (wallet) => wallet.walletType === "binance"
+    (wallet) => wallet.walletType === "binance",
   );
   const blockchainWallets = wallets.filter(
-    (wallet) => wallet.walletType !== "binance"
+    (wallet) => wallet.walletType !== "binance",
   );
 
   const walletsTotalValue = blockchainWallets.reduce((sum, wallet) => {
@@ -801,7 +904,7 @@ const Dashboard: React.FC = () => {
 
   const totalPurchaseValue = investments.reduce(
     (sum, inv) => sum + inv.quantity * inv.purchasePrice,
-    0
+    0,
   );
 
   // PEA + PEE uniquement: somme de (lastPrice - buyingPrice) * quantity
@@ -812,12 +915,15 @@ const Dashboard: React.FC = () => {
       : 0;
 
   // Répartition par type
-  const typeDistribution = investments.reduce((acc, inv) => {
-    const currentPrice = inv.currentPrice ?? 0;
-    const value = inv.quantity * currentPrice;
-    acc[inv.type] = (acc[inv.type] || 0) + value;
-    return acc;
-  }, {} as Record<string, number>);
+  const typeDistribution = investments.reduce(
+    (acc, inv) => {
+      const currentPrice = inv.currentPrice ?? 0;
+      const value = inv.quantity * currentPrice;
+      acc[inv.type] = (acc[inv.type] || 0) + value;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
 
   // Ajouter les wallets à la répartition par type
   wallets.forEach((wallet) => {
@@ -997,7 +1103,7 @@ const Dashboard: React.FC = () => {
                 peaHoverTimerRef,
                 setPeaAnimating,
                 setPeaShowCurrent,
-                true
+                true,
               );
             }}
             onMouseLeave={() => {
@@ -1005,7 +1111,7 @@ const Dashboard: React.FC = () => {
                 peaHoverTimerRef,
                 setPeaAnimating,
                 setPeaShowCurrent,
-                false
+                false,
               );
             }}
           >
@@ -1048,7 +1154,7 @@ const Dashboard: React.FC = () => {
                 peeHoverTimerRef,
                 setPeeAnimating,
                 setPeeShowCurrent,
-                true
+                true,
               );
             }}
             onMouseLeave={() => {
@@ -1056,7 +1162,7 @@ const Dashboard: React.FC = () => {
                 peeHoverTimerRef,
                 setPeeAnimating,
                 setPeeShowCurrent,
-                false
+                false,
               );
             }}
           >
@@ -1163,7 +1269,7 @@ const Dashboard: React.FC = () => {
                 setFocusedSubCategory(null);
               }}
             >
-              {bankSeries.map((b: any) => (
+              {sortedBankSeries.map((b: any) => (
                 <option key={b.key} value={b.key}>
                   {b.key}
                 </option>
@@ -1181,12 +1287,13 @@ const Dashboard: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
             <div className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-              Cashflow “spaghetti” (catégories IA) — {cashGranularity}
+              Cashflow — {cashGranularity}
             </div>
             <div className="h-64">
               <CashflowSpaghetti
-                incomeByCategory={incomeByCategoryForBucket}
-                expenseByCategory={expenseByCategoryForBucket}
+                key={`cashflow-${cashGranularity}-${selectedBucketKey || 'all'}`}
+                incomeByCategory={selectedBucketKey ? incomeByCategoryForBucket : incomeByCategoryForPeriod}
+                expenseByCategory={selectedBucketKey ? expenseByCategoryForBucket : expenseByCategoryForPeriod}
                 colorsByCategory={cashflowSpaghettiColorMap}
                 height={256}
               />
@@ -1200,23 +1307,44 @@ const Dashboard: React.FC = () => {
 
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
             <div className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-              Évolution du solde (accountbalance)
+              Évolution du solde
+              {selectedBucketKey && ` — ${selectedBucketKey}`}
             </div>
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={bankSeries}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="key" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line
-                    type="monotone"
-                    dataKey="balance"
-                    stroke="#8b5cf6"
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {balanceChartData.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-300">
+                  Aucune donnée de solde disponible pour cette période
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart 
+                    key={`balance-${cashGranularity}-${selectedBucketKey || 'all'}`}
+                    data={balanceChartData}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="dateLabel" 
+                      angle={-45}
+                      textAnchor="end"
+                      height={80}
+                    />
+                    <YAxis />
+                    <Tooltip 
+                      formatter={(value: any) => `${Number(value).toLocaleString("fr-FR")}€`}
+                      labelFormatter={(label) => `Date: ${label}`}
+                      contentStyle={{ color: '#000' }}
+                      labelStyle={{ color: '#000' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="balance"
+                      stroke="#3b82f6"
+                      dot={false}
+                      strokeWidth={2}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
         </div>
@@ -1240,7 +1368,7 @@ const Dashboard: React.FC = () => {
             >
               <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
                 <div className="text-sm font-medium text-gray-900 dark:text-white mb-2">
-                  Catégories (hover = drilldown)
+                  Catégories
                 </div>
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
@@ -1266,14 +1394,14 @@ const Dashboard: React.FC = () => {
                               key={`cell-${idx}`}
                               fill={PIE_COLORS[idx % PIE_COLORS.length]}
                             />
-                          )
+                          ),
                         )}
                       </Pie>
                       <Tooltip
                         formatter={(value: any, name: any) => {
                           const total = expenseByCategoryForBucket.reduce(
                             (s: number, r: any) => s + (r.value || 0),
-                            0
+                            0,
                           );
                           const v = Number(value || 0);
                           const pct = total > 0 ? (v / total) * 100 : 0;
@@ -1333,10 +1461,10 @@ const Dashboard: React.FC = () => {
                                     categoryColorMap[focusedCategory] ||
                                       PIE_COLORS[0],
                                     idx,
-                                    expenseBySubCategoryForBucket.length
+                                    expenseBySubCategoryForBucket.length,
                                   )}
                                 />
-                              )
+                              ),
                             )}
                           </Pie>
                           <Tooltip
@@ -1344,13 +1472,13 @@ const Dashboard: React.FC = () => {
                               const total =
                                 expenseBySubCategoryForBucket.reduce(
                                   (s: number, r: any) => s + (r.value || 0),
-                                  0
+                                  0,
                                 );
                               const v = Number(value || 0);
                               const pct = total > 0 ? (v / total) * 100 : 0;
                               return [
                                 `${v.toLocaleString("fr-FR")} (${pct.toFixed(
-                                  1
+                                  1,
                                 )}%)`,
                                 name,
                               ];
@@ -1385,7 +1513,7 @@ const Dashboard: React.FC = () => {
                             </div>
                             <div className="text-gray-900 dark:text-gray-100 whitespace-nowrap">
                               {Math.abs(Number(t.amount || 0)).toLocaleString(
-                                "fr-FR"
+                                "fr-FR",
                               )}
                             </div>
                           </div>
@@ -1521,7 +1649,7 @@ const Dashboard: React.FC = () => {
                         .reduce(
                           (sum, inv) =>
                             sum + inv.quantity * (inv.currentPrice ?? 0),
-                          0
+                          0,
                         ) + binanceWalletsTotalValue
                     ).toLocaleString()}
                   </p>
@@ -1533,7 +1661,7 @@ const Dashboard: React.FC = () => {
                             .reduce(
                               (sum, inv) =>
                                 sum + inv.quantity * (inv.currentPrice ?? 0),
-                              0
+                              0,
                             ) +
                             binanceWalletsTotalValue) /
                             totalValue) *
@@ -1689,7 +1817,7 @@ const Dashboard: React.FC = () => {
                       .reduce(
                         (sum, inv) =>
                           sum + inv.quantity * (inv.currentPrice ?? 0),
-                        0
+                        0,
                       )
                       .toLocaleString()}
                   </p>
@@ -1701,7 +1829,7 @@ const Dashboard: React.FC = () => {
                             .reduce(
                               (sum, inv) =>
                                 sum + inv.quantity * (inv.currentPrice ?? 0),
-                              0
+                              0,
                             ) /
                             totalValue) *
                           100
@@ -1774,7 +1902,7 @@ const Dashboard: React.FC = () => {
                     (sum, wallet) =>
                       sum +
                       wallet.assets.filter((asset) => !asset.isHidden).length,
-                    0
+                    0,
                   )}{" "}
                   Assets Blockchain
                 </span>
@@ -1786,7 +1914,7 @@ const Dashboard: React.FC = () => {
                       wallets.forEach((wallet) => {
                         wallet.assets
                           .filter(
-                            (asset) => !asset.isHidden && asset.blockchain
+                            (asset) => !asset.isHidden && asset.blockchain,
                           )
                           .forEach((asset) => {
                             uniqueBlockchains.add(asset.blockchain);
@@ -1988,7 +2116,7 @@ const Dashboard: React.FC = () => {
                       (sum, wallet) =>
                         sum +
                         wallet.assets.filter((asset) => !asset.isHidden).length,
-                      0
+                      0,
                     )}
                   </p>
                 </div>
@@ -2128,7 +2256,7 @@ const Dashboard: React.FC = () => {
                               (asset) =>
                                 !asset.isHidden &&
                                 asset.value &&
-                                asset.value > 0
+                                asset.value > 0,
                             )
                             .forEach((asset) => {
                               const currentValue = asset.value || 0;
@@ -2200,12 +2328,12 @@ const Dashboard: React.FC = () => {
                                     item.type === "stock"
                                       ? "bg-blue-100 text-blue-800"
                                       : item.type === "crypto"
-                                      ? "bg-orange-100 text-orange-800"
-                                      : item.type === "etf"
-                                      ? "bg-green-100 text-green-800"
-                                      : item.type === "bond"
-                                      ? "bg-purple-100 text-purple-800"
-                                      : "bg-gray-100 text-gray-800"
+                                        ? "bg-orange-100 text-orange-800"
+                                        : item.type === "etf"
+                                          ? "bg-green-100 text-green-800"
+                                          : item.type === "bond"
+                                            ? "bg-purple-100 text-purple-800"
+                                            : "bg-gray-100 text-gray-800"
                                   }`}
                                 >
                                   {item.type.toUpperCase()}
