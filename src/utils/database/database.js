@@ -152,7 +152,7 @@ class DatabaseManager {
     // Migration légère: ajouter la colonne section si la table existe déjà (anciens DB)
     try {
       db.exec(
-        "ALTER TABLE bank_csv_uploads ADD COLUMN section TEXT NOT NULL DEFAULT 'bank'"
+        "ALTER TABLE bank_csv_uploads ADD COLUMN section TEXT NOT NULL DEFAULT 'bank'",
       );
     } catch (e) {
       // ignore si la colonne existe déjà
@@ -161,7 +161,7 @@ class DatabaseManager {
     // Migration: ajouter une étiquette immuable pour identifier la source (ne change pas au renommage)
     try {
       db.exec(
-        "ALTER TABLE bank_csv_uploads ADD COLUMN source_label TEXT NOT NULL DEFAULT ''"
+        "ALTER TABLE bank_csv_uploads ADD COLUMN source_label TEXT NOT NULL DEFAULT ''",
       );
     } catch (e) {
       // ignore si la colonne existe déjà
@@ -169,7 +169,7 @@ class DatabaseManager {
     // Backfill: si source_label est vide, on prend le filename actuel
     try {
       db.exec(
-        "UPDATE bank_csv_uploads SET source_label = filename WHERE source_label IS NULL OR source_label = ''"
+        "UPDATE bank_csv_uploads SET source_label = filename WHERE source_label IS NULL OR source_label = ''",
       );
     } catch (e) {
       // ignore si la colonne n'existe pas (DB très ancienne)
@@ -198,13 +198,13 @@ class DatabaseManager {
     if (userId === "Romain") {
       return db
         .prepare(
-          "SELECT * FROM investments WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC"
+          "SELECT * FROM investments WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC",
         )
         .all(userId);
     } else {
       return db
         .prepare(
-          "SELECT * FROM investments WHERE user_id = ? ORDER BY created_at DESC"
+          "SELECT * FROM investments WHERE user_id = ? ORDER BY created_at DESC",
         )
         .all(userId);
     }
@@ -241,7 +241,7 @@ class DatabaseManager {
       investment.notes,
       investment.account_type,
       now,
-      now
+      now,
     );
 
     return id;
@@ -270,7 +270,7 @@ class DatabaseManager {
       investment.notes,
       investment.account_type,
       now,
-      id
+      id,
     );
 
     return result.changes > 0;
@@ -309,13 +309,13 @@ class DatabaseManager {
     if (userId === "Romain") {
       return db
         .prepare(
-          "SELECT * FROM watchlist WHERE user_id = ? OR user_id IS NULL ORDER BY added_at DESC"
+          "SELECT * FROM watchlist WHERE user_id = ? OR user_id IS NULL ORDER BY added_at DESC",
         )
         .all(userId);
     } else {
       return db
         .prepare(
-          "SELECT * FROM watchlist WHERE user_id = ? ORDER BY added_at DESC"
+          "SELECT * FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
         )
         .all(userId);
     }
@@ -337,7 +337,7 @@ class DatabaseManager {
       item.symbol,
       item.name,
       item.type,
-      now
+      now,
     );
     return id;
   }
@@ -345,7 +345,7 @@ class DatabaseManager {
   deleteWatchlistItem(symbol, userId = "Romain") {
     const db = this.getDatabase();
     const stmt = db.prepare(
-      "DELETE FROM watchlist WHERE symbol = ? AND user_id = ?"
+      "DELETE FROM watchlist WHERE symbol = ? AND user_id = ?",
     );
     const result = stmt.run(symbol, userId);
     return result.changes > 0;
@@ -384,7 +384,7 @@ class DatabaseManager {
       JSON.stringify(wallet.blockchains),
       wallet.total_value || 0,
       wallet.last_updated || now,
-      now
+      now,
     );
 
     return id;
@@ -393,7 +393,7 @@ class DatabaseManager {
   updateWallet(id, wallet) {
     const db = this.getDatabase();
     const fields = Object.keys(wallet).filter(
-      (key) => key !== "id" && key !== "added_at"
+      (key) => key !== "id" && key !== "added_at",
     );
     const setClause = fields.map((field) => `${field} = ?`).join(", ");
     const values = fields.map((field) => wallet[field]);
@@ -419,7 +419,7 @@ class DatabaseManager {
   getWalletAssets(walletId) {
     const db = this.getDatabase();
     const stmt = db.prepare(
-      "SELECT * FROM wallet_assets WHERE wallet_id = ? ORDER BY created_at DESC"
+      "SELECT * FROM wallet_assets WHERE wallet_id = ? ORDER BY created_at DESC",
     );
     return stmt.all(walletId);
   }
@@ -465,7 +465,7 @@ class DatabaseManager {
       safeAsset.logo,
       safeAsset.is_hidden,
       now,
-      now
+      now,
     );
 
     return id;
@@ -476,7 +476,7 @@ class DatabaseManager {
     const now = new Date().toISOString();
 
     const fields = Object.keys(asset).filter(
-      (key) => key !== "id" && key !== "created_at"
+      (key) => key !== "id" && key !== "created_at",
     );
     const setClause = fields.map((field) => `${field} = ?`).join(", ");
     const values = fields.map((field) => {
@@ -504,7 +504,7 @@ class DatabaseManager {
   updateWalletAssetVisibility(id, isHidden) {
     const db = this.getDatabase();
     const stmt = db.prepare(
-      "UPDATE wallet_assets SET is_hidden = ? WHERE id = ?"
+      "UPDATE wallet_assets SET is_hidden = ? WHERE id = ?",
     );
     const result = stmt.run(isHidden ? 1 : 0, id);
     return result.changes > 0;
@@ -565,7 +565,7 @@ class DatabaseManager {
       safeNft.traits,
       safeNft.is_hidden ? 1 : 0,
       now,
-      now
+      now,
     );
 
     return id;
@@ -599,7 +599,7 @@ class DatabaseManager {
       nft.nftData?.traits ? JSON.stringify(nft.nftData.traits) : null,
       nft.isHidden ? 1 : 0,
       now,
-      id
+      id,
     );
   }
 
@@ -612,7 +612,7 @@ class DatabaseManager {
   updateWalletNFTVisibility(id, isHidden) {
     const db = this.getDatabase();
     const stmt = db.prepare(
-      "UPDATE wallet_nfts SET is_hidden = ? WHERE id = ?"
+      "UPDATE wallet_nfts SET is_hidden = ? WHERE id = ?",
     );
     stmt.run(isHidden ? 1 : 0, id);
   }
@@ -624,13 +624,13 @@ class DatabaseManager {
     if (userId === "Romain") {
       return db
         .prepare(
-          "SELECT * FROM bank_csv_uploads WHERE user_id = ? OR user_id IS NULL ORDER BY uploaded_at DESC"
+          "SELECT * FROM bank_csv_uploads WHERE user_id = ? OR user_id IS NULL ORDER BY uploaded_at DESC",
         )
         .all(userId);
     }
     return db
       .prepare(
-        "SELECT * FROM bank_csv_uploads WHERE user_id = ? ORDER BY uploaded_at DESC"
+        "SELECT * FROM bank_csv_uploads WHERE user_id = ? ORDER BY uploaded_at DESC",
       )
       .all(userId);
   }
@@ -641,26 +641,26 @@ class DatabaseManager {
       if (section) {
         return db
           .prepare(
-            "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE (user_id = ? OR user_id IS NULL) AND section = ? ORDER BY uploaded_at DESC"
+            "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE (user_id = ? OR user_id IS NULL) AND section = ? ORDER BY uploaded_at DESC",
           )
           .all(userId, section);
       }
       return db
         .prepare(
-          "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE user_id = ? OR user_id IS NULL ORDER BY uploaded_at DESC"
+          "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE user_id = ? OR user_id IS NULL ORDER BY uploaded_at DESC",
         )
         .all(userId);
     }
     if (section) {
       return db
         .prepare(
-          "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE user_id = ? AND section = ? ORDER BY uploaded_at DESC"
+          "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE user_id = ? AND section = ? ORDER BY uploaded_at DESC",
         )
         .all(userId, section);
     }
     return db
       .prepare(
-        "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE user_id = ? ORDER BY uploaded_at DESC"
+        "SELECT id, user_id, section, source_label, filename, size_bytes, uploaded_at FROM bank_csv_uploads WHERE user_id = ? ORDER BY uploaded_at DESC",
       )
       .all(userId);
   }
@@ -670,7 +670,7 @@ class DatabaseManager {
     if (userId === "Romain") {
       return db
         .prepare(
-          "SELECT * FROM bank_csv_uploads WHERE id = ? AND (user_id = ? OR user_id IS NULL)"
+          "SELECT * FROM bank_csv_uploads WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
         )
         .get(id, userId);
     }
@@ -700,7 +700,7 @@ class DatabaseManager {
       filename,
       upload.content || "",
       Number(upload.size_bytes || 0),
-      upload.uploaded_at || now
+      upload.uploaded_at || now,
     );
 
     return id;
@@ -711,7 +711,7 @@ class DatabaseManager {
     // On force la sécurité par user_id quand on peut
     if (userId) {
       const stmt = db.prepare(
-        "DELETE FROM bank_csv_uploads WHERE id = ? AND user_id = ?"
+        "DELETE FROM bank_csv_uploads WHERE id = ? AND user_id = ?",
       );
       const result = stmt.run(id, userId);
       return result.changes > 0;
@@ -741,11 +741,27 @@ class DatabaseManager {
     const setClause = fields.map((f) => `${f} = ?`).join(", ");
     const values = fields.map((f) => updates[f]);
 
+    const effectiveUserId = userId || "Romain";
+    if (effectiveUserId === "Romain") {
+      const stmt = db.prepare(
+        `UPDATE bank_csv_uploads SET ${setClause} WHERE id = ? AND (user_id = ? OR user_id IS NULL)`,
+      );
+      const result = stmt.run(...values, id, effectiveUserId);
+      return result.changes > 0;
+    }
+
     const stmt = db.prepare(
-      `UPDATE bank_csv_uploads SET ${setClause} WHERE id = ? AND user_id = ?`
+      `UPDATE bank_csv_uploads SET ${setClause} WHERE id = ? AND user_id = ?`,
     );
-    const result = stmt.run(...values, id, userId || "Romain");
-    return result.changes > 0;
+    const result = stmt.run(...values, id, effectiveUserId);
+    if (result.changes > 0) return true;
+
+    // Legacy fallback: allow updates on rows without user_id
+    const fallback = db.prepare(
+      `UPDATE bank_csv_uploads SET ${setClause} WHERE id = ? AND user_id IS NULL`,
+    );
+    const fallbackResult = fallback.run(...values, id);
+    return fallbackResult.changes > 0;
   }
 
   // Statistiques de la base de données

@@ -18,6 +18,16 @@ import {
 } from "../utils/userSettings";
 import { getBinanceAccountInfo } from "../utils/binanceService";
 import { addWallet, getStoredWallets } from "../utils/storage";
+import { fetchBoursoAccounts } from "../utils/boursoService";
+import type {
+  BoursoAccount,
+  BoursoAccountMapping,
+  BoursoAccountSection,
+} from "../types";
+
+type StringSettingKeys = {
+  [K in keyof UserSettings]: UserSettings[K] extends string ? K : never;
+}[keyof UserSettings];
 
 const Settings: React.FC = () => {
   const { username } = useParams<{ username: string }>();
@@ -31,6 +41,8 @@ const Settings: React.FC = () => {
     coinGeckoApiKey: "",
     openSeaApiKey: "",
     customApiEndpoint: "",
+    boursoClientId: "",
+    boursoAccountMappings: [],
     theme: "auto",
     currency: "USD",
     language: "fr",
@@ -56,6 +68,12 @@ const Settings: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
+
+  // Bourso account detection
+  const [showBoursoModal, setShowBoursoModal] = useState(false);
+  const [boursoPassword, setBoursoPassword] = useState("");
+  const [boursoLoading, setBoursoLoading] = useState(false);
+  const [boursoError, setBoursoError] = useState("");
 
   useEffect(() => {
     loadSettings();
@@ -84,7 +102,7 @@ const Settings: React.FC = () => {
     }
   };
 
-  const handleInputChange = (field: keyof UserSettings, value: string) => {
+  const handleInputChange = (field: StringSettingKeys, value: string) => {
     setSettings((prev) => ({
       ...prev,
       [field]: value,
@@ -117,7 +135,7 @@ const Settings: React.FC = () => {
       // Vérifier si un wallet Binance existe déjà
       const existingWallets = await getStoredWallets(username || currentUser);
       const existingBinanceWallet = existingWallets.find(
-        (wallet) => wallet.walletType === "binance"
+        (wallet) => wallet.walletType === "binance",
       );
 
       if (existingBinanceWallet) {
@@ -132,13 +150,13 @@ const Settings: React.FC = () => {
       // Tester la connexion et récupérer les assets
       const assets = await getBinanceAccountInfo(
         settings.binanceApiKey,
-        settings.binanceSecretKey
+        settings.binanceSecretKey,
       );
 
       // Calculer la valeur totale
       const totalValue = assets.reduce(
         (sum, asset) => sum + (asset.value || 0),
-        0
+        0,
       );
 
       // Créer le wallet Binance
@@ -149,6 +167,7 @@ const Settings: React.FC = () => {
         walletType: "binance" as const,
         blockchains: ["binance"],
         assets,
+        nfts: [],
         totalValue,
         lastUpdated: new Date().toISOString(),
         addedAt: new Date().toISOString(),
@@ -165,7 +184,7 @@ const Settings: React.FC = () => {
         } catch (error) {
           console.error(
             "❌ Erreur lors de la sauvegarde automatique des paramètres:",
-            error
+            error,
           );
         }
       }
@@ -193,13 +212,13 @@ const Settings: React.FC = () => {
 
   const renderApiKeyField = (
     label: string,
-    field: keyof UserSettings,
+    field: StringSettingKeys,
     showState: boolean,
     setShowState: (show: boolean) => void,
     placeholder: string,
-    isPassword: boolean = true
+    isPassword: boolean = true,
   ) => {
-    const value = settings[field];
+    const value = settings[field] ?? "";
     const fieldName = field.toString();
 
     return (
@@ -246,6 +265,75 @@ const Settings: React.FC = () => {
         </div>
       </div>
     );
+  };
+
+  const inferBoursoSection = (account: BoursoAccount): BoursoAccountSection => {
+    const name = account.name.toLowerCase();
+    const kind = account.kind.toLowerCase();
+    if (name.includes("pea") || kind.includes("trading")) {
+      return "pea";
+    }
+    return "bank";
+  };
+
+  const handleDetectBoursoAccounts = async () => {
+    if (!settings.boursoClientId) {
+      setBoursoError("Veuillez renseigner votre identifiant client.");
+      return;
+    }
+    if (!boursoPassword) {
+      setBoursoError("Veuillez saisir votre mot de passe.");
+      return;
+    }
+
+    setBoursoLoading(true);
+    setBoursoError("");
+    try {
+      const accounts = await fetchBoursoAccounts({
+        customerId: settings.boursoClientId,
+        password: boursoPassword,
+      });
+
+      const existingById = new Map(
+        settings.boursoAccountMappings.map((mapping) => [
+          mapping.accountId,
+          mapping,
+        ]),
+      );
+
+      const nextMappings: BoursoAccountMapping[] = accounts.map((account) => {
+        const existing = existingById.get(account.id);
+        return {
+          accountId: account.id,
+          accountName: account.name,
+          kind: account.kind,
+          section: existing?.section ?? inferBoursoSection(account),
+        };
+      });
+
+      setSettings((prev) => ({
+        ...prev,
+        boursoAccountMappings: nextMappings,
+      }));
+    } catch (error: any) {
+      setBoursoError(
+        error?.message || "Impossible de récupérer les comptes Bourso.",
+      );
+    } finally {
+      setBoursoLoading(false);
+    }
+  };
+
+  const updateBoursoMappingSection = (
+    accountId: string,
+    section: BoursoAccountSection,
+  ) => {
+    setSettings((prev) => ({
+      ...prev,
+      boursoAccountMappings: prev.boursoAccountMappings.map((mapping) =>
+        mapping.accountId === accountId ? { ...mapping, section } : mapping,
+      ),
+    }));
   };
 
   if (!username) {
@@ -312,7 +400,7 @@ const Settings: React.FC = () => {
                 showBinanceApi,
                 setShowBinanceApi,
                 "Votre clé API Binance",
-                false
+                false,
               )}
 
               {/* Binance Secret Key */}
@@ -321,7 +409,7 @@ const Settings: React.FC = () => {
                 "binanceSecretKey",
                 showBinanceSecret,
                 setShowBinanceSecret,
-                "Votre clé secrète Binance"
+                "Votre clé secrète Binance",
               )}
 
               {/* Bouton de connexion Binance */}
@@ -356,8 +444,8 @@ const Settings: React.FC = () => {
                     binanceConnectionStatus.type === "success"
                       ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                       : binanceConnectionStatus.type === "error"
-                      ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                      : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                        ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                        : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
                   }`}
                 >
                   {binanceConnectionStatus.message}
@@ -379,7 +467,7 @@ const Settings: React.FC = () => {
                 "geminiApiKey",
                 showGeminiApi,
                 setShowGeminiApi,
-                "Votre clé API Gemini"
+                "Votre clé API Gemini",
               )}
 
               {/* Custom API Endpoint */}
@@ -402,7 +490,7 @@ const Settings: React.FC = () => {
                     onClick={() =>
                       copyToClipboard(
                         settings.customApiEndpoint,
-                        "customApiEndpoint"
+                        "customApiEndpoint",
                       )
                     }
                     className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
@@ -416,6 +504,48 @@ const Settings: React.FC = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Section BoursoBank */}
+          <div className="bg-white dark:bg-[#111111] rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              BoursoBank
+            </h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Identifiant client
+                </label>
+                <input
+                  type="text"
+                  value={settings.boursoClientId}
+                  onChange={(e) =>
+                    handleInputChange("boursoClientId", e.target.value)
+                  }
+                  placeholder="Votre identifiant client BoursoBank"
+                  className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                />
+              </div>
+
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                {settings.boursoAccountMappings.length
+                  ? `${settings.boursoAccountMappings.length} compte(s) configuré(s)`
+                  : "Aucun compte configuré"}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowBoursoModal(true)}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Détecter et mapper les comptes
+              </button>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Le mot de passe n'est jamais stocké. Pensez à sauvegarder vos
+                paramètres après la détection.
+              </p>
             </div>
           </div>
         </div>
@@ -434,7 +564,7 @@ const Settings: React.FC = () => {
                 "etherscanApiKey",
                 showEtherscanApi,
                 setShowEtherscanApi,
-                "Votre clé API Etherscan (pour toutes les chaînes)"
+                "Votre clé API Etherscan (pour toutes les chaînes)",
               )}
 
               {/* CoinGecko API Key */}
@@ -443,7 +573,7 @@ const Settings: React.FC = () => {
                 "coinGeckoApiKey",
                 showCoinGeckoApi,
                 setShowCoinGeckoApi,
-                "Votre clé API CoinGecko (optionnel)"
+                "Votre clé API CoinGecko (optionnel)",
               )}
 
               {/* OpenSea API Key */}
@@ -452,12 +582,125 @@ const Settings: React.FC = () => {
                 "openSeaApiKey",
                 showOpenSeaApi,
                 setShowOpenSeaApi,
-                "Votre clé API OpenSea (pour les NFTs)"
+                "Votre clé API OpenSea (pour les NFTs)",
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {showBoursoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl bg-white dark:bg-[#111111] rounded-lg shadow-lg">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Détection des comptes Bourso
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowBoursoModal(false)}
+                className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Mot de passe
+                </label>
+                <input
+                  type="password"
+                  value={boursoPassword}
+                  onChange={(e) => setBoursoPassword(e.target.value)}
+                  placeholder="Votre mot de passe BoursoBank"
+                  className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Le mot de passe sert uniquement à la détection et n'est pas
+                  conservé.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDetectBoursoAccounts}
+                disabled={boursoLoading}
+                className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50"
+              >
+                {boursoLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Détection en cours...</span>
+                  </>
+                ) : (
+                  <span>Détecter les comptes</span>
+                )}
+              </button>
+
+              {boursoError && (
+                <div className="rounded-md bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 p-3 text-sm">
+                  {boursoError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {settings.boursoAccountMappings.length === 0 && (
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    Aucun compte détecté pour le moment.
+                  </div>
+                )}
+
+                {settings.boursoAccountMappings.map((mapping) => (
+                  <div
+                    key={mapping.accountId}
+                    className="flex flex-col gap-2 rounded-md border border-gray-200 dark:border-gray-700 p-3"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100">
+                        {mapping.accountName}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {mapping.kind}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Rubrique
+                      </label>
+                      <select
+                        value={mapping.section}
+                        onChange={(e) =>
+                          updateBoursoMappingSection(
+                            mapping.accountId,
+                            e.target.value as BoursoAccountSection,
+                          )
+                        }
+                        className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                      >
+                        <option value="bank">Banque</option>
+                        <option value="pea">PEA</option>
+                        <option value="ignore">Ignorer</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBoursoModal(false)}
+                className="px-4 py-2 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-[#1a1a1a] dark:text-gray-200 dark:hover:bg-[#222222]"
+              >
+                Terminer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

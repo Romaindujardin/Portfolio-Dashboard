@@ -124,3 +124,42 @@ export interface BankCsvUploadMeta {
   sizeBytes: number;
   uploadedAt: string;
 }
+
+// ===== BOURSO / BOURSORAMA =====
+export type BoursoAccountKind =
+  | "Banking"
+  | "Trading"
+  | "Savings"
+  | "Loans"
+  | string;
+
+export interface BoursoAccount {
+  id: string;
+  name: string;
+  balance: number;
+  bankName: string;
+  kind: BoursoAccountKind;
+}
+
+export type BoursoAccountSection = "bank" | "pea" | "ignore";
+
+export interface BoursoAccountMapping {
+  accountId: string;
+  accountName: string;
+  kind: BoursoAccountKind;
+  section: BoursoAccountSection;
+}
+
+export interface BoursoSyncItem {
+  accountId: string;
+  accountName: string;
+  section: BoursoAccountSection;
+  addedCount: number;
+  totalCount: number;
+  newRows: Array<Record<string, string>>;
+  filename: string;
+}
+
+export interface BoursoSyncResult {
+  items: BoursoSyncItem[];
+}

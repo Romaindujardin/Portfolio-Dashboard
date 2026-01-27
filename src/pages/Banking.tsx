@@ -12,8 +12,11 @@ import {
   Briefcase,
   Download,
   Pencil,
+  Loader2,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
+import { getUserSettings } from "../utils/userSettings";
+import { syncBoursoAccounts } from "../utils/boursoService";
 import {
   createBankCsvUpload,
   deleteBankCsvUpload,
@@ -22,7 +25,7 @@ import {
   updateBankCsvUpload,
 } from "../utils/storage";
 import { parseCsv, stringifyCsv } from "../utils/csv";
-import type { BankCsvUploadMeta } from "../types";
+import type { BankCsvUploadMeta, BoursoSyncResult } from "../types";
 import {
   BankCategorySchema,
   categorizeBankRowsBatch,
@@ -113,16 +116,28 @@ const Banking: React.FC = () => {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(
-    {}
+    {},
   );
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
 
+  const boursoSettings = getUserSettings(currentUser);
+
+  // ===== Bourso sync =====
+  const [showBoursoSyncModal, setShowBoursoSyncModal] = useState(false);
+  const [boursoPassword, setBoursoPassword] = useState("");
+  const [boursoPages, setBoursoPages] = useState(10);
+  const [boursoSyncLoading, setBoursoSyncLoading] = useState(false);
+  const [boursoSyncError, setBoursoSyncError] = useState("");
+  const [boursoSyncResult, setBoursoSyncResult] =
+    useState<BoursoSyncResult | null>(null);
+  const [boursoSyncPreview, setBoursoSyncPreview] = useState(false);
+
   // ===== IA catégorisation =====
   const schemaStorageKey = useMemo(
     () => `bank_ai_schema_${currentUser}`,
-    [currentUser]
+    [currentUser],
   );
   const [schema, setSchema] = useState<BankCategorySchema>([]);
   const [schemaJsonDraft, setSchemaJsonDraft] = useState<string>("");
@@ -130,7 +145,7 @@ const Banking: React.FC = () => {
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [aiRunning, setAiRunning] = useState(false);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number }>(
-    { done: 0, total: 0 }
+    { done: 0, total: 0 },
   );
   const [aiMode, setAiMode] = useState<"missing" | "overwrite">("missing");
   const [showAiModeChoice, setShowAiModeChoice] = useState(false);
@@ -144,13 +159,13 @@ const Banking: React.FC = () => {
   const [showManualModal, setShowManualModal] = useState(false);
   const manualColumnsStorageKey = useMemo(
     () => `manual_columns_${currentUser}_${currentSection}`,
-    [currentUser, currentSection]
+    [currentUser, currentSection],
   );
   const [manualBaseHeaders, setManualBaseHeaders] = useState<string[] | null>(
-    null
+    null,
   );
   const [manualCustomHeaders, setManualCustomHeaders] = useState<string[]>(
-    DEFAULT_MANUAL_COLUMNS
+    DEFAULT_MANUAL_COLUMNS,
   );
   const [newManualColumn, setNewManualColumn] = useState("");
   const [manualDraft, setManualDraft] = useState<Record<string, string>>({});
@@ -166,7 +181,7 @@ const Banking: React.FC = () => {
   const refreshSectionCounts = async () => {
     try {
       const [bank, pea, pee] = await Promise.all(
-        CSV_SECTIONS.map((s) => getStoredBankCsvUploads(currentUser, s))
+        CSV_SECTIONS.map((s) => getStoredBankCsvUploads(currentUser, s)),
       );
       setSectionCounts({
         bank: bank.length,
@@ -189,14 +204,14 @@ const Banking: React.FC = () => {
         setManualCustomHeaders(
           currentSection === "pee" || currentSection === "pea"
             ? DEFAULT_HOLDINGS_COLUMNS
-            : DEFAULT_MANUAL_COLUMNS
+            : DEFAULT_MANUAL_COLUMNS,
         );
       }
     } catch {
       setManualCustomHeaders(
         currentSection === "pee" || currentSection === "pea"
           ? DEFAULT_HOLDINGS_COLUMNS
-          : DEFAULT_MANUAL_COLUMNS
+          : DEFAULT_MANUAL_COLUMNS,
       );
     }
     setManualBaseHeaders(null);
@@ -223,6 +238,102 @@ const Banking: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openBoursoSyncModal = () => {
+    setBoursoSyncError("");
+    setBoursoPassword("");
+    setBoursoSyncResult(null);
+    setBoursoSyncPreview(false);
+    setShowBoursoSyncModal(true);
+  };
+
+  const closeBoursoSyncModal = () => setShowBoursoSyncModal(false);
+
+  const handleBoursoSync = async () => {
+    if (!boursoSettings.boursoClientId) {
+      setBoursoSyncError("Identifiant client Bourso manquant.");
+      return;
+    }
+    if (!boursoPassword) {
+      setBoursoSyncError("Mot de passe requis.");
+      return;
+    }
+    if (!boursoSettings.boursoAccountMappings?.length) {
+      setBoursoSyncError("Aucun compte Bourso configuré dans les paramètres.");
+      return;
+    }
+
+    const sectionMappings = boursoSettings.boursoAccountMappings.filter(
+      (m) => m.section === currentSection,
+    );
+    if (!sectionMappings.length) {
+      setBoursoSyncError(
+        `Aucun compte Bourso configuré pour l'onglet ${
+          currentSection === "bank"
+            ? "Compte bancaire"
+            : currentSection === "pea"
+              ? "PEA"
+              : "PEE"
+        }.`,
+      );
+      return;
+    }
+
+    setBoursoSyncLoading(true);
+    setBoursoSyncError("");
+    try {
+      const result = await syncBoursoAccounts({
+        customerId: boursoSettings.boursoClientId,
+        password: boursoPassword,
+        mappings: sectionMappings,
+        pages: boursoPages,
+        userId: currentUser,
+        dryRun: true,
+      });
+      setBoursoSyncResult(result);
+      setBoursoSyncPreview(true);
+    } catch (e: any) {
+      setBoursoSyncError(e?.message || "Erreur lors de la synchronisation");
+    } finally {
+      setBoursoSyncLoading(false);
+    }
+  };
+
+  const handleBoursoConfirm = async () => {
+    if (!boursoSettings.boursoClientId || !boursoPassword) return;
+    const sectionMappings = boursoSettings.boursoAccountMappings.filter(
+      (m) => m.section === currentSection,
+    );
+    if (!sectionMappings.length) return;
+
+    setBoursoSyncLoading(true);
+    setBoursoSyncError("");
+    try {
+      const result = await syncBoursoAccounts({
+        customerId: boursoSettings.boursoClientId,
+        password: boursoPassword,
+        mappings: sectionMappings,
+        pages: boursoPages,
+        userId: currentUser,
+        dryRun: false,
+      });
+      setBoursoSyncResult(result);
+      setBoursoSyncPreview(false);
+      await loadUploads();
+      setShowBoursoSyncModal(false);
+    } catch (e: any) {
+      setBoursoSyncError(e?.message || "Erreur lors de la synchronisation");
+    } finally {
+      setBoursoSyncLoading(false);
+    }
+  };
+
+  const handleBoursoReject = () => {
+    setBoursoSyncResult(null);
+    setBoursoSyncPreview(false);
+    setBoursoSyncError("");
+    setShowBoursoSyncModal(false);
   };
 
   const closeManualModal = () => setShowManualModal(false);
@@ -293,7 +404,7 @@ const Banking: React.FC = () => {
   const detectBaseHeadersForManual = async (): Promise<string[] | null> => {
     // find first non-manual upload in current section
     const candidate = uploads.find(
-      (u) => u.sourceLabel !== MANUAL_SOURCE_LABEL
+      (u) => u.sourceLabel !== MANUAL_SOURCE_LABEL,
     );
     if (!candidate) return null;
 
@@ -394,7 +505,7 @@ const Banking: React.FC = () => {
         null;
       if (!candidate) {
         throw new Error(
-          "Aucun CSV PEA trouvé. Uploade d’abord ton PEA (format holdings)."
+          "Aucun CSV PEA trouvé. Uploade d’abord ton PEA (format holdings).",
         );
       }
 
@@ -431,7 +542,7 @@ const Banking: React.FC = () => {
     if (effectiveHeaders.includes("amount")) required.add("amount");
 
     const nonEmptyRows = (manualRowsDraft || []).filter((r) =>
-      effectiveHeaders.some((h) => ((r?.[h] ?? "") + "").trim() !== "")
+      effectiveHeaders.some((h) => ((r?.[h] ?? "") + "").trim() !== ""),
     );
     if (nonEmptyRows.length === 0) {
       setError("Ajoute au moins une ligne.");
@@ -451,7 +562,7 @@ const Banking: React.FC = () => {
       setError(
         `Lignes incomplètes: ${invalid
           .slice(0, 8)
-          .join(", ")}. Champs requis: amount + (name ou isin).`
+          .join(", ")}. Champs requis: amount + (name ou isin).`,
       );
       return;
     }
@@ -488,7 +599,7 @@ const Banking: React.FC = () => {
             sizeBytes: starter.length,
             section: currentSection,
           },
-          currentUser
+          currentUser,
         );
 
         if (!manualId) throw new Error("Impossible de créer le CSV manuel");
@@ -498,7 +609,7 @@ const Banking: React.FC = () => {
       const parsed = parseCsv(contentText || "");
       const delimiter = parsed.delimiter || ";";
       const headers = Array.from(
-        new Set([...parsed.headers, ...effectiveHeaders])
+        new Set([...parsed.headers, ...effectiveHeaders]),
       );
 
       const rows: Array<Record<string, string>> = parsed.rows.map((r) => ({
@@ -522,14 +633,16 @@ const Banking: React.FC = () => {
       const ok = await updateBankCsvUpload(
         manualId,
         { content: updatedText, sizeBytes: updatedText.length },
-        currentUser
+        currentUser,
       );
       if (!ok) throw new Error("Impossible de sauvegarder les lignes");
 
       setCsvCache((prev) => ({ ...prev, [manualId as string]: updatedText }));
       await loadUploads();
       setSelectedUploadIds((prev) =>
-        prev.includes(manualId as string) ? prev : [manualId as string, ...prev]
+        prev.includes(manualId as string)
+          ? prev
+          : [manualId as string, ...prev],
       );
       closeManualModal();
     } catch (e: any) {
@@ -557,7 +670,7 @@ const Banking: React.FC = () => {
       setError(
         effectiveHeaders.includes("label")
           ? "Champs requis: date, libellé, montant"
-          : "Champs requis: date, montant"
+          : "Champs requis: date, montant",
       );
       return;
     }
@@ -597,7 +710,7 @@ const Banking: React.FC = () => {
             sizeBytes: starter.length,
             section: currentSection,
           },
-          currentUser
+          currentUser,
         );
 
         if (!manualId) throw new Error("Impossible de créer le CSV manuel");
@@ -607,7 +720,7 @@ const Banking: React.FC = () => {
       const parsed = parseCsv(contentText || "");
       const delimiter = parsed.delimiter || ";";
       const headers = Array.from(
-        new Set([...parsed.headers, ...effectiveHeaders])
+        new Set([...parsed.headers, ...effectiveHeaders]),
       );
 
       const rows: Array<Record<string, string>> = parsed.rows.map((r) => ({
@@ -636,14 +749,16 @@ const Banking: React.FC = () => {
       const ok = await updateBankCsvUpload(
         manualId,
         { content: updatedText, sizeBytes: updatedText.length },
-        currentUser
+        currentUser,
       );
       if (!ok) throw new Error("Impossible de sauvegarder la ligne manuelle");
 
       setCsvCache((prev) => ({ ...prev, [manualId as string]: updatedText }));
       await loadUploads();
       setSelectedUploadIds((prev) =>
-        prev.includes(manualId as string) ? prev : [manualId as string, ...prev]
+        prev.includes(manualId as string)
+          ? prev
+          : [manualId as string, ...prev],
       );
       closeManualModal();
     } catch (e: any) {
@@ -835,7 +950,7 @@ const Banking: React.FC = () => {
       localStorage.setItem(schemaStorageKey, JSON.stringify(parsed));
     } catch (e: any) {
       setSchemaError(
-        e?.message || "Schéma JSON invalide (ex: accolade manquante)"
+        e?.message || "Schéma JSON invalide (ex: accolade manquante)",
       );
     }
   };
@@ -851,7 +966,7 @@ const Banking: React.FC = () => {
   };
 
   const runAiCategorization = async (
-    modeOverride?: "missing" | "overwrite"
+    modeOverride?: "missing" | "overwrite",
   ) => {
     const err = validateSchema(schema);
     if (err) {
@@ -869,14 +984,14 @@ const Banking: React.FC = () => {
     try {
       // Ensure all contents are loaded
       const missing = selectedUploadIds.filter(
-        (id) => csvCache[id] === undefined
+        (id) => csvCache[id] === undefined,
       );
       if (missing.length > 0) {
         const results = await Promise.all(
           missing.map(async (id) => {
             const upload = await getBankCsvUploadById(id, currentUser);
             return { id, content: upload?.content || "" };
-          })
+          }),
         );
         setCsvCache((prev) => {
           const next = { ...prev };
@@ -903,7 +1018,7 @@ const Banking: React.FC = () => {
         const missingCount = rows.filter(
           (r) =>
             !String(r.aiCategory || "").trim() ||
-            !String(r.aiSubCategory || "").trim()
+            !String(r.aiSubCategory || "").trim(),
         ).length;
         return sum + missingCount;
       }, 0);
@@ -914,7 +1029,7 @@ const Banking: React.FC = () => {
         const { id, parsed } = f;
         const delimiter = parsed.delimiter;
         const headers = Array.from(
-          new Set([...parsed.headers, "aiCategory", "aiSubCategory"])
+          new Set([...parsed.headers, "aiCategory", "aiSubCategory"]),
         );
 
         const rows: CsvRowWithAi[] = parsed.rows.map((r) => ({
@@ -933,7 +1048,7 @@ const Banking: React.FC = () => {
                 .filter(
                   ({ r }) =>
                     !String(r.aiCategory || "").trim() ||
-                    !String(r.aiSubCategory || "").trim()
+                    !String(r.aiSubCategory || "").trim(),
                 )
                 .map(({ idx }) => idx);
 
@@ -984,7 +1099,7 @@ const Banking: React.FC = () => {
         const ok = await updateBankCsvUpload(
           id,
           { content: updatedText, sizeBytes: updatedText.length },
-          currentUser
+          currentUser,
         );
         if (!ok)
           throw new Error("Échec sauvegarde CSV après catégorisation IA");
@@ -1005,7 +1120,7 @@ const Banking: React.FC = () => {
       setError(null);
       try {
         const missing = selectedUploadIds.filter(
-          (id) => csvCache[id] === undefined
+          (id) => csvCache[id] === undefined,
         );
         if (missing.length === 0) return;
 
@@ -1013,7 +1128,7 @@ const Banking: React.FC = () => {
           missing.map(async (id) => {
             const upload = await getBankCsvUploadById(id, currentUser);
             return { id, content: upload?.content || "" };
-          })
+          }),
         );
 
         setCsvCache((prev) => {
@@ -1033,7 +1148,7 @@ const Banking: React.FC = () => {
     // default sort when possible
     const headerCandidates = ["dateVal", "dateOp"];
     const found = headerCandidates.find((h) =>
-      Object.values(csvCache).some((txt) => txt.includes(h))
+      Object.values(csvCache).some((txt) => txt.includes(h)),
     );
     if (found) {
       setSortKey(found);
@@ -1136,7 +1251,7 @@ const Banking: React.FC = () => {
 
       const delimiter = parsed.delimiter;
       const headers = Array.from(
-        new Set([...parsed.headers, "aiCategory", "aiSubCategory"])
+        new Set([...parsed.headers, "aiCategory", "aiSubCategory"]),
       );
 
       const rows = parsed.rows.map((r) => ({
@@ -1167,7 +1282,7 @@ const Banking: React.FC = () => {
       const ok = await updateBankCsvUpload(
         uploadId,
         { content: updatedText, sizeBytes: updatedText.length },
-        currentUser
+        currentUser,
       );
       if (!ok) throw new Error("Échec sauvegarde CSV");
 
@@ -1262,7 +1377,7 @@ const Banking: React.FC = () => {
           sizeBytes: file.size,
           section: currentSection,
         },
-        currentUser
+        currentUser,
       );
       if (!id) {
         setError("Impossible de sauvegarder le CSV");
@@ -1270,7 +1385,7 @@ const Banking: React.FC = () => {
       }
       await loadUploads();
       setSelectedUploadIds((prev) =>
-        prev.includes(id) ? prev : [id, ...prev]
+        prev.includes(id) ? prev : [id, ...prev],
       );
     } catch (e: any) {
       setError(e?.message || "Erreur lors de l'upload du fichier");
@@ -1352,12 +1467,12 @@ const Banking: React.FC = () => {
       const ok = await updateBankCsvUpload(
         id,
         { filename: trimmed },
-        currentUser
+        currentUser,
       );
       if (!ok) throw new Error("Impossible de renommer le CSV");
 
       setUploads((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, filename: trimmed } : u))
+        prev.map((u) => (u.id === id ? { ...u, filename: trimmed } : u)),
       );
     } catch (e: any) {
       setError(e?.message || "Erreur lors du renommage");
@@ -1431,8 +1546,8 @@ const Banking: React.FC = () => {
             {currentSection === "bank"
               ? "Compte bancaire"
               : currentSection === "pea"
-              ? "PEA"
-              : "PEE"}
+                ? "PEA"
+                : "PEE"}
           </h1>
           <p className="text-gray-600 dark:text-gray-300 mt-2">
             Importez vos transactions via CSV puis triez/filtrez dans un tableau
@@ -1441,6 +1556,14 @@ const Banking: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={openBoursoSyncModal}
+            className="btn-secondary flex items-center gap-2"
+          >
+            <Download size={18} />
+            <span>Mettre à jour</span>
+          </button>
           <button
             onClick={openManualModal}
             className="btn-secondary flex items-center gap-2"
@@ -1509,10 +1632,10 @@ const Banking: React.FC = () => {
               const dateKey = effectiveHeaders.includes("dateVal")
                 ? "dateVal"
                 : effectiveHeaders.includes("dateOp")
-                ? "dateOp"
-                : effectiveHeaders.includes("date")
-                ? "date"
-                : null;
+                  ? "dateOp"
+                  : effectiveHeaders.includes("date")
+                    ? "date"
+                    : null;
               const required = new Set<string>();
               if (dateKey) required.add(dateKey);
               if (effectiveHeaders.includes("amount")) required.add("amount");
@@ -1549,7 +1672,7 @@ const Banking: React.FC = () => {
                               title="Supprimer"
                               onClick={() => {
                                 const next = manualCustomHeaders.filter(
-                                  (x) => x !== h
+                                  (x) => x !== h,
                                 );
                                 persistManualCustomHeaders(next);
                                 if (currentSection === "pee") {
@@ -1679,8 +1802,8 @@ const Banking: React.FC = () => {
                                           (prev || []).map((r, i) =>
                                             i === rowIdx
                                               ? { ...(r || {}), [h]: v }
-                                              : r
-                                          )
+                                              : r,
+                                          ),
                                         );
                                       }}
                                       placeholder={manualFieldPlaceholder(h)}
@@ -1695,8 +1818,8 @@ const Banking: React.FC = () => {
                                     onClick={() =>
                                       setManualRowsDraft((prev) =>
                                         (prev || []).filter(
-                                          (_, i) => i !== rowIdx
-                                        )
+                                          (_, i) => i !== rowIdx,
+                                        ),
                                       )
                                     }
                                   >
@@ -1770,6 +1893,193 @@ const Banking: React.FC = () => {
               >
                 {currentSection === "pee" ? "Enregistrer" : "Ajouter"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBoursoSyncModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={closeBoursoSyncModal}
+          />
+          <div className="relative w-full max-w-4xl mx-4 bg-white dark:bg-[#111111] rounded-lg p-6 shadow-xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                Mise à jour BoursoBank
+              </h2>
+              <button
+                type="button"
+                onClick={closeBoursoSyncModal}
+                className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                title="Fermer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {!boursoSettings.boursoClientId && (
+                <div className="p-3 rounded-md bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 text-sm">
+                  Renseigne ton identifiant client Bourso dans les paramètres.
+                </div>
+              )}
+              {!boursoSettings.boursoAccountMappings?.length && (
+                <div className="p-3 rounded-md bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 text-sm">
+                  Aucun compte Bourso configuré. Lance la détection dans les
+                  paramètres.
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Mot de passe BoursoBank
+                  </label>
+                  <input
+                    type="password"
+                    value={boursoPassword}
+                    onChange={(e) => setBoursoPassword(e.target.value)}
+                    placeholder="Mot de passe (non stocké)"
+                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Pages à récupérer
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={boursoPages}
+                    onChange={(e) => setBoursoPages(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                  />
+                </div>
+              </div>
+
+              {!boursoSyncPreview && (
+                <button
+                  type="button"
+                  onClick={handleBoursoSync}
+                  disabled={boursoSyncLoading}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-60"
+                >
+                  {boursoSyncLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Mise à jour...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download size={16} />
+                      <span>Lancer la mise à jour</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {boursoSyncError && (
+                <div className="p-3 rounded-md bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 text-sm">
+                  {boursoSyncError}
+                </div>
+              )}
+
+              {boursoSyncResult?.items?.length ? (
+                <div className="space-y-4">
+                  {boursoSyncResult.items.map((item) => {
+                    const headers = item.newRows?.length
+                      ? Object.keys(item.newRows[0])
+                      : [];
+                    return (
+                      <div
+                        key={`${item.section}-${item.accountId}`}
+                        className="border border-gray-200 dark:border-gray-700 rounded-md p-4"
+                      >
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+                          <div>
+                            <p className="font-medium text-gray-900 dark:text-gray-100">
+                              {item.accountName}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {item.section === "bank"
+                                ? "Compte bancaire"
+                                : "PEA"}{" "}
+                              • {item.filename}
+                            </p>
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                            {item.addedCount} nouvelle(s) • total{" "}
+                            {item.totalCount}
+                          </div>
+                        </div>
+
+                        {item.newRows?.length ? (
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                              <thead className="bg-gray-50 dark:bg-gray-800">
+                                <tr>
+                                  {headers.map((h) => (
+                                    <th
+                                      key={h}
+                                      className="px-2 py-1 text-left text-gray-600 dark:text-gray-300"
+                                    >
+                                      {h}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {item.newRows.map((row, idx) => (
+                                  <tr
+                                    key={idx}
+                                    className="border-t border-gray-200 dark:border-gray-700"
+                                  >
+                                    {headers.map((h) => (
+                                      <td
+                                        key={h}
+                                        className="px-2 py-1 text-gray-900 dark:text-gray-100 whitespace-nowrap"
+                                      >
+                                        {(row?.[h] ?? "").toString()}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            Aucune nouvelle donnée détectée.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {boursoSyncPreview && (
+                    <div className="flex flex-col sm:flex-row gap-2 justify-end">
+                      <button
+                        type="button"
+                        onClick={handleBoursoReject}
+                        className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+                      >
+                        Refuser
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleBoursoConfirm}
+                        disabled={boursoSyncLoading}
+                        className="px-4 py-2 rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                      >
+                        Valider
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -2010,7 +2320,7 @@ const Banking: React.FC = () => {
                               setShowAdvancedSchema(checked);
                               if (checked) {
                                 setSchemaJsonDraft(
-                                  JSON.stringify(schema, null, 2)
+                                  JSON.stringify(schema, null, 2),
                                 );
                               }
                             }}
@@ -2037,8 +2347,8 @@ const Banking: React.FC = () => {
                                     prev.map((c) =>
                                       c.category === cat.category
                                         ? { ...c, category: nextName }
-                                        : c
-                                    )
+                                        : c,
+                                    ),
                                   );
                                 }}
                               />
@@ -2049,14 +2359,14 @@ const Banking: React.FC = () => {
                                 onClick={() => {
                                   if (
                                     !window.confirm(
-                                      `Supprimer la catégorie "${cat.category}" ?`
+                                      `Supprimer la catégorie "${cat.category}" ?`,
                                     )
                                   )
                                     return;
                                   setSchema((prev) =>
                                     prev.filter(
-                                      (c) => c.category !== cat.category
-                                    )
+                                      (c) => c.category !== cat.category,
+                                    ),
                                   );
                                 }}
                               >
@@ -2096,7 +2406,7 @@ const Banking: React.FC = () => {
                                           sub,
                                         ],
                                       };
-                                    })
+                                    }),
                                   );
                                   setNewSubByCategory((prev) => ({
                                     ...prev,
@@ -2126,7 +2436,7 @@ const Banking: React.FC = () => {
                                         if (c.category !== cat.category)
                                           return c;
                                         const nextSubs = c.subcategories.filter(
-                                          (s) => s !== sub
+                                          (s) => s !== sub,
                                         );
                                         return {
                                           ...c,
@@ -2135,7 +2445,7 @@ const Banking: React.FC = () => {
                                               ? nextSubs
                                               : ["Autres"],
                                         };
-                                      })
+                                      }),
                                     );
                                   }}
                                 >
@@ -2174,7 +2484,7 @@ const Banking: React.FC = () => {
                             className="btn-secondary py-2 px-4"
                             onClick={() =>
                               setSchemaJsonDraft(
-                                JSON.stringify(schema, null, 2)
+                                JSON.stringify(schema, null, 2),
                               )
                             }
                           >
@@ -2197,9 +2507,9 @@ const Banking: React.FC = () => {
                     {selectedUploadIds.length === 0
                       ? "Tableau"
                       : selectedUploadIds.length === 1
-                      ? uploads.find((u) => u.id === selectedUploadIds[0])
-                          ?.filename || "Tableau"
-                      : `${selectedUploadIds.length} fichiers sélectionnés`}
+                        ? uploads.find((u) => u.id === selectedUploadIds[0])
+                            ?.filename || "Tableau"
+                        : `${selectedUploadIds.length} fichiers sélectionnés`}
                   </h2>
                   <p className="text-sm text-gray-500">
                     {merged.rows.length} lignes • {merged.headers.length}{" "}
@@ -2207,8 +2517,8 @@ const Banking: React.FC = () => {
                     {merged.delimiter === "\t"
                       ? "TAB"
                       : merged.delimiter === "mix"
-                      ? "mix"
-                      : merged.delimiter}
+                        ? "mix"
+                        : merged.delimiter}
                     ”
                   </p>
                 </div>
@@ -2362,7 +2672,7 @@ const Banking: React.FC = () => {
                                             : getSubcategoryOptions(
                                                 (
                                                   row.aiCategory ?? ""
-                                                ).toString()
+                                                ).toString(),
                                               );
                                         return (
                                           <div className="flex items-center gap-2">
@@ -2414,7 +2724,7 @@ const Banking: React.FC = () => {
                                           onClick={() =>
                                             startEdit(
                                               row as Record<string, string>,
-                                              h
+                                              h,
                                             )
                                           }
                                           title="Cliquer pour modifier"

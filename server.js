@@ -3,6 +3,10 @@ import cors from "cors";
 import yahooFinance from "yahoo-finance2";
 import fetch from "node-fetch";
 import crypto from "crypto";
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import os from "os";
 import DatabaseManager from "./src/utils/database/database.js";
 
 const app = express();
@@ -10,11 +14,222 @@ const PORT = 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 // Initialiser la base de données
 const dbManager = DatabaseManager.getInstance();
 dbManager.initializeTables();
+
+const resolveBoursoCliPath = () => {
+  const candidates = [
+    process.env.BOURSO_CLI_PATH,
+    path.resolve(process.cwd(), "../bourso-api/target/release/bourso-cli"),
+    path.resolve(process.cwd(), "../bourso-api/target/debug/bourso-cli"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+      } catch (error) {
+        throw new Error(
+          `bourso-cli non exécutable: ${candidate}. Vérifie les permissions (chmod +x) ou Gatekeeper.`,
+        );
+      }
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    "bourso-cli introuvable. Définis BOURSO_CLI_PATH ou compile bourso-api.",
+  );
+};
+
+const getBoursoSettingsPath = () =>
+  path.join(os.homedir(), ".bourso", "settings.json");
+
+const withTemporaryPassword = async (password, action) => {
+  if (!password) {
+    return action();
+  }
+
+  const settingsPath = getBoursoSettingsPath();
+  const settingsDir = path.dirname(settingsPath);
+  let originalContent = null;
+  let settings = {};
+
+  try {
+    if (fs.existsSync(settingsPath)) {
+      originalContent = fs.readFileSync(settingsPath, "utf-8");
+      settings = JSON.parse(originalContent || "{}") || {};
+    }
+  } catch (error) {
+    console.warn("⚠️ Impossible de lire settings.json, création d'un nouveau.");
+  }
+
+  settings.password = password;
+
+  fs.mkdirSync(settingsDir, { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  try {
+    return await action();
+  } finally {
+    if (originalContent != null) {
+      fs.writeFileSync(settingsPath, originalContent);
+    } else {
+      settings.password = null;
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    }
+  }
+};
+
+const runBoursoCli = ({ args, password }) => {
+  const cliPath = resolveBoursoCliPath();
+  const execCommand = () =>
+    new Promise((resolve, reject) => {
+      const child = spawn(cliPath, args, {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: "pipe",
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout.on("data", (data) => {
+        stdout += data.toString();
+      });
+      child.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+      child.on("error", (error) => reject(error));
+      child.on("close", (code) => {
+        if (code !== 0) {
+          return reject(
+            new Error(stderr || stdout || `bourso-cli exit ${code}`),
+          );
+        }
+        return resolve({ stdout, stderr });
+      });
+    });
+
+  return withTemporaryPassword(password, execCommand);
+};
+
+const parseAccountsFromOutput = (stdout) => {
+  const accounts = [];
+  const matches = stdout.matchAll(/Account\s*\{([\s\S]*?)\}/g);
+
+  for (const match of matches) {
+    const block = match[1];
+    const idMatch = block.match(/id:\s*"([^"]+)"/);
+    const nameMatch = block.match(/name:\s*"([^"]+)"/);
+    const balanceMatch = block.match(/balance:\s*([0-9.\-]+)/);
+    const bankMatch = block.match(/bank_name:\s*"([^"]+)"/);
+    const kindMatch = block.match(/kind:\s*([A-Za-z]+)/);
+    if (!idMatch || !nameMatch || !balanceMatch || !bankMatch || !kindMatch) {
+      continue;
+    }
+    accounts.push({
+      id: idMatch[1],
+      name: nameMatch[1],
+      balance: Number(balanceMatch[1]),
+      bankName: bankMatch[1],
+      kind: kindMatch[1],
+    });
+  }
+
+  return accounts;
+};
+
+const parseCsvLine = (line, delimiter) => {
+  const out = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && ch === delimiter) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+
+  out.push(cur);
+  return out.map((v) => v.trim());
+};
+
+const parseCsvText = (text) => {
+  const cleaned = (text || "").replace(/^\uFEFF/, "");
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return { headers: [], rows: [], delimiter: ";" };
+
+  const sample = lines[0];
+  const delimiter = sample.includes(";") ? ";" : ",";
+  const headers = parseCsvLine(lines[0], delimiter).map(
+    (h, idx) => h || `col_${idx}`,
+  );
+  const rows = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCsvLine(lines[i], delimiter);
+    const row = {};
+    headers.forEach((h, idx) => {
+      row[h] = (values[idx] ?? "").trim();
+    });
+    rows.push(row);
+  }
+
+  return { headers, rows, delimiter };
+};
+
+const escapeCsvValue = (value, delimiter) => {
+  const v = String(value ?? "");
+  const needs =
+    v.includes('"') ||
+    v.includes("\n") ||
+    v.includes("\r") ||
+    v.includes(delimiter);
+  if (!needs) return v;
+  return `"${v.replace(/"/g, '""')}"`;
+};
+
+const stringifyCsvText = ({ headers, rows, delimiter = ";" }) => {
+  const headerLine = headers
+    .map((h) => escapeCsvValue(h, delimiter))
+    .join(delimiter);
+  const lines = [headerLine];
+  for (const row of rows) {
+    const line = headers
+      .map((h) => escapeCsvValue((row?.[h] ?? "").toString(), delimiter))
+      .join(delimiter);
+    lines.push(line);
+  }
+  return lines.join("\n");
+};
+
+const extractCsvFromOutput = (stdout, headerStartsWith) => {
+  const lines = (stdout || "").split(/\r?\n/);
+  const idx = lines.findIndex((line) =>
+    line.trim().startsWith(headerStartsWith),
+  );
+  if (idx === -1) {
+    throw new Error("CSV introuvable dans la sortie bourso-cli");
+  }
+  return lines.slice(idx).join("\n").trim();
+};
 
 // Routes existantes
 app.get("/api/test", (req, res) => {
@@ -98,14 +313,14 @@ app.get("/api/opensea/nfts/:address", async (req, res) => {
 
     if (!response.ok) {
       throw new Error(
-        `OpenSea API error: ${response.status} ${response.statusText}`
+        `OpenSea API error: ${response.status} ${response.statusText}`,
       );
     }
 
     const data = await response.json();
 
     console.log(
-      `✅ [Server] ${data.nfts?.length || 0} NFTs trouvés pour ${address}`
+      `✅ [Server] ${data.nfts?.length || 0} NFTs trouvés pour ${address}`,
     );
 
     res.json(data);
@@ -126,7 +341,7 @@ app.get("/api/opensea/nft/:contract/:tokenId", async (req, res) => {
 
   try {
     console.log(
-      `🔍 [Server] Récupération de la valeur NFT ${contract}/${tokenId}...`
+      `🔍 [Server] Récupération de la valeur NFT ${contract}/${tokenId}...`,
     );
 
     // Utiliser l'API v2 d'OpenSea pour un NFT spécifique
@@ -141,7 +356,7 @@ app.get("/api/opensea/nft/:contract/:tokenId", async (req, res) => {
 
     if (!response.ok) {
       throw new Error(
-        `OpenSea API error: ${response.status} ${response.statusText}`
+        `OpenSea API error: ${response.status} ${response.statusText}`,
       );
     }
 
@@ -153,7 +368,7 @@ app.get("/api/opensea/nft/:contract/:tokenId", async (req, res) => {
   } catch (error) {
     console.error(
       `❌ [Server] Erreur OpenSea pour ${contract}/${tokenId}:`,
-      error
+      error,
     );
     res.status(500).json({ error: error.message });
   }
@@ -170,7 +385,7 @@ app.get("/api/opensea/collection/:collection/floor", async (req, res) => {
 
   try {
     console.log(
-      `🔍 [Server] Récupération du floor price pour la collection ${collection}...`
+      `🔍 [Server] Récupération du floor price pour la collection ${collection}...`,
     );
 
     // Utiliser l'API v2 d'OpenSea pour les statistiques de collection
@@ -185,7 +400,7 @@ app.get("/api/opensea/collection/:collection/floor", async (req, res) => {
 
     if (!response.ok) {
       throw new Error(
-        `OpenSea API error: ${response.status} ${response.statusText}`
+        `OpenSea API error: ${response.status} ${response.statusText}`,
       );
     }
 
@@ -194,16 +409,334 @@ app.get("/api/opensea/collection/:collection/floor", async (req, res) => {
     console.log(
       `✅ [Server] Floor price récupéré pour ${collection}: ${
         data.total?.floor_price !== undefined ? data.total.floor_price : "N/A"
-      }`
+      }`,
     );
 
     res.json(data);
   } catch (error) {
     console.error(
       `❌ [Server] Erreur OpenSea pour la collection ${collection}:`,
-      error
+      error,
     );
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== BOURSO / BOURSORAMA =====
+
+app.post("/api/bourso/accounts", async (req, res) => {
+  try {
+    const { customerId, password } = req.body || {};
+    if (!customerId || !password) {
+      return res.status(400).json({ error: "customerId et password requis" });
+    }
+
+    await runBoursoCli({ args: ["config", "--username", customerId] });
+    const { stdout } = await runBoursoCli({ args: ["accounts"], password });
+    const accounts = parseAccountsFromOutput(stdout);
+
+    if (!accounts.length) {
+      return res
+        .status(500)
+        .json({ error: "Aucun compte détecté dans la sortie bourso-cli" });
+    }
+
+    res.json({ accounts });
+  } catch (error) {
+    console.error("Error fetching bourso accounts:", error);
+    res.status(500).json({ error: error.message || "Erreur Bourso" });
+  }
+});
+
+app.post("/api/bourso/sync", async (req, res) => {
+  try {
+    const {
+      customerId,
+      password,
+      mappings,
+      pages = 10,
+      userId = "Romain",
+      dryRun = false,
+    } = req.body || {};
+
+    if (!customerId || !password) {
+      return res.status(400).json({ error: "customerId et password requis" });
+    }
+    if (!Array.isArray(mappings) || mappings.length === 0) {
+      return res.status(400).json({ error: "Aucune configuration de comptes" });
+    }
+
+    await runBoursoCli({ args: ["config", "--username", customerId] });
+
+    const results = [];
+
+    for (const mapping of mappings) {
+      if (!mapping || mapping.section === "ignore") continue;
+
+      if (mapping.section === "bank") {
+        const { stdout } = await runBoursoCli({
+          args: [
+            "transactions",
+            "--account",
+            mapping.accountId,
+            "--pages",
+            `${pages}`,
+            "--format",
+            "csv",
+          ],
+          password,
+        });
+
+        const rawCsv = extractCsvFromOutput(stdout, "date,");
+        const parsed = parseCsvText(rawCsv);
+        const rows = parsed.rows.map((row) => ({
+          dateOp: row.date || row.date_op || "",
+          dateVal: row.value_date || row.valueDate || "",
+          label: row.label || "",
+          amount: row.amount || "",
+          currency: row.currency || "EUR",
+          category: row.category || "",
+          reference: row.reference || "",
+          accountbalance: row.balance || "",
+          accountLabel: mapping.accountName || "",
+          supplierFound: "",
+          comment: "",
+          aiCategory: row.category || "Non catégorisé",
+          aiSubCategory: "Non catégorisé",
+        }));
+
+        const headers = [
+          "dateOp",
+          "dateVal",
+          "label",
+          "amount",
+          "currency",
+          "category",
+          "reference",
+          "accountbalance",
+          "accountLabel",
+          "supplierFound",
+          "comment",
+          "aiCategory",
+          "aiSubCategory",
+        ];
+
+        const sourceLabel = `bourso:${mapping.accountId}`;
+        const existing = dbManager
+          .getAllBankCsvUploadsMeta(userId, "bank")
+          .find((u) => u.source_label === sourceLabel);
+        let existingRows = [];
+
+        if (existing) {
+          const existingUpload = dbManager.getBankCsvUploadById(
+            existing.id,
+            userId,
+          );
+          if (existingUpload?.content) {
+            const parsedExisting = parseCsvText(existingUpload.content);
+            existingRows = parsedExisting.rows || [];
+          }
+        }
+
+        const existingKeys = new Set(
+          existingRows.map((r) =>
+            r.reference
+              ? `ref:${r.reference}`
+              : `key:${r.dateOp}|${r.label}|${r.amount}|${r.accountbalance}`,
+          ),
+        );
+
+        const newRows = rows.filter((r) => {
+          const key = r.reference
+            ? `ref:${r.reference}`
+            : `key:${r.dateOp}|${r.label}|${r.amount}|${r.accountbalance}`;
+          if (existingKeys.has(key)) return false;
+          existingKeys.add(key);
+          return true;
+        });
+
+        const combinedRows = [...existingRows, ...newRows];
+        combinedRows.sort((a, b) => {
+          const da = Date.parse(a.dateOp || "") || 0;
+          const db = Date.parse(b.dateOp || "") || 0;
+          return da - db;
+        });
+
+        const csvContent = stringifyCsvText({
+          headers,
+          rows: combinedRows,
+          delimiter: ";",
+        });
+        const filename = `bourso-bank-${mapping.accountId}.csv`;
+
+        if (!dryRun) {
+          if (existing) {
+            dbManager.updateBankCsvUpload(existing.id, userId, {
+              filename,
+              content: csvContent,
+              size_bytes: csvContent.length,
+            });
+          } else {
+            dbManager.createBankCsvUpload({
+              user_id: userId,
+              section: "bank",
+              source_label: sourceLabel,
+              filename,
+              content: csvContent,
+              size_bytes: csvContent.length,
+            });
+          }
+        }
+
+        results.push({
+          accountId: mapping.accountId,
+          accountName: mapping.accountName,
+          section: "bank",
+          addedCount: newRows.length,
+          totalCount: combinedRows.length,
+          newRows,
+          filename,
+        });
+      }
+
+      if (mapping.section === "pea") {
+        const { stdout } = await runBoursoCli({
+          args: [
+            "positions",
+            "--account",
+            mapping.accountId,
+            "--format",
+            "csv",
+          ],
+          password,
+        });
+
+        const rawCsv = extractCsvFromOutput(stdout, "symbol,");
+        const parsed = parseCsvText(rawCsv);
+        const rows = parsed.rows.map((row) => ({
+          name: row.label || row.symbol || "",
+          isin: row.symbol || "",
+          quantity: row.quantity || "",
+          buyingPrice: row.buying_price || "",
+          lastPrice: row.last || "",
+          amount: row.amount || "",
+          amountVariation: row.gain_loss || "",
+          variation: row.gain_loss_percent || "",
+          lastMovementDate: row.last_movement_date || "",
+        }));
+
+        const headers = [
+          "name",
+          "isin",
+          "quantity",
+          "buyingPrice",
+          "lastPrice",
+          "amount",
+          "amountVariation",
+          "variation",
+          "lastMovementDate",
+        ];
+
+        const sourceLabel = `bourso:${mapping.accountId}`;
+        const existing = dbManager
+          .getAllBankCsvUploadsMeta(userId, "pea")
+          .find((u) => u.source_label === sourceLabel);
+
+        let existingRows = [];
+        if (existing) {
+          const existingUpload = dbManager.getBankCsvUploadById(
+            existing.id,
+            userId,
+          );
+          if (existingUpload?.content) {
+            const parsedExisting = parseCsvText(existingUpload.content);
+            existingRows = parsedExisting.rows || [];
+          }
+        }
+
+        const buildPeaKey = (row) => {
+          const isin = (row.isin || row.symbol || row.name || "").toString();
+          const quantity = (row.quantity || "").toString();
+          const buyingPrice = (
+            row.buyingPrice ||
+            row.buying_price ||
+            ""
+          ).toString();
+          const lastMovementDate = (
+            row.lastMovementDate ||
+            row.last_movement_date ||
+            ""
+          ).toString();
+          return `${isin}|${quantity}|${buyingPrice}|${lastMovementDate}`;
+        };
+
+        const combinedMap = new Map();
+        existingRows.forEach((row) => {
+          const key = buildPeaKey(row);
+          combinedMap.set(key, { ...row });
+        });
+
+        const newRows = [];
+        rows.forEach((row) => {
+          const key = buildPeaKey(row);
+          if (combinedMap.has(key)) {
+            // Update latest prices/amounts but don't count as new
+            combinedMap.set(key, { ...combinedMap.get(key), ...row });
+          } else {
+            combinedMap.set(key, row);
+            newRows.push(row);
+          }
+        });
+
+        const combinedRows = Array.from(combinedMap.values());
+        combinedRows.sort((a, b) => {
+          const amountA = Number(a.amount || 0);
+          const amountB = Number(b.amount || 0);
+          return amountB - amountA;
+        });
+
+        const csvContent = stringifyCsvText({
+          headers,
+          rows: combinedRows,
+          delimiter: ";",
+        });
+        const filename = `bourso-pea-${mapping.accountId}.csv`;
+
+        if (!dryRun) {
+          if (existing) {
+            dbManager.updateBankCsvUpload(existing.id, userId, {
+              filename,
+              content: csvContent,
+              size_bytes: csvContent.length,
+            });
+          } else {
+            dbManager.createBankCsvUpload({
+              user_id: userId,
+              section: "pea",
+              source_label: sourceLabel,
+              filename,
+              content: csvContent,
+              size_bytes: csvContent.length,
+            });
+          }
+        }
+
+        results.push({
+          accountId: mapping.accountId,
+          accountName: mapping.accountName,
+          section: "pea",
+          addedCount: newRows.length,
+          totalCount: combinedRows.length,
+          newRows,
+          filename,
+        });
+      }
+    }
+
+    res.json({ items: results });
+  } catch (error) {
+    console.error("Error syncing bourso data:", error);
+    res.status(500).json({ error: error.message || "Erreur Bourso" });
   }
 });
 
@@ -251,7 +784,9 @@ app.post("/api/database/clear", (req, res) => {
 
     // Supprimer tous les uploads CSV bancaires
     const bankCsvUploads = dbManager.getAllBankCsvUploads("Romain");
-    bankCsvUploads.forEach((u) => dbManager.deleteBankCsvUpload(u.id, "Romain"));
+    bankCsvUploads.forEach((u) =>
+      dbManager.deleteBankCsvUpload(u.id, "Romain"),
+    );
 
     res.json({ message: "Database cleared successfully" });
   } catch (error) {
@@ -322,11 +857,25 @@ app.put("/api/database/bank-csv/:id", (req, res) => {
     const userId = req.query.user_id || req.body.user_id || "Romain";
     const { filename, content, size_bytes } = req.body || {};
 
-    const success = dbManager.updateBankCsvUpload(id, userId, {
+    let success = dbManager.updateBankCsvUpload(id, userId, {
       filename,
       content,
       size_bytes,
     });
+
+    if (!success) {
+      const db = dbManager.getDatabase();
+      const row = db
+        .prepare("SELECT user_id FROM bank_csv_uploads WHERE id = ?")
+        .get(id);
+      if (row) {
+        success = dbManager.updateBankCsvUpload(id, row.user_id || "Romain", {
+          filename,
+          content,
+          size_bytes,
+        });
+      }
+    }
 
     if (success) return res.json({ message: "Upload updated successfully" });
     res.status(404).json({ error: "Upload not found" });
@@ -474,7 +1023,7 @@ app.put("/api/database/watchlist", (req, res) => {
     // Supprimer tous les éléments existants pour cet utilisateur
     const existing = dbManager.getAllWatchlistItems(userId);
     existing.forEach((item) =>
-      dbManager.deleteWatchlistItem(item.symbol, userId)
+      dbManager.deleteWatchlistItem(item.symbol, userId),
     );
 
     // Ajouter les nouveaux éléments
@@ -501,7 +1050,7 @@ app.delete("/api/database/watchlist/:symbol", (req, res) => {
     const userId = req.query.user_id || "Romain";
     const success = dbManager.deleteWatchlistItem(
       decodeURIComponent(symbol),
-      userId
+      userId,
     );
 
     if (success) {
@@ -546,7 +1095,7 @@ app.post("/api/database/wallets", (req, res) => {
   try {
     console.log(
       "📝 Création d'un wallet avec données:",
-      JSON.stringify(req.body, null, 2)
+      JSON.stringify(req.body, null, 2),
     );
 
     const { assets, nfts, ...walletData } = req.body;
@@ -611,7 +1160,7 @@ app.put("/api/database/wallets", (req, res) => {
       if (walletNFTs && walletNFTs.length > 0) {
         existingNFTs.set(wallet.address, walletNFTs);
         console.log(
-          `💾 Sauvegarde de ${walletNFTs.length} NFTs pour le wallet ${wallet.address}`
+          `💾 Sauvegarde de ${walletNFTs.length} NFTs pour le wallet ${wallet.address}`,
         );
       }
 
@@ -703,7 +1252,7 @@ app.put("/api/database/wallets", (req, res) => {
         const savedNFTs = existingNFTs.get(wallet.address);
         if (savedNFTs && savedNFTs.length > 0) {
           console.log(
-            `  - ${savedNFTs.length} NFTs existants trouvés, transfert vers le nouveau wallet...`
+            `  - ${savedNFTs.length} NFTs existants trouvés, transfert vers le nouveau wallet...`,
           );
           savedNFTs.forEach((nft, nftIndex) => {
             try {
@@ -715,7 +1264,7 @@ app.put("/api/database/wallets", (req, res) => {
             } catch (nftError) {
               console.error(
                 `  ❌ Erreur transfert NFT ${nftIndex + 1}:`,
-                nftError.message
+                nftError.message,
               );
             }
           });
@@ -807,7 +1356,7 @@ app.put("/api/database/wallets/:id/assets/:index/visibility", (req, res) => {
     if (assets[index]) {
       const success = dbManager.updateWalletAssetVisibility(
         assets[index].id,
-        isHidden
+        isHidden,
       );
 
       if (success) {
@@ -835,7 +1384,7 @@ app.post("/api/database/wallets/:id/sync-nfts", async (req, res) => {
     }
 
     console.log(
-      `🔄 Synchronisation des NFTs pour le wallet ${wallet.address}...`
+      `🔄 Synchronisation des NFTs pour le wallet ${wallet.address}...`,
     );
 
     // Supprimer les anciens NFTs
@@ -888,7 +1437,7 @@ app.post("/api/database/wallets/:id/sync-nfts", async (req, res) => {
     });
 
     console.log(
-      `✅ ${testNFTs.length} NFTs synchronisés pour le wallet ${wallet.address}`
+      `✅ ${testNFTs.length} NFTs synchronisés pour le wallet ${wallet.address}`,
     );
 
     res.json({
@@ -911,7 +1460,7 @@ app.post("/api/database/wallets/test-create-with-nfts", async (req, res) => {
     }
 
     console.log(
-      `🧪 Création d'un wallet de test avec NFTs: ${name} (${address})`
+      `🧪 Création d'un wallet de test avec NFTs: ${name} (${address})`,
     );
 
     // Créer le wallet
@@ -991,7 +1540,7 @@ app.post("/api/database/wallets/test-create-with-nfts", async (req, res) => {
     });
 
     console.log(
-      `✅ Wallet de test créé avec ${testAssets.length} assets et ${testNFTs.length} NFTs`
+      `✅ Wallet de test créé avec ${testAssets.length} assets et ${testNFTs.length} NFTs`,
     );
 
     res.json({
@@ -1044,7 +1593,7 @@ app.post("/api/database/import", (req, res) => {
 
     const existingWatchlist = dbManager.getAllWatchlistItems();
     existingWatchlist.forEach((item) =>
-      dbManager.deleteWatchlistItem(item.symbol)
+      dbManager.deleteWatchlistItem(item.symbol),
     );
 
     // Importer les nouvelles données

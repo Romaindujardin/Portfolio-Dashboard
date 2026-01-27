@@ -1,3 +1,5 @@
+import type { BoursoAccountMapping } from "../types";
+
 export interface UserSettings {
   binanceApiKey: string;
   binanceSecretKey: string;
@@ -6,6 +8,8 @@ export interface UserSettings {
   coinGeckoApiKey: string;
   openSeaApiKey: string;
   customApiEndpoint: string;
+  boursoClientId: string;
+  boursoAccountMappings: BoursoAccountMapping[];
   theme: "light" | "dark" | "auto";
   currency: string;
   language: string;
@@ -19,6 +23,8 @@ const defaultSettings: UserSettings = {
   coinGeckoApiKey: "",
   openSeaApiKey: "",
   customApiEndpoint: "",
+  boursoClientId: "",
+  boursoAccountMappings: [],
   theme: "auto",
   currency: "USD",
   language: "fr",
@@ -39,7 +45,7 @@ export const getUserSettings = (username: string): UserSettings => {
 
 export const saveUserSettings = (
   username: string,
-  settings: UserSettings
+  settings: UserSettings,
 ): void => {
   try {
     localStorage.setItem(`user_settings_${username}`, JSON.stringify(settings));
@@ -50,16 +56,16 @@ export const saveUserSettings = (
 
 export const getSetting = (
   username: string,
-  key: keyof UserSettings
+  key: keyof UserSettings,
 ): UserSettings[keyof UserSettings] => {
   const settings = getUserSettings(username);
   return settings[key] || defaultSettings[key];
 };
 
-export const setSetting = (
+export const setSetting = <K extends keyof UserSettings>(
   username: string,
-  key: keyof UserSettings,
-  value: UserSettings[keyof UserSettings]
+  key: K,
+  value: UserSettings[K],
 ): void => {
   const settings = getUserSettings(username);
   settings[key] = value;
