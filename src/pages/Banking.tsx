@@ -13,6 +13,7 @@ import {
   Download,
   Pencil,
   Loader2,
+  RefreshCcw,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import { getUserSettings } from "../utils/userSettings";
@@ -1561,7 +1562,7 @@ const Banking: React.FC = () => {
             onClick={openBoursoSyncModal}
             className="btn-secondary flex items-center gap-2"
           >
-            <Download size={18} />
+            <RefreshCcw size={18} />
             <span>Mettre à jour</span>
           </button>
           <button
@@ -1974,7 +1975,7 @@ const Banking: React.FC = () => {
                     </>
                   ) : (
                     <>
-                      <Download size={16} />
+                      <RefreshCcw size={16} />
                       <span>Lancer la mise à jour</span>
                     </>
                   )}
