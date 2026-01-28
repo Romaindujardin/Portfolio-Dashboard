@@ -91,6 +91,10 @@ const Dashboard: React.FC = () => {
     Record<string, ReturnType<typeof setTimeout> | null>
   >({});
   const [loading, setLoading] = useState(true);
+  const [isAnonymous, setIsAnonymous] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("dashboardAnonymous") === "1";
+  });
   const { currentUser } = useUser();
   const [userSettings, setUserSettings] = useState(() =>
     getUserSettings(currentUser),
@@ -124,6 +128,45 @@ const Dashboard: React.FC = () => {
     purchaseValue: 0,
     currentValue: 0,
   });
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== "dashboardAnonymous") return;
+      setIsAnonymous(event.newValue === "1");
+    };
+    const handleCustom = (event: Event) => {
+      const detail = (event as CustomEvent | undefined)?.detail as
+        | { value?: boolean }
+        | undefined;
+      if (typeof detail?.value === "boolean") {
+        setIsAnonymous(detail.value);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener(
+      "dashboardAnonymousChanged",
+      handleCustom as EventListener,
+    );
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(
+        "dashboardAnonymousChanged",
+        handleCustom as EventListener,
+      );
+    };
+  }, []);
+
+  const maskDigits = (text: string) =>
+    isAnonymous ? text.replace(/[0-9]/g, "*") : text;
+  const formatNumber = (value: number, locale: string = "fr-FR") =>
+    maskDigits(Number(value || 0).toLocaleString(locale));
+  const formatCurrency = (value: number, locale: string = "fr-FR") =>
+    `${formatNumber(value, locale)}€`;
+  const formatDollar = (value: number, locale: string = "fr-FR") =>
+    `$${formatNumber(value, locale)}`;
+  const formatPercent = (value: number, digits: number = 2) =>
+    `${maskDigits(Number(value || 0).toFixed(digits))}%`;
+  const maskText = (text: string) => maskDigits(text);
 
   const animateAccountValue = (accountId: string, next: boolean) => {
     const timers = hoverTimersRef.current;
@@ -950,7 +993,7 @@ const Dashboard: React.FC = () => {
             Valeur Totale
           </p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white">
-            {totalWealthAll.toLocaleString()}€
+            {formatCurrency(totalWealthAll)}
           </p>
         </div>
         <div className="card flex flex-col items-center justify-center text-center">
@@ -958,7 +1001,7 @@ const Dashboard: React.FC = () => {
             Investissements
           </p>
           <p className="text-2xl font-bold text-gray-900 dark:text-white">
-            {totalInvestmentsAll.toLocaleString()}€
+            {formatCurrency(totalInvestmentsAll)}
           </p>
         </div>
         <div className="card flex flex-col items-center justify-center text-center">
@@ -972,7 +1015,7 @@ const Dashboard: React.FC = () => {
                 : "text-danger-600 dark:text-danger-400"
             }`}
           >
-            {totalGainLoss.toLocaleString()}€
+            {formatCurrency(totalGainLoss)}
           </p>
         </div>
         <div className="card flex flex-col items-center justify-center text-center">
@@ -986,7 +1029,7 @@ const Dashboard: React.FC = () => {
                 : "text-danger-600 dark:text-danger-400"
             }`}
           >
-            {totalGainLossPercent.toFixed(2)}%
+            {formatPercent(totalGainLossPercent, 2)}
           </p>
         </div>
       </div>
@@ -1043,20 +1086,17 @@ const Dashboard: React.FC = () => {
                       : "transform translate-y-0 opacity-100"
                   } ${displayClass}`}
                 >
-                  {displayValue != null
-                    ? displayValue.toLocaleString("fr-FR")
-                    : "—"}
-                  {displayValue != null ? "€" : ""}
+                  {displayValue != null ? formatCurrency(displayValue) : "—"}
                 </p>
                 {summary.kind === "bank" ? (
                   <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
                     Entrées:{" "}
                     <span className="font-semibold text-success-600 dark:text-success-400">
-                      {(summary.income || 0).toLocaleString("fr-FR")}
+                      {formatNumber(summary.income || 0)}
                     </span>{" "}
                     • Sorties:{" "}
                     <span className="font-semibold text-danger-600 dark:text-danger-400">
-                      {(summary.expenses || 0).toLocaleString("fr-FR")}
+                      {formatNumber(summary.expenses || 0)}
                     </span>
                   </p>
                 ) : (
@@ -1064,11 +1104,11 @@ const Dashboard: React.FC = () => {
                     {showPnl
                       ? "Survol: P&L"
                       : summary.purchaseValue != null
-                        ? `Investi initial: ${summary.purchaseValue.toLocaleString(
-                            "fr-FR",
+                        ? `Investi initial: ${formatNumber(
+                            summary.purchaseValue,
                           )}€`
                         : summary.pnl != null
-                          ? `P&L: ${summary.pnl.toLocaleString("fr-FR")}€`
+                          ? `P&L: ${formatNumber(summary.pnl)}€`
                           : "P&L: —"}
                   </p>
                 )}
@@ -1080,7 +1120,7 @@ const Dashboard: React.FC = () => {
               Crypto
             </p>
             <p className="text-2xl font-bold text-gray-900 dark:text-white">
-              {cryptoTotalValue.toLocaleString()}€
+              {formatCurrency(cryptoTotalValue)}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
               Investissements crypto + wallets/nfts
@@ -1182,6 +1222,7 @@ const Dashboard: React.FC = () => {
                 }
                 colorsByCategory={cashflowSpaghettiColorMap}
                 height={256}
+                isAnonymous={isAnonymous}
               />
             </div>
             <div className="mt-2 text-xs text-gray-500 dark:text-gray-300">
@@ -1217,7 +1258,7 @@ const Dashboard: React.FC = () => {
                     <YAxis />
                     <Tooltip
                       formatter={(value: any) =>
-                        `${Number(value).toLocaleString("fr-FR")}€`
+                        formatCurrency(Number(value || 0))
                       }
                       labelFormatter={(label) => `Date: ${label}`}
                       contentStyle={{ color: "#000" }}
@@ -1294,7 +1335,7 @@ const Dashboard: React.FC = () => {
                           const v = Number(value || 0);
                           const pct = total > 0 ? (v / total) * 100 : 0;
                           return [
-                            `${v.toLocaleString("fr-FR")} (${pct.toFixed(1)}%)`,
+                            `${formatNumber(v)} (${formatPercent(pct, 1)})`,
                             name,
                           ];
                         }}
@@ -1365,9 +1406,7 @@ const Dashboard: React.FC = () => {
                               const v = Number(value || 0);
                               const pct = total > 0 ? (v / total) * 100 : 0;
                               return [
-                                `${v.toLocaleString("fr-FR")} (${pct.toFixed(
-                                  1,
-                                )}%)`,
+                                `${formatNumber(v)} (${formatPercent(pct, 1)})`,
                                 name,
                               ];
                             }}
@@ -1400,9 +1439,7 @@ const Dashboard: React.FC = () => {
                               </div>
                             </div>
                             <div className="text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                              {Math.abs(Number(t.amount || 0)).toLocaleString(
-                                "fr-FR",
-                              )}
+                              {formatNumber(Math.abs(Number(t.amount || 0)))}
                             </div>
                           </div>
                         ))}
@@ -1464,13 +1501,15 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="text-right">
                   <p className="font-semibold dark:text-white">
-                    ${walletsTotalValue.toLocaleString()}
+                    {formatDollar(walletsTotalValue)}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-white">
-                    {totalValue > 0
-                      ? ((walletsTotalValue / totalValue) * 100).toFixed(1)
-                      : 0}
-                    %
+                    {formatPercent(
+                      totalValue > 0
+                        ? (walletsTotalValue / totalValue) * 100
+                        : 0,
+                      1,
+                    )}
                   </p>
                 </div>
               </div>
@@ -1485,11 +1524,14 @@ const Dashboard: React.FC = () => {
                         {wallet.name}
                       </span>
                       <span>
-                        $
-                        {wallet.assets
-                          .filter((asset) => !asset.isHidden)
-                          .reduce((sum, asset) => sum + (asset.value || 0), 0)
-                          .toLocaleString()}
+                        {formatDollar(
+                          wallet.assets
+                            .filter((asset) => !asset.isHidden)
+                            .reduce(
+                              (sum, asset) => sum + (asset.value || 0),
+                              0,
+                            ),
+                        )}
                       </span>
                     </div>
                   ))}
@@ -1530,21 +1572,20 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="text-right">
                   <p className="font-semibold dark:text-white">
-                    $
-                    {(
+                    {formatDollar(
                       investments
                         .filter((inv) => inv.type === "crypto")
                         .reduce(
                           (sum, inv) =>
                             sum + inv.quantity * (inv.currentPrice ?? 0),
                           0,
-                        ) + binanceWalletsTotalValue
-                    ).toLocaleString()}
+                        ) + binanceWalletsTotalValue,
+                    )}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-white">
-                    {totalValue > 0
-                      ? (
-                          ((investments
+                    {formatPercent(
+                      totalValue > 0
+                        ? ((investments
                             .filter((inv) => inv.type === "crypto")
                             .reduce(
                               (sum, inv) =>
@@ -1553,10 +1594,10 @@ const Dashboard: React.FC = () => {
                             ) +
                             binanceWalletsTotalValue) /
                             totalValue) *
-                          100
-                        ).toFixed(1)
-                      : 0}
-                    %
+                            100
+                        : 0,
+                      1,
+                    )}
                   </p>
                 </div>
               </div>
@@ -1570,11 +1611,14 @@ const Dashboard: React.FC = () => {
                     >
                       <span className="dark:text-white">{wallet.name}</span>
                       <span className="dark:text-white">
-                        $
-                        {wallet.assets
-                          .filter((asset) => !asset.isHidden)
-                          .reduce((sum, asset) => sum + (asset.value || 0), 0)
-                          .toLocaleString()}
+                        {formatDollar(
+                          wallet.assets
+                            .filter((asset) => !asset.isHidden)
+                            .reduce(
+                              (sum, asset) => sum + (asset.value || 0),
+                              0,
+                            ),
+                        )}
                       </span>
                     </div>
                   ))}
@@ -1590,10 +1634,7 @@ const Dashboard: React.FC = () => {
                           {inv.name} ({inv.symbol})
                         </span>
                         <span className="dark:text-white">
-                          $
-                          {(
-                            inv.quantity * (inv.currentPrice ?? 0)
-                          ).toLocaleString()}
+                          {formatDollar(inv.quantity * (inv.currentPrice ?? 0))}
                         </span>
                       </div>
                     ))}
@@ -1633,13 +1674,15 @@ const Dashboard: React.FC = () => {
                   </div>
                   <div className="text-right">
                     <p className="font-semibold dark:text-white">
-                      ${nftsTotalValue.toLocaleString()}
+                      {formatDollar(nftsTotalValue)}
                     </p>
                     <p className="text-sm text-gray-500 dark:text-white">
-                      {totalValue > 0
-                        ? ((nftsTotalValue / totalValue) * 100).toFixed(1)
-                        : 0}
-                      %
+                      {formatPercent(
+                        totalValue > 0
+                          ? (nftsTotalValue / totalValue) * 100
+                          : 0,
+                        1,
+                      )}
                     </p>
                   </div>
                 </div>
@@ -1655,10 +1698,12 @@ const Dashboard: React.FC = () => {
                       >
                         <span className="dark:text-white">{wallet.name}</span>
                         <span className="dark:text-white">
-                          $
-                          {(wallet.nfts || [])
-                            .reduce((sum, nft) => sum + (nft.value || 0), 0)
-                            .toLocaleString()}
+                          {formatDollar(
+                            (wallet.nfts || []).reduce(
+                              (sum, nft) => sum + (nft.value || 0),
+                              0,
+                            ),
+                          )}
                         </span>
                       </div>
                     ))}
@@ -1699,20 +1744,20 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="text-right">
                   <p className="font-semibold dark:text-white">
-                    $
-                    {investments
-                      .filter((inv) => inv.type !== "crypto")
-                      .reduce(
-                        (sum, inv) =>
-                          sum + inv.quantity * (inv.currentPrice ?? 0),
-                        0,
-                      )
-                      .toLocaleString()}
+                    {formatDollar(
+                      investments
+                        .filter((inv) => inv.type !== "crypto")
+                        .reduce(
+                          (sum, inv) =>
+                            sum + inv.quantity * (inv.currentPrice ?? 0),
+                          0,
+                        ),
+                    )}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-white">
-                    {totalValue > 0
-                      ? (
-                          (investments
+                    {formatPercent(
+                      totalValue > 0
+                        ? (investments
                             .filter((inv) => inv.type !== "crypto")
                             .reduce(
                               (sum, inv) =>
@@ -1720,10 +1765,10 @@ const Dashboard: React.FC = () => {
                               0,
                             ) /
                             totalValue) *
-                          100
-                        ).toFixed(1)
-                      : 0}
-                    %
+                            100
+                        : 0,
+                      1,
+                    )}
                   </p>
                 </div>
               </div>
@@ -1740,10 +1785,7 @@ const Dashboard: React.FC = () => {
                           {inv.name} ({inv.symbol})
                         </span>
                         <span className="dark:text-white">
-                          $
-                          {(
-                            inv.quantity * (inv.currentPrice ?? 0)
-                          ).toLocaleString()}
+                          {formatDollar(inv.quantity * (inv.currentPrice ?? 0))}
                         </span>
                       </div>
                     ))}
@@ -1755,7 +1797,7 @@ const Dashboard: React.FC = () => {
                     Total
                   </span>
                   <span className="font-bold text-lg dark:text-white">
-                    ${totalValue.toLocaleString()}
+                    {formatDollar(totalValue)}
                   </span>
                 </div>
               </div>
@@ -1772,7 +1814,7 @@ const Dashboard: React.FC = () => {
                   📈 {investments.length} Investissements
                 </span>
                 <span className="font-semibold dark:text-white">
-                  ${investmentsTotalValue.toLocaleString()}
+                  {formatDollar(investmentsTotalValue)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -1780,7 +1822,7 @@ const Dashboard: React.FC = () => {
                   👛 {wallets.length} Wallets
                 </span>
                 <span className="font-semibold dark:text-white">
-                  ${walletsTotalValue.toLocaleString()}
+                  {formatDollar(walletsTotalValue)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -1872,7 +1914,7 @@ const Dashboard: React.FC = () => {
                             {stats.count} assets
                           </span>
                           <span className="text-xs text-gray-400 dark:text-white ml-2">
-                            ${stats.value.toLocaleString()}
+                            {formatDollar(stats.value)}
                           </span>
                         </div>
                       </div>
@@ -1936,8 +1978,13 @@ const Dashboard: React.FC = () => {
                 wallets={wallets}
                 chartType="pie"
                 title="Répartition par Type d'Actif"
-                subtitle={`Répartition de votre portfolio de $${totalValue.toLocaleString()}`}
+                subtitle={maskText(
+                  `Répartition de votre portfolio de $${formatNumber(
+                    totalValue,
+                  )}`,
+                )}
                 height={400}
+                isAnonymous={isAnonymous}
               />
               <PortfolioChart
                 investments={investments}
@@ -1946,6 +1993,7 @@ const Dashboard: React.FC = () => {
                 title="Distribution Empilée"
                 subtitle="Vue cumulative des types d'investissements"
                 height={400}
+                isAnonymous={isAnonymous}
               />
             </div>
           )}
@@ -1960,6 +2008,7 @@ const Dashboard: React.FC = () => {
                 title="Évolution du Portfolio (30 jours)"
                 subtitle="Performance historique simulée de votre portfolio"
                 height={500}
+                isAnonymous={isAnonymous}
               />
               <div className="grid grid-cols-1 gap-6">
                 <PortfolioChart
@@ -1969,6 +2018,7 @@ const Dashboard: React.FC = () => {
                   title="Comparaison des Investissements"
                   subtitle="Valeur actuelle vs Gain/Perte pour chaque investissement"
                   height={400}
+                  isAnonymous={isAnonymous}
                 />
               </div>
             </div>
@@ -1984,7 +2034,7 @@ const Dashboard: React.FC = () => {
                     Investissements
                   </h4>
                   <p className="text-2xl font-bold text-primary-600 dark:text-white">
-                    {investments.length}
+                    {formatNumber(investments.length, "fr-FR")}
                   </p>
                 </div>
                 <div className="card text-center">
@@ -1992,7 +2042,7 @@ const Dashboard: React.FC = () => {
                     Wallets
                   </h4>
                   <p className="text-2xl font-bold text-primary-600 dark:text-white">
-                    {wallets.length}
+                    {formatNumber(wallets.length, "fr-FR")}
                   </p>
                 </div>
                 <div className="card text-center">
@@ -2000,11 +2050,15 @@ const Dashboard: React.FC = () => {
                     Assets Blockchain
                   </h4>
                   <p className="text-2xl font-bold text-primary-600 dark:text-white">
-                    {wallets.reduce(
-                      (sum, wallet) =>
-                        sum +
-                        wallet.assets.filter((asset) => !asset.isHidden).length,
-                      0,
+                    {formatNumber(
+                      wallets.reduce(
+                        (sum, wallet) =>
+                          sum +
+                          wallet.assets.filter((asset) => !asset.isHidden)
+                            .length,
+                        0,
+                      ),
+                      "fr-FR",
                     )}
                   </p>
                 </div>
@@ -2013,7 +2067,7 @@ const Dashboard: React.FC = () => {
                     Valeur Totale
                   </h4>
                   <p className="text-2xl font-bold text-primary-600 dark:text-white">
-                    ${totalValue.toLocaleString()}
+                    {formatDollar(totalValue)}
                   </p>
                 </div>
               </div>
@@ -2027,6 +2081,7 @@ const Dashboard: React.FC = () => {
                   title="Top 10 par Valeur"
                   subtitle="Classement de vos plus gros investissements"
                   height={400}
+                  isAnonymous={isAnonymous}
                 />
                 <PortfolioChart
                   investments={investments}
@@ -2035,6 +2090,7 @@ const Dashboard: React.FC = () => {
                   title="Répartition Détaillée"
                   subtitle="Distribution précise avec pourcentages"
                   height={400}
+                  isAnonymous={isAnonymous}
                 />
               </div>
 
@@ -2231,10 +2287,10 @@ const Dashboard: React.FC = () => {
                                 {item.source}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                ${item.currentValue.toLocaleString()}
+                                {formatDollar(item.currentValue)}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                {item.portfolioPercent.toFixed(1)}%
+                                {formatPercent(item.portfolioPercent, 1)}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm">
                                 {item.gainLoss !== 0 ? (
@@ -2245,8 +2301,8 @@ const Dashboard: React.FC = () => {
                                         : "text-danger-600"
                                     }
                                   >
-                                    {item.gainLoss >= 0 ? "+" : ""}$
-                                    {item.gainLoss.toLocaleString()}
+                                    {item.gainLoss >= 0 ? "+" : ""}
+                                    {formatDollar(item.gainLoss)}
                                   </span>
                                 ) : (
                                   <span className="text-gray-500 dark:text-white">
@@ -2264,7 +2320,7 @@ const Dashboard: React.FC = () => {
                                     }
                                   >
                                     {item.gainLossPercent >= 0 ? "+" : ""}
-                                    {item.gainLossPercent.toFixed(2)}%
+                                    {formatPercent(item.gainLossPercent, 2)}
                                   </span>
                                 ) : (
                                   <span className="text-gray-500 dark:text-white">

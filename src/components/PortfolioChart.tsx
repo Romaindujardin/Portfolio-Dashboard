@@ -10,6 +10,7 @@ interface PortfolioChartProps {
   title: string;
   subtitle?: string;
   height?: number;
+  isAnonymous?: boolean;
 }
 
 const PortfolioChart: React.FC<PortfolioChartProps> = ({
@@ -19,17 +20,8 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
   title,
   subtitle,
   height = 400,
+  isAnonymous = false,
 }) => {
-  // Couleurs thématiques pour les différents types d'actifs
-  const typeColors: Record<string, string> = {
-    stock: "#3b82f6",
-    crypto: "#f59e0b",
-    etf: "#10b981",
-    bond: "#8b5cf6",
-    other: "#6b7280",
-    wallet: "#8b5cf6", // Couleur pour les wallets
-  };
-
   // Palette de couleurs pour les assets individuels
   const assetColors = [
     "#3b82f6", // Bleu
@@ -183,6 +175,18 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
     typeof window !== "undefined" &&
     document.documentElement.classList.contains("dark");
 
+  const maskDigits = (text: string) =>
+    isAnonymous ? text.replace(/[0-9]/g, "*") : text;
+  const formatNumber = (value: number) =>
+    maskDigits(
+      Number(value || 0).toLocaleString("fr-FR", {
+        maximumFractionDigits: 0,
+      }),
+    );
+  const formatCurrency = (value: number) => `$${formatNumber(value)}`;
+  const formatPercent = (value: number, digits: number = 1) =>
+    `${maskDigits(Number(value || 0).toFixed(digits))}%`;
+
   // Configuration de base pour tous les graphiques
   const baseOptions: Highcharts.Options = {
     chart: {
@@ -244,7 +248,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
       },
       labels: {
         formatter: function () {
-          return "$" + Highcharts.numberFormat(this.value as number, 0);
+          return formatCurrency(this.value as number);
         },
         style: {
           fontSize: "11px",
@@ -302,8 +306,12 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
           cursor: "pointer",
           dataLabels: {
             enabled: true,
-            format:
-              "<b>{point.name}</b>: ${point.y:,.0f} ({point.percentage:.1f}%)",
+            formatter: function () {
+              const point = (this as any).point as Highcharts.Point;
+              const value = point.y as number;
+              const pct = (point.percentage as number) || 0;
+              return `<b>${point.name}</b>: ${formatCurrency(value)} (${formatPercent(pct, 1)})`;
+            },
             style: {
               fontSize: "11px",
             },
@@ -320,8 +328,15 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
       ],
       tooltip: {
         ...baseOptions.tooltip,
-        pointFormat:
-          "<b>{point.fullName}</b><br/><b>${point.y:,.0f}</b> ({point.percentage:.1f}%)",
+        formatter: function () {
+          const point = (this as any).point as Highcharts.Point as
+            | (Highcharts.Point & { fullName?: string; percentage?: number })
+            | undefined;
+          const value = (point?.y as number) || 0;
+          const pct = (point?.percentage as number) || 0;
+          const name = point?.fullName || point?.name || "";
+          return `<b>${name}</b><br/><b>${formatCurrency(value)}</b> (${formatPercent(pct, 1)})`;
+        },
       },
     };
   };
@@ -399,7 +414,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
         },
         labels: {
           formatter: function () {
-            return "$" + Highcharts.numberFormat(this.value as number, 0);
+            return formatCurrency(this.value as number);
           },
           style: {
             fontSize: "11px",
@@ -425,7 +440,13 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
       tooltip: {
         ...baseOptions.tooltip,
         xDateFormat: "%A, %b %e, %Y",
-        pointFormat: "<b>${point.y:,.0f}</b>",
+        formatter: function () {
+          const date = this.x
+            ? new Date(this.x as number).toLocaleDateString("fr-FR")
+            : "";
+          const value = this.y as number;
+          return `${date ? `${maskDigits(date)}<br/>` : ""}<b>${formatCurrency(value)}</b>`;
+        },
         style: {
           ...baseOptions.tooltip?.style,
           color: isDark ? "#fff" : undefined,
@@ -507,7 +528,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
         },
         labels: {
           formatter: function () {
-            return "$" + Highcharts.numberFormat(this.value as number, 0);
+            return formatCurrency(this.value as number);
           },
           style: {
             fontSize: "11px",
@@ -531,8 +552,22 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
       tooltip: {
         ...baseOptions.tooltip,
         shared: true,
-        pointFormat:
-          '<span style="color:{point.color}">●</span> {series.name}: <b>${point.y:,.0f}</b><br/>',
+        formatter: function () {
+          const header = this.x
+            ? `<b>${maskDigits(String(this.x))}</b><br/>`
+            : "";
+          const points = this.points || [];
+          const lines = points
+            .map((point) => {
+              const color = point.color || point.series.color;
+              const name = point.series.name;
+              return `<span style="color:${color}">●</span> ${name}: <b>${formatCurrency(
+                point.y as number,
+              )}</b><br/>`;
+            })
+            .join("");
+          return header + lines;
+        },
         style: {
           ...baseOptions.tooltip?.style,
           color: isDark ? "#fff" : undefined,
@@ -611,7 +646,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
         },
         labels: {
           formatter: function () {
-            return "$" + Highcharts.numberFormat(this.value as number, 0);
+            return formatCurrency(this.value as number);
           },
           style: {
             fontSize: "11px",
@@ -643,8 +678,22 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
       tooltip: {
         ...baseOptions.tooltip,
         shared: true,
-        pointFormat:
-          '<span style="color:{point.color}">●</span> {series.name}: <b>${point.y:,.0f}</b><br/>',
+        formatter: function () {
+          const header = this.x
+            ? `<b>${maskDigits(String(this.x))}</b><br/>`
+            : "";
+          const points = this.points || [];
+          const lines = points
+            .map((point) => {
+              const color = point.color || point.series.color;
+              const name = point.series.name;
+              return `<span style="color:${color}">●</span> ${name}: <b>${formatCurrency(
+                point.y as number,
+              )}</b><br/>`;
+            })
+            .join("");
+          return header + lines;
+        },
         style: {
           ...baseOptions.tooltip?.style,
           color: isDark ? "#fff" : undefined,

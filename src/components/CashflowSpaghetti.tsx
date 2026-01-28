@@ -21,8 +21,9 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
-function formatEur(n: number) {
-  return n.toLocaleString("fr-FR", { maximumFractionDigits: 0 }) + " €";
+function formatEur(n: number, isAnonymous: boolean) {
+  const raw = n.toLocaleString("fr-FR", { maximumFractionDigits: 0 }) + " €";
+  return isAnonymous ? raw.replace(/[0-9]/g, "*") : raw;
 }
 
 function hexToRgba(hex: string, alpha: number) {
@@ -68,12 +69,13 @@ export type CashflowSpaghettiInput = {
   height?: number;
   maxIncomeCategories?: number;
   maxExpenseCategories?: number;
+  isAnonymous?: boolean;
 };
 
 function topAndOthers(
   rows: Array<{ name: string; value: number }>,
   max: number,
-  othersLabel: string
+  othersLabel: string,
 ) {
   const clean = rows
     .filter((r) => Number.isFinite(r.value) && r.value > 0)
@@ -94,6 +96,7 @@ export default function CashflowSpaghetti({
   height = 256,
   maxIncomeCategories = 6,
   maxExpenseCategories = 8,
+  isAnonymous = false,
 }: CashflowSpaghettiInput) {
   const { ref, width } = useSize<HTMLDivElement>();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -114,7 +117,7 @@ export default function CashflowSpaghetti({
       const y = e.clientY - r.top;
       setTooltip({ open: true, x, y, title, amount });
     },
-    []
+    [],
   );
 
   const hideTooltip = React.useCallback(() => {
@@ -130,7 +133,7 @@ export default function CashflowSpaghetti({
     const expenses = topAndOthers(
       expenseByCategory,
       maxExpenseCategories,
-      "Autres sorties"
+      "Autres sorties",
     );
 
     const totalExpenses = expenses.reduce((s, r) => s + r.value, 0);
@@ -162,8 +165,10 @@ export default function CashflowSpaghetti({
     }
 
     // Flow is "checkpointed": left (income + optional balance) -> checkpoint -> right (expense categories + optional savings)
-    const addLeftBalance = totalExpenses > totalIncome ? totalExpenses - totalIncome : 0;
-    const addRightSavings = totalIncome > totalExpenses ? totalIncome - totalExpenses : 0;
+    const addLeftBalance =
+      totalExpenses > totalIncome ? totalExpenses - totalIncome : 0;
+    const addRightSavings =
+      totalIncome > totalExpenses ? totalIncome - totalExpenses : 0;
     const totalFlow = Math.max(totalIncome, totalExpenses);
 
     // Left nodes (aggregated)
@@ -229,7 +234,7 @@ export default function CashflowSpaghetti({
         targetId: "mid:Checkpoint",
         value: totalIncome,
         color: getColor("Entrées", "#10b981"),
-        title: `Entrées → Checkpoint: ${formatEur(totalIncome)}`,
+        title: `Entrées → Checkpoint: ${formatEur(totalIncome, isAnonymous)}`,
       });
     }
     if (addLeftBalance > 0) {
@@ -239,7 +244,7 @@ export default function CashflowSpaghetti({
         targetId: "mid:Checkpoint",
         value: addLeftBalance,
         color: getColor("Solde (complément)", "#94a3b8"),
-        title: `Solde → Checkpoint: ${formatEur(addLeftBalance)}`,
+        title: `Solde → Checkpoint: ${formatEur(addLeftBalance, isAnonymous)}`,
       });
     }
 
@@ -254,7 +259,7 @@ export default function CashflowSpaghetti({
         targetId: exp.id,
         value: v,
         color: c,
-        title: `Checkpoint → ${exp.name}: ${formatEur(v)}`,
+        title: `Checkpoint → ${exp.name}: ${formatEur(v, isAnonymous)}`,
       });
     }
     if (addRightSavings > 0) {
@@ -264,7 +269,7 @@ export default function CashflowSpaghetti({
         targetId: "out:Épargne",
         value: addRightSavings,
         color: getColor("Épargne / reste", "#94a3b8"),
-        title: `Checkpoint → Épargne: ${formatEur(addRightSavings)}`,
+        title: `Checkpoint → Épargne: ${formatEur(addRightSavings, isAnonymous)}`,
       });
     }
 
@@ -281,6 +286,7 @@ export default function CashflowSpaghetti({
     colorsByCategory,
     maxIncomeCategories,
     maxExpenseCategories,
+    isAnonymous,
   ]);
 
   const innerHeight = height;
@@ -292,7 +298,11 @@ export default function CashflowSpaghetti({
 
   if (data.nodes.length === 0 || data.links.length === 0) {
     return (
-      <div ref={ref} style={{ height }} className="flex items-center justify-center">
+      <div
+        ref={ref}
+        style={{ height }}
+        className="flex items-center justify-center"
+      >
         <div className="text-sm text-gray-500 dark:text-gray-300">
           Pas assez de données pour afficher le spaghetti.
         </div>
@@ -303,7 +313,7 @@ export default function CashflowSpaghetti({
   const nodeW = 14;
   const padY = 10;
   const left = data.nodes.filter(
-    (n) => n.side === "left" && !n.id.startsWith("mid:")
+    (n) => n.side === "left" && !n.id.startsWith("mid:"),
   );
   const mid = data.nodes.filter((n) => n.id.startsWith("mid:"));
   const right = data.nodes.filter((n) => n.side === "right");
@@ -325,10 +335,7 @@ export default function CashflowSpaghetti({
     }
   >();
 
-  const placeColumn = (
-    nodes: SankeyNode[],
-    col: "left" | "mid" | "right"
-  ) => {
+  const placeColumn = (nodes: SankeyNode[], col: "left" | "mid" | "right") => {
     let y = 0;
     const x =
       col === "left" ? 0 : col === "right" ? w - nodeW : w / 2 - nodeW / 2;
@@ -393,7 +400,9 @@ export default function CashflowSpaghetti({
             const d = `M ${x0} ${y0} C ${x0 + curve} ${y0}, ${x1 - curve} ${y1}, ${x1} ${y1}`;
 
             const isRightFlow = l.sourceId.startsWith("mid:");
-            const clipPath = isRightFlow ? "url(#cfsp-right)" : "url(#cfsp-left)";
+            const clipPath = isRightFlow
+              ? "url(#cfsp-right)"
+              : "url(#cfsp-left)";
             const alpha = isRightFlow ? 0.55 : 0.25;
 
             const label = isRightFlow
@@ -411,8 +420,7 @@ export default function CashflowSpaghetti({
                 clipPath={clipPath}
                 onMouseMove={(e) => showTooltip(e, label, l.value)}
                 onMouseLeave={hideTooltip}
-              >
-              </path>
+              ></path>
             );
           })}
         </g>
@@ -434,8 +442,7 @@ export default function CashflowSpaghetti({
                   opacity={0.9}
                   onMouseMove={(e) => showTooltip(e, n.label, n.value)}
                   onMouseLeave={hideTooltip}
-                >
-                </rect>
+                ></rect>
                 {!hideLabel && (
                   <text
                     x={n.side === "left" ? p.x + nodeW + 8 : p.x - 8}
@@ -468,11 +475,10 @@ export default function CashflowSpaghetti({
             {tooltip.title}
           </div>
           <div className="text-sm font-semibold text-gray-900 dark:text-white">
-            {formatEur(tooltip.amount)}
+            {formatEur(tooltip.amount, isAnonymous)}
           </div>
         </div>
       )}
     </div>
   );
 }
-
