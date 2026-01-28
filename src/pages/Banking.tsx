@@ -9,7 +9,6 @@ import {
   X,
   Landmark,
   TrendingUp,
-  Briefcase,
   Download,
   Pencil,
   Loader2,
@@ -39,8 +38,7 @@ type EditTarget = {
   rowIndex: number;
   field: EditableField;
 };
-type CsvSection = "bank" | "pea" | "pee";
-const CSV_SECTIONS: CsvSection[] = ["bank", "pea", "pee"];
+type CsvSectionId = string;
 const MANUAL_SOURCE_LABEL = "__manual__";
 const DEFAULT_MANUAL_COLUMNS: string[] = [
   "dateOp",
@@ -97,14 +95,16 @@ function parseMaybeDate(raw: string): number | null {
 const Banking: React.FC = () => {
   const { currentUser } = useUser();
 
-  const [currentSection, setCurrentSection] = useState<CsvSection>("bank");
+  const [userSettings, setUserSettings] = useState(() =>
+    getUserSettings(currentUser),
+  );
+  const accountSections = userSettings.accountSections || [];
+  const [currentSection, setCurrentSection] = useState<CsvSectionId>(
+    accountSections[0]?.id || "bank",
+  );
   const [sectionCounts, setSectionCounts] = useState<
-    Record<CsvSection, number>
-  >({
-    bank: 0,
-    pea: 0,
-    pee: 0,
-  });
+    Record<CsvSectionId, number>
+  >({});
 
   const [uploads, setUploads] = useState<BankCsvUploadMeta[]>([]);
   const [selectedUploadIds, setSelectedUploadIds] = useState<string[]>([]);
@@ -123,7 +123,11 @@ const Banking: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
 
-  const boursoSettings = getUserSettings(currentUser);
+  const boursoSettings = userSettings;
+  const currentSectionConfig =
+    accountSections.find((s) => s.id === currentSection) || accountSections[0];
+  const currentSectionLabel = currentSectionConfig?.label || currentSection;
+  const isInvestmentSection = currentSectionConfig?.kind === "investment";
 
   // ===== Bourso sync =====
   const [showBoursoSyncModal, setShowBoursoSyncModal] = useState(false);
@@ -181,18 +185,51 @@ const Banking: React.FC = () => {
 
   const refreshSectionCounts = async () => {
     try {
-      const [bank, pea, pee] = await Promise.all(
-        CSV_SECTIONS.map((s) => getStoredBankCsvUploads(currentUser, s)),
+      const counts = await Promise.all(
+        accountSections.map(async (section) => {
+          const uploads = await getStoredBankCsvUploads(
+            currentUser,
+            section.id,
+          );
+          return [section.id, uploads.length] as const;
+        }),
       );
-      setSectionCounts({
-        bank: bank.length,
-        pea: pea.length,
-        pee: pee.length,
-      });
+      setSectionCounts(Object.fromEntries(counts));
     } catch {
       // keep previous counts on error
     }
   };
+
+  useEffect(() => {
+    setUserSettings(getUserSettings(currentUser));
+  }, [currentUser]);
+
+  useEffect(() => {
+    const refresh = (event?: Event) => {
+      const detail = (event as CustomEvent | undefined)?.detail as
+        | { username?: string }
+        | undefined;
+      if (detail?.username && detail.username !== currentUser) return;
+      setUserSettings(getUserSettings(currentUser));
+    };
+
+    window.addEventListener("userSettingsUpdated", refresh as EventListener);
+    window.addEventListener("storage", refresh as EventListener);
+    return () => {
+      window.removeEventListener(
+        "userSettingsUpdated",
+        refresh as EventListener,
+      );
+      window.removeEventListener("storage", refresh as EventListener);
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!accountSections.length) return;
+    if (!accountSections.find((s) => s.id === currentSection)) {
+      setCurrentSection(accountSections[0].id);
+    }
+  }, [accountSections, currentSection]);
 
   useEffect(() => {
     // Load custom manual columns per section/user
@@ -203,16 +240,14 @@ const Banking: React.FC = () => {
         setManualCustomHeaders(parsed as string[]);
       } else {
         setManualCustomHeaders(
-          currentSection === "pee" || currentSection === "pea"
+          isInvestmentSection
             ? DEFAULT_HOLDINGS_COLUMNS
             : DEFAULT_MANUAL_COLUMNS,
         );
       }
     } catch {
       setManualCustomHeaders(
-        currentSection === "pee" || currentSection === "pea"
-          ? DEFAULT_HOLDINGS_COLUMNS
-          : DEFAULT_MANUAL_COLUMNS,
+        isInvestmentSection ? DEFAULT_HOLDINGS_COLUMNS : DEFAULT_MANUAL_COLUMNS,
       );
     }
     setManualBaseHeaders(null);
@@ -220,7 +255,7 @@ const Banking: React.FC = () => {
     setManualDraft({});
     setManualRowsDraft([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualColumnsStorageKey]);
+  }, [manualColumnsStorageKey, isInvestmentSection]);
 
   const loadUploads = async () => {
     setLoading(true);
@@ -265,18 +300,13 @@ const Banking: React.FC = () => {
       return;
     }
 
+    const mappingSection = isInvestmentSection ? "pea" : "bank";
     const sectionMappings = boursoSettings.boursoAccountMappings.filter(
-      (m) => m.section === currentSection,
+      (m) => m.section === mappingSection,
     );
     if (!sectionMappings.length) {
       setBoursoSyncError(
-        `Aucun compte Bourso configuré pour l'onglet ${
-          currentSection === "bank"
-            ? "Compte bancaire"
-            : currentSection === "pea"
-              ? "PEA"
-              : "PEE"
-        }.`,
+        `Aucun compte Bourso configuré pour l'onglet ${currentSectionLabel}.`,
       );
       return;
     }
@@ -303,8 +333,9 @@ const Banking: React.FC = () => {
 
   const handleBoursoConfirm = async () => {
     if (!boursoSettings.boursoClientId || !boursoPassword) return;
+    const mappingSection = isInvestmentSection ? "pea" : "bank";
     const sectionMappings = boursoSettings.boursoAccountMappings.filter(
-      (m) => m.section === currentSection,
+      (m) => m.section === mappingSection,
     );
     if (!sectionMappings.length) return;
 
@@ -384,8 +415,8 @@ const Banking: React.FC = () => {
             next[h] = today;
             return;
           }
-          if (h === "accountLabel" && currentSection === "pee") {
-            next[h] = "PEE";
+          if (h === "accountLabel" && isInvestmentSection) {
+            next[h] = currentSectionLabel;
             return;
           }
           next[h] = "";
@@ -420,9 +451,9 @@ const Banking: React.FC = () => {
       const parsed = parseCsv(contentText || "");
       const headers = (parsed.headers || []).filter(Boolean);
       if (headers.length === 0) return null;
-      // For PEE, we want the same format as PEA (holdings).
+      // For investment sections, we want the same format as holdings.
       // If the existing CSV is not holdings-shaped, ignore it and use custom/default holdings headers.
-      if (currentSection === "pee") {
+      if (isInvestmentSection) {
         const looksLikeHoldings =
           headers.includes("name") ||
           headers.includes("isin") ||
@@ -469,15 +500,15 @@ const Banking: React.FC = () => {
       headers.forEach((h) => {
         if (h === "dateOp" || h === "dateVal" || h === "date") {
           nextDraft[h] = today;
-        } else if (h === "accountLabel" && currentSection === "pee") {
-          nextDraft[h] = "PEE";
+        } else if (h === "accountLabel" && isInvestmentSection) {
+          nextDraft[h] = currentSectionLabel;
         } else {
           nextDraft[h] = "";
         }
       });
 
       setManualDraft(nextDraft);
-      if (currentSection === "pee") {
+      if (isInvestmentSection) {
         // Start with a few empty rows so it feels like a spreadsheet
         const startRows = Array.from({ length: 8 }).map(() => ({
           ...nextDraft,
@@ -494,25 +525,40 @@ const Banking: React.FC = () => {
 
   const copyPeaStructureToPee = async () => {
     if (!currentUser) return;
-    if (currentSection !== "pee") return;
+    if (!isInvestmentSection) return;
+
+    const peaSection =
+      accountSections.find((s) => s.id === "pea") ||
+      accountSections.find(
+        (s) => s.kind === "investment" && s.id !== currentSection,
+      );
+    if (!peaSection) {
+      setError("Aucun autre compte investissement trouvé pour la copie.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
     try {
-      const peaMetas = await getStoredBankCsvUploads(currentUser, "pea");
+      const peaMetas = await getStoredBankCsvUploads(
+        currentUser,
+        peaSection.id,
+      );
       const candidate =
         peaMetas.find((u) => u.sourceLabel !== MANUAL_SOURCE_LABEL) ||
         peaMetas[0] ||
         null;
       if (!candidate) {
         throw new Error(
-          "Aucun CSV PEA trouvé. Uploade d’abord ton PEA (format holdings).",
+          `Aucun CSV ${peaSection.label} trouvé. Uploade d’abord un CSV (format holdings).`,
         );
       }
 
       const upload = await getBankCsvUploadById(candidate.id, currentUser);
       const contentText = upload?.content || "";
-      if (!contentText.trim()) throw new Error("CSV PEA vide ou introuvable.");
+      if (!contentText.trim()) {
+        throw new Error(`CSV ${peaSection.label} vide ou introuvable.`);
+      }
 
       const parsed = parseCsv(contentText);
       const headers = (parsed.headers || [])
@@ -520,14 +566,16 @@ const Banking: React.FC = () => {
         .map((h) => h.trim())
         .filter((h) => h.length > 0);
       if (headers.length === 0)
-        throw new Error("Impossible de lire les colonnes du PEA.");
+        throw new Error(
+          `Impossible de lire les colonnes de ${peaSection.label}.`,
+        );
 
-      // Force PEE to use the exact same headers as PEA (so dashboard treats them identically).
+      // Force investment sections to share the same headers (so dashboard treats them identically).
       setManualBaseHeaders(null);
       persistManualCustomHeaders(headers);
       syncManualRowsDraftToHeaders(headers);
     } catch (e: any) {
-      setError(e?.message || "Impossible de copier la structure PEA");
+      setError(e?.message || "Impossible de copier la structure");
     } finally {
       setLoading(false);
     }
@@ -535,10 +583,10 @@ const Banking: React.FC = () => {
 
   const saveManualRows = async () => {
     if (!currentUser) return;
-    if (currentSection !== "pee") return;
+    if (!isInvestmentSection) return;
 
     const effectiveHeaders = getEffectiveManualHeaders();
-    // PEE is treated like PEA holdings (positions): require amount + (name or isin)
+    // Investment sections are treated like holdings: require amount + (name or isin)
     const required = new Set<string>();
     if (effectiveHeaders.includes("amount")) required.add("amount");
 
@@ -584,7 +632,7 @@ const Banking: React.FC = () => {
 
       // Create if missing
       if (!manualId) {
-        const filename = "PEE - lignes manuelles.csv";
+        const filename = `${currentSectionLabel} - lignes manuelles.csv`;
         const headers = effectiveHeaders;
         const starter = stringifyCsv({
           headers,
@@ -655,8 +703,8 @@ const Banking: React.FC = () => {
 
   const saveManualLine = async () => {
     if (!currentUser) return;
-    if (currentSection === "pea") {
-      setError("Ajout manuel non supporté pour PEA");
+    if (isInvestmentSection) {
+      setError("Ajout manuel non supporté pour les sections d'investissement");
       return;
     }
 
@@ -692,10 +740,7 @@ const Banking: React.FC = () => {
 
       // Create if missing
       if (!manualId) {
-        const filename =
-          currentSection === "pee"
-            ? "PEE - lignes manuelles.csv"
-            : "Compte bancaire - lignes manuelles.csv";
+        const filename = `${currentSectionLabel} - lignes manuelles.csv`;
         const headers = effectiveHeaders;
         const starter = stringifyCsv({
           headers,
@@ -835,7 +880,8 @@ const Banking: React.FC = () => {
     if (h === "amount") return "Ex: -32,50";
     if (h === "label") return "Ex: Courses Carrefour";
     if (h === "supplierFound") return "Ex: carrefour";
-    if (h === "accountLabel" && currentSection === "pee") return "Ex: PEE";
+    if (h === "accountLabel" && isInvestmentSection)
+      return `Ex: ${currentSectionLabel}`;
     return undefined;
   };
 
@@ -1495,60 +1541,38 @@ const Banking: React.FC = () => {
     <div className="space-y-6 animate-fade-in">
       {/* Onglets (style Suivi Marché) */}
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex justify-center space-x-8">
-          <button
-            type="button"
-            onClick={() => setCurrentSection("bank")}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              currentSection === "bank"
-                ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-300 dark:hover:text-white dark:hover:border-gray-600"
-            }`}
-          >
-            <div className="flex items-center space-x-2">
-              <Landmark size={16} />
-              <span>Compte bancaire ({sectionCounts.bank})</span>
-            </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentSection("pea")}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              currentSection === "pea"
-                ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-300 dark:hover:text-white dark:hover:border-gray-600"
-            }`}
-          >
-            <div className="flex items-center space-x-2">
-              <TrendingUp size={16} />
-              <span>PEA ({sectionCounts.pea})</span>
-            </div>
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentSection("pee")}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              currentSection === "pee"
-                ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-300 dark:hover:text-white dark:hover:border-gray-600"
-            }`}
-          >
-            <div className="flex items-center space-x-2">
-              <Briefcase size={16} />
-              <span>PEE ({sectionCounts.pee})</span>
-            </div>
-          </button>
+        <nav className="-mb-px flex flex-wrap justify-center gap-6">
+          {accountSections.map((section) => {
+            const isActive = currentSection === section.id;
+            const count = sectionCounts[section.id] ?? 0;
+            const Icon = section.kind === "investment" ? TrendingUp : Landmark;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => setCurrentSection(section.id)}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  isActive
+                    ? "border-primary-500 text-primary-600 dark:text-primary-400"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-300 dark:hover:text-white dark:hover:border-gray-600"
+                }`}
+              >
+                <div className="flex items-center space-x-2">
+                  <Icon size={16} />
+                  <span>
+                    {section.label} ({count})
+                  </span>
+                </div>
+              </button>
+            );
+          })}
         </nav>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-            {currentSection === "bank"
-              ? "Compte bancaire"
-              : currentSection === "pea"
-                ? "PEA"
-                : "PEE"}
+            {currentSectionLabel}
           </h1>
           <p className="text-gray-600 dark:text-gray-300 mt-2">
             Importez vos transactions via CSV puis triez/filtrez dans un tableau
@@ -1568,10 +1592,10 @@ const Banking: React.FC = () => {
           <button
             onClick={openManualModal}
             className="btn-secondary flex items-center gap-2"
-            disabled={loading || currentSection === "pea"}
+            disabled={loading}
             title={
-              currentSection === "pea"
-                ? "Ajout manuel non supporté pour PEA"
+              isInvestmentSection
+                ? "Ajouter des lignes manuelles (tableur)"
                 : "Ajouter une ligne manuelle (CSV dédié)"
             }
           >
@@ -1611,9 +1635,9 @@ const Banking: React.FC = () => {
           <div className="relative card w-full max-w-5xl mx-4">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {currentSection === "pee"
-                  ? "Saisie manuelle (tableur) - PEE"
-                  : `Ajouter une ligne manuelle (${currentSection.toUpperCase()})`}
+                {isInvestmentSection
+                  ? `Saisie manuelle (tableur) - ${currentSectionLabel}`
+                  : `Ajouter une ligne manuelle (${currentSectionLabel})`}
               </h2>
               <button
                 type="button"
@@ -1676,7 +1700,7 @@ const Banking: React.FC = () => {
                                   (x) => x !== h,
                                 );
                                 persistManualCustomHeaders(next);
-                                if (currentSection === "pee") {
+                                if (isInvestmentSection) {
                                   syncManualRowsDraftToHeaders(next);
                                 } else {
                                   syncManualDraftToHeaders(next);
@@ -1705,7 +1729,7 @@ const Banking: React.FC = () => {
                             if (manualCustomHeaders.includes(name)) return;
                             const next = [...manualCustomHeaders, name];
                             persistManualCustomHeaders(next);
-                            if (currentSection === "pee") {
+                            if (isInvestmentSection) {
                               syncManualRowsDraftToHeaders(next);
                             } else {
                               syncManualDraftToHeaders(next);
@@ -1720,7 +1744,7 @@ const Banking: React.FC = () => {
                     </div>
                   )}
 
-                  {currentSection === "pee" ? (
+                  {isInvestmentSection ? (
                     <div className="space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <button
@@ -1756,10 +1780,11 @@ const Banking: React.FC = () => {
                           disabled={loading}
                           onClick={copyPeaStructureToPee}
                         >
-                          Copie PEA
+                          Copier la structure
                         </button>
                         <div className="text-xs text-gray-500 dark:text-gray-300">
-                          Applique exactement les mêmes colonnes que ton PEA.
+                          Applique exactement les mêmes colonnes qu'un autre
+                          compte investissement.
                         </div>
                       </div>
 
@@ -1887,12 +1912,10 @@ const Banking: React.FC = () => {
               <button
                 type="button"
                 className="btn-primary py-2 px-4"
-                onClick={
-                  currentSection === "pee" ? saveManualRows : saveManualLine
-                }
+                onClick={isInvestmentSection ? saveManualRows : saveManualLine}
                 disabled={loading}
               >
-                {currentSection === "pee" ? "Enregistrer" : "Ajouter"}
+                {isInvestmentSection ? "Enregistrer" : "Ajouter"}
               </button>
             </div>
           </div>
@@ -2007,7 +2030,7 @@ const Banking: React.FC = () => {
                             <p className="text-xs text-gray-500 dark:text-gray-400">
                               {item.section === "bank"
                                 ? "Compte bancaire"
-                                : "PEA"}{" "}
+                                : "Investissement"}{" "}
                               • {item.filename}
                             </p>
                           </div>
@@ -2201,7 +2224,7 @@ const Banking: React.FC = () => {
 
         {/* Right: table */}
         <div className="lg:col-span-3">
-          {currentSection === "bank" && (
+          {!isInvestmentSection && (
             <div className="card mb-6">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">

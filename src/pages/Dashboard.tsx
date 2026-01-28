@@ -13,36 +13,28 @@ import {
 } from "recharts";
 import {
   TrendingUp,
-  TrendingDown,
-  DollarSign,
-  PieChart as PieChartIcon,
-  Plus,
-  BarChart,
   BarChart3,
   Activity,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { Investment, PortfolioStats, Wallet } from "../types";
+import { AccountSectionKind, Investment, Wallet } from "../types";
 import {
   getStoredInvestments,
-  calculatePortfolioStats,
   getStoredWallets,
   getStoredBankCsvUploads,
   getBankCsvUploadById,
 } from "../utils/storage";
-import PriceRefreshButton from "../components/PriceRefreshButton";
 import { Link } from "react-router-dom";
 import PortfolioChart from "../components/PortfolioChart";
-import PriceChart from "../components/PriceChart";
 import MarketClock from "../components/MarketClock";
 import CashflowSpaghetti from "../components/CashflowSpaghetti";
 import { useUser } from "../contexts/UserContext";
+import { getUserSettings } from "../utils/userSettings";
 import {
   TimeGranularity,
   parseBankCsvTransactions,
   buildCashflowSeries,
-  aggregateByCategory,
   latestBalance,
   parsePeaCsvHoldings,
   getTimeBucketKey,
@@ -61,10 +53,22 @@ const PIE_COLORS = [
   "#a855f7",
 ];
 
+type AccountSectionSummary = {
+  id: string;
+  label: string;
+  kind: AccountSectionKind;
+  balance: number | null;
+  income?: number;
+  expenses?: number;
+  net?: number;
+  pnl?: number | null;
+  purchaseValue?: number | null;
+  currentValue?: number | null;
+};
+
 const Dashboard: React.FC = () => {
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [stats, setStats] = useState<PortfolioStats | null>(null);
   const [activeTab, setActiveTab] = useState<
     "overview" | "performance" | "analysis"
   >("overview");
@@ -74,8 +78,17 @@ const Dashboard: React.FC = () => {
   const [showTradfiDetail, setShowTradfiDetail] = useState(false);
   const [showNFTsDetail, setShowNFTsDetail] = useState(false);
   const [showAccountsInfo, setShowAccountsInfo] = useState(false);
+  const [hoveredAccountId, setHoveredAccountId] = useState<string | null>(null);
+  const [hoverAnimatingId, setHoverAnimatingId] = useState<string | null>(null);
+  const hoverTimersRef = useRef<
+    Record<string, ReturnType<typeof setTimeout> | null>
+  >({});
   const [loading, setLoading] = useState(true);
   const { currentUser } = useUser();
+  const [userSettings, setUserSettings] = useState(() =>
+    getUserSettings(currentUser),
+  );
+  const accountSections = userSettings.accountSections || [];
 
   // ===== CSV Comptes (bank/PEA/PEE) =====
   const [accountsLoading, setAccountsLoading] = useState(false);
@@ -83,67 +96,48 @@ const Dashboard: React.FC = () => {
   const [cashGranularity, setCashGranularity] =
     useState<TimeGranularity>("month");
   const [bankSeries, setBankSeries] = useState<any[]>([]);
-  const [bankCategoryRows, setBankCategoryRows] = useState<any[]>([]);
   const [bankTxs, setBankTxs] = useState<any[]>([]);
   const [selectedBucketKey, setSelectedBucketKey] = useState<string>("");
   const [focusedCategory, setFocusedCategory] = useState<string | null>(null);
   const [focusedSubCategory, setFocusedSubCategory] = useState<string | null>(
     null,
   );
-  const [bankSummary, setBankSummary] = useState<{
-    bankBalance: number | null;
-    peaBalance: number | null;
-    peeBalance: number | null;
-    peaPnl: number | null;
-    peePnl: number | null;
-    peaPurchaseValue: number | null;
-    peePurchaseValue: number | null;
-    peaCurrentValue: number | null;
-    peeCurrentValue: number | null;
-    peaPeePurchaseValue: number;
-    peaPeePnl: number;
-    income: number;
-    expenses: number;
-    net: number;
-  }>({
-    bankBalance: null,
-    peaBalance: null,
-    peeBalance: null,
-    peaPnl: null,
-    peePnl: null,
-    peaPurchaseValue: null,
-    peePurchaseValue: null,
-    peaCurrentValue: null,
-    peeCurrentValue: null,
-    peaPeePurchaseValue: 0,
-    peaPeePnl: 0,
+  const [accountSummaries, setAccountSummaries] = useState<
+    AccountSectionSummary[]
+  >([]);
+  const [cashSummary, setCashSummary] = useState({
+    balance: null as number | null,
     income: 0,
     expenses: 0,
     net: 0,
   });
+  const [investmentSummary, setInvestmentSummary] = useState({
+    balance: 0,
+    pnl: 0,
+    purchaseValue: 0,
+    currentValue: 0,
+  });
 
-  // Hover animation (same spirit as MarketClock: fade/translate, swap value, fade in)
-  const [peaShowCurrent, setPeaShowCurrent] = useState(false);
-  const [peeShowCurrent, setPeeShowCurrent] = useState(false);
-  const [peaAnimating, setPeaAnimating] = useState(false);
-  const [peeAnimating, setPeeAnimating] = useState(false);
-  const peaHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const peeHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const animateToggleValue = (
-    timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
-    setAnimating: (v: boolean) => void,
-    setShowCurrent: (v: boolean) => void,
-    next: boolean,
-  ) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setAnimating(true);
-    timerRef.current = setTimeout(() => {
-      setShowCurrent(next);
-      setAnimating(false);
-      timerRef.current = null;
+  const animateAccountValue = (accountId: string, next: boolean) => {
+    const timers = hoverTimersRef.current;
+    if (timers[accountId]) {
+      clearTimeout(timers[accountId] as ReturnType<typeof setTimeout>);
+    }
+    setHoverAnimatingId(accountId);
+    timers[accountId] = setTimeout(() => {
+      setHoveredAccountId(next ? accountId : null);
+      setHoverAnimatingId(null);
+      timers[accountId] = null;
     }, 220);
   };
+
+  useEffect(() => {
+    return () => {
+      Object.values(hoverTimersRef.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
+    };
+  }, []);
 
   const loadInvestments = async () => {
     try {
@@ -218,151 +212,163 @@ const Dashboard: React.FC = () => {
   }, [currentUser]);
 
   useEffect(() => {
+    setUserSettings(getUserSettings(currentUser));
+  }, [currentUser]);
+
+  useEffect(() => {
+    const refresh = (event?: Event) => {
+      const detail = (event as CustomEvent | undefined)?.detail as
+        | { username?: string }
+        | undefined;
+      if (detail?.username && detail.username !== currentUser) return;
+      setUserSettings(getUserSettings(currentUser));
+    };
+    window.addEventListener("userSettingsUpdated", refresh as EventListener);
+    window.addEventListener("storage", refresh as EventListener);
+    return () => {
+      window.removeEventListener(
+        "userSettingsUpdated",
+        refresh as EventListener,
+      );
+      window.removeEventListener("storage", refresh as EventListener);
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
     const loadAccountCsv = async () => {
       setAccountsLoading(true);
       setAccountsError("");
       try {
-        // Bank: load all uploads (for cashflow + balance chart)
-        const bankMetas = await getStoredBankCsvUploads(currentUser, "bank");
-        const bankContents = await Promise.all(
-          bankMetas.map(async (m) => {
-            const u = await getBankCsvUploadById(m.id, currentUser);
-            return u?.content || "";
-          }),
-        );
-        const bankTxs = bankContents.flatMap((c) =>
-          parseBankCsvTransactions(c),
-        );
+        const summaries: AccountSectionSummary[] = [];
+        const allBankTxs: any[] = [];
+        let totalBankBalance = 0;
+        let totalIncome = 0;
+        let totalExpenses = 0;
+        let totalInvestmentBalance = 0;
+        let totalInvestmentPnl = 0;
+        let totalInvestmentPurchase = 0;
+        let totalInvestmentCurrent = 0;
 
-        const series = buildCashflowSeries(bankTxs, cashGranularity);
-        const categories = aggregateByCategory(bankTxs);
-        const bal = latestBalance(bankTxs);
-
-        const income = bankTxs
-          .filter((t) => t.amount >= 0)
-          .reduce((s, t) => s + t.amount, 0);
-        const expenses = bankTxs
-          .filter((t) => t.amount < 0)
-          .reduce((s, t) => s + Math.abs(t.amount), 0);
-        const net = income - expenses;
-
-        // PEA/PEE: best-effort balance = last accountbalance if present in those CSVs
-        const peaMetas = await getStoredBankCsvUploads(currentUser, "pea");
-        const peaContents = await Promise.all(
-          peaMetas.map(async (m) => {
-            const u = await getBankCsvUploadById(m.id, currentUser);
-            return u?.content || "";
-          }),
-        );
-        const peaHoldings = peaContents.flatMap((c) => parsePeaCsvHoldings(c));
-        const peaBal =
-          peaHoldings.length > 0
-            ? peaHoldings.reduce((s, h) => s + (h.amount || 0), 0)
-            : null;
-        const peaPnl =
-          peaHoldings.length > 0
-            ? peaHoldings.reduce((sum, h) => {
-                if (
-                  h.buyingPrice == null ||
-                  h.lastPrice == null ||
-                  !Number.isFinite(h.buyingPrice) ||
-                  !Number.isFinite(h.lastPrice)
-                )
-                  return sum;
-                const q = Number(h.quantity || 0);
-                if (!Number.isFinite(q) || q === 0) return sum;
-                return sum + (h.lastPrice - h.buyingPrice) * q;
-              }, 0)
-            : null;
-        const peaPurchaseValue =
-          peaHoldings.length > 0
-            ? peaHoldings.reduce((sum, h) => {
-                if (h.buyingPrice == null || !Number.isFinite(h.buyingPrice))
-                  return sum;
-                const q = Number(h.quantity || 0);
-                if (!Number.isFinite(q) || q === 0) return sum;
-                return sum + h.buyingPrice * q;
-              }, 0)
-            : 0;
-        const peaCurrentValue =
-          peaHoldings.length > 0
-            ? (() => {
-                let sum = 0;
-                let used = 0;
-                for (const h of peaHoldings) {
-                  if (h.lastPrice == null || !Number.isFinite(h.lastPrice))
-                    continue;
+        const buildHoldingsSummary = (
+          holdings: ReturnType<typeof parsePeaCsvHoldings>,
+        ) => {
+          const balance =
+            holdings.length > 0
+              ? holdings.reduce((s, h) => s + (h.amount || 0), 0)
+              : null;
+          const pnl =
+            holdings.length > 0
+              ? holdings.reduce((sum, h) => {
+                  if (
+                    h.buyingPrice == null ||
+                    h.lastPrice == null ||
+                    !Number.isFinite(h.buyingPrice) ||
+                    !Number.isFinite(h.lastPrice)
+                  )
+                    return sum;
                   const q = Number(h.quantity || 0);
-                  if (!Number.isFinite(q) || q === 0) continue;
-                  sum += h.lastPrice * q;
-                  used++;
-                }
-                return used > 0 ? sum : null;
-              })()
-            : null;
-
-        const peeMetas = await getStoredBankCsvUploads(currentUser, "pee");
-        const peeContents = await Promise.all(
-          peeMetas.map(async (m) => {
-            const u = await getBankCsvUploadById(m.id, currentUser);
-            return u?.content || "";
-          }),
-        );
-        const peeHoldings = peeContents.flatMap((c) => parsePeaCsvHoldings(c));
-        const peeBal =
-          peeHoldings.length > 0
-            ? peeHoldings.reduce((s, h) => s + (h.amount || 0), 0)
-            : (() => {
-                // Backward compatibility: if the user previously used PEE as a transactions CSV
-                const peeTxs = peeContents.flatMap((c) =>
-                  c ? parseBankCsvTransactions(c) : [],
-                );
-                return latestBalance(peeTxs);
-              })();
-        const peePnl =
-          peeHoldings.length > 0
-            ? peeHoldings.reduce((sum, h) => {
-                if (
-                  h.buyingPrice == null ||
-                  h.lastPrice == null ||
-                  !Number.isFinite(h.buyingPrice) ||
-                  !Number.isFinite(h.lastPrice)
-                )
-                  return sum;
-                const q = Number(h.quantity || 0);
-                if (!Number.isFinite(q) || q === 0) return sum;
-                return sum + (h.lastPrice - h.buyingPrice) * q;
-              }, 0)
-            : null;
-        const peePurchaseValue =
-          peeHoldings.length > 0
-            ? peeHoldings.reduce((sum, h) => {
-                if (h.buyingPrice == null || !Number.isFinite(h.buyingPrice))
-                  return sum;
-                const q = Number(h.quantity || 0);
-                if (!Number.isFinite(q) || q === 0) return sum;
-                return sum + h.buyingPrice * q;
-              }, 0)
-            : 0;
-        const peeCurrentValue =
-          peeHoldings.length > 0
-            ? (() => {
-                let sum = 0;
-                let used = 0;
-                for (const h of peeHoldings) {
-                  if (h.lastPrice == null || !Number.isFinite(h.lastPrice))
-                    continue;
+                  if (!Number.isFinite(q) || q === 0) return sum;
+                  return sum + (h.lastPrice - h.buyingPrice) * q;
+                }, 0)
+              : null;
+          const purchaseValue =
+            holdings.length > 0
+              ? holdings.reduce((sum, h) => {
+                  if (h.buyingPrice == null || !Number.isFinite(h.buyingPrice))
+                    return sum;
                   const q = Number(h.quantity || 0);
-                  if (!Number.isFinite(q) || q === 0) continue;
-                  sum += h.lastPrice * q;
-                  used++;
-                }
-                return used > 0 ? sum : null;
-              })()
-            : null;
+                  if (!Number.isFinite(q) || q === 0) return sum;
+                  return sum + h.buyingPrice * q;
+                }, 0)
+              : 0;
+          const currentValue =
+            holdings.length > 0
+              ? (() => {
+                  let sum = 0;
+                  let used = 0;
+                  for (const h of holdings) {
+                    if (h.lastPrice == null || !Number.isFinite(h.lastPrice))
+                      continue;
+                    const q = Number(h.quantity || 0);
+                    if (!Number.isFinite(q) || q === 0) continue;
+                    sum += h.lastPrice * q;
+                    used++;
+                  }
+                  return used > 0 ? sum : null;
+                })()
+              : null;
+          return { balance, pnl, purchaseValue, currentValue };
+        };
 
-        const peaPeePurchaseValue = peaPurchaseValue + peePurchaseValue;
-        const peaPeePnl = (peaPnl || 0) + (peePnl || 0);
+        for (const section of accountSections) {
+          const metas = await getStoredBankCsvUploads(currentUser, section.id);
+          const contents = await Promise.all(
+            metas.map(async (m) => {
+              const u = await getBankCsvUploadById(m.id, currentUser);
+              return u?.content || "";
+            }),
+          );
+
+          if (section.kind === "bank") {
+            const txs = contents.flatMap((c) => parseBankCsvTransactions(c));
+            allBankTxs.push(...txs);
+            const balance = latestBalance(txs);
+            const income = txs
+              .filter((t) => t.amount >= 0)
+              .reduce((s, t) => s + t.amount, 0);
+            const expenses = txs
+              .filter((t) => t.amount < 0)
+              .reduce((s, t) => s + Math.abs(t.amount), 0);
+            const net = income - expenses;
+
+            if (balance != null) totalBankBalance += balance;
+            totalIncome += income;
+            totalExpenses += expenses;
+
+            summaries.push({
+              id: section.id,
+              label: section.label,
+              kind: section.kind,
+              balance,
+              income,
+              expenses,
+              net,
+            });
+          } else {
+            const holdings = contents.flatMap((c) => parsePeaCsvHoldings(c));
+            const holdingsSummary = buildHoldingsSummary(holdings);
+
+            let balance = holdingsSummary.balance;
+            if (balance == null && contents.length > 0) {
+              const fallbackTxs = contents.flatMap((c) =>
+                c ? parseBankCsvTransactions(c) : [],
+              );
+              balance = latestBalance(fallbackTxs);
+            }
+
+            summaries.push({
+              id: section.id,
+              label: section.label,
+              kind: section.kind,
+              balance,
+              pnl: holdingsSummary.pnl,
+              purchaseValue:
+                holdingsSummary.purchaseValue > 0
+                  ? holdingsSummary.purchaseValue
+                  : null,
+              currentValue: holdingsSummary.currentValue,
+            });
+
+            totalInvestmentBalance += balance ?? 0;
+            totalInvestmentPnl += holdingsSummary.pnl ?? 0;
+            totalInvestmentPurchase += holdingsSummary.purchaseValue || 0;
+            totalInvestmentCurrent += holdingsSummary.currentValue || 0;
+          }
+        }
+
+        const series = buildCashflowSeries(allBankTxs, cashGranularity);
+        const net = totalIncome - totalExpenses;
+        const hasBankSections = accountSections.some((s) => s.kind === "bank");
 
         setBankSeries(
           series.map((p) => ({
@@ -374,23 +380,19 @@ const Dashboard: React.FC = () => {
             balance: p.endingBalance ?? null,
           })),
         );
-        setBankCategoryRows(categories);
-        setBankTxs(bankTxs);
-        setBankSummary({
-          bankBalance: bal,
-          peaBalance: peaBal,
-          peeBalance: peeBal,
-          peaPnl,
-          peePnl,
-          peaPurchaseValue: peaPurchaseValue > 0 ? peaPurchaseValue : null,
-          peePurchaseValue: peePurchaseValue > 0 ? peePurchaseValue : null,
-          peaCurrentValue,
-          peeCurrentValue,
-          peaPeePurchaseValue,
-          peaPeePnl,
-          income,
-          expenses,
+        setBankTxs(allBankTxs);
+        setAccountSummaries(summaries);
+        setCashSummary({
+          balance: hasBankSections ? totalBankBalance : null,
+          income: totalIncome,
+          expenses: totalExpenses,
           net,
+        });
+        setInvestmentSummary({
+          balance: totalInvestmentBalance,
+          pnl: totalInvestmentPnl,
+          purchaseValue: totalInvestmentPurchase,
+          currentValue: totalInvestmentCurrent,
         });
       } catch (e: any) {
         setAccountsError(e?.message || "Erreur lors du chargement des CSV");
@@ -400,7 +402,7 @@ const Dashboard: React.FC = () => {
     };
 
     loadAccountCsv();
-  }, [currentUser, cashGranularity]);
+  }, [currentUser, cashGranularity, accountSections]);
 
   // Trier les séries par ordre décroissant (plus récentes en premier)
   const sortedBankSeries = React.useMemo(() => {
@@ -455,9 +457,7 @@ const Dashboard: React.FC = () => {
       setFocusedSubCategory(null);
       return;
     }
-    setSelectedBucketKey(
-      (prev) => prev || sortedBankSeries[0].key,
-    );
+    setSelectedBucketKey((prev) => prev || sortedBankSeries[0].key);
     // keep last focused category (memory)
     setFocusedSubCategory(null);
   }, [sortedBankSeries]);
@@ -582,17 +582,11 @@ const Dashboard: React.FC = () => {
     return map;
   }, [expenseByCategoryForBucket]);
 
-  const incomeColorMap = React.useMemo(() => {
-    const map: Record<string, string> = {};
-    incomeByCategoryForBucket.forEach((c: any, idx: number) => {
-      map[String(c.name)] = PIE_COLORS[(idx + 2) % PIE_COLORS.length];
-    });
-    return map;
-  }, [incomeByCategoryForBucket]);
-
   // Couleurs pour le graphique cashflow (basé sur le bucket sélectionné ou toutes les périodes)
   const incomeColorMapForCashflow = React.useMemo(() => {
-    const data = selectedBucketKey ? incomeByCategoryForBucket : incomeByCategoryForPeriod;
+    const data = selectedBucketKey
+      ? incomeByCategoryForBucket
+      : incomeByCategoryForPeriod;
     const map: Record<string, string> = {};
     data.forEach((c: any, idx: number) => {
       map[String(c.name)] = PIE_COLORS[(idx + 2) % PIE_COLORS.length];
@@ -601,13 +595,19 @@ const Dashboard: React.FC = () => {
   }, [selectedBucketKey, incomeByCategoryForBucket, incomeByCategoryForPeriod]);
 
   const categoryColorMapForCashflow = React.useMemo(() => {
-    const data = selectedBucketKey ? expenseByCategoryForBucket : expenseByCategoryForPeriod;
+    const data = selectedBucketKey
+      ? expenseByCategoryForBucket
+      : expenseByCategoryForPeriod;
     const map: Record<string, string> = {};
     data.forEach((c: any, idx: number) => {
       map[String(c.name)] = PIE_COLORS[idx % PIE_COLORS.length];
     });
     return map;
-  }, [selectedBucketKey, expenseByCategoryForBucket, expenseByCategoryForPeriod]);
+  }, [
+    selectedBucketKey,
+    expenseByCategoryForBucket,
+    expenseByCategoryForPeriod,
+  ]);
 
   const cashflowSpaghettiColorMap = React.useMemo(() => {
     return { ...incomeColorMapForCashflow, ...categoryColorMapForCashflow };
@@ -711,12 +711,6 @@ const Dashboard: React.FC = () => {
     categoryColorMap,
   ]);
 
-  useEffect(() => {
-    if (investments.length > 0) {
-      // setStats(calculatePortfolioStats(investments));
-    }
-  }, [investments]);
-
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-black p-6">
@@ -733,128 +727,6 @@ const Dashboard: React.FC = () => {
       </div>
     );
   }
-
-  const portfolioData = investments.map((inv) => ({
-    name: inv.name,
-    value: inv.quantity * (inv.currentPrice ?? 0),
-    type: inv.type,
-  }));
-
-  const COLORS = [
-    "#3b82f6",
-    "#10b981",
-    "#f59e0b",
-    "#ef4444",
-    "#8b5cf6",
-    "#06b6d4",
-  ];
-
-  const performanceData = [
-    {
-      date: "1W ago",
-      value:
-        (investments.reduce(
-          (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0,
-        ) +
-          wallets.reduce(
-            (sum, wallet) =>
-              sum +
-              wallet.assets
-                .filter((asset) => !asset.isHidden)
-                .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-              (wallet.nfts || []).reduce(
-                (nftSum, nft) => nftSum + (nft.value || 0),
-                0,
-              ),
-            0,
-          )) *
-        0.95,
-    },
-    {
-      date: "5D ago",
-      value:
-        (investments.reduce(
-          (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0,
-        ) +
-          wallets.reduce(
-            (sum, wallet) =>
-              sum +
-              wallet.assets
-                .filter((asset) => !asset.isHidden)
-                .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-              (wallet.nfts || []).reduce(
-                (nftSum, nft) => nftSum + (nft.value || 0),
-                0,
-              ),
-            0,
-          )) *
-        0.97,
-    },
-    {
-      date: "3D ago",
-      value:
-        (investments.reduce(
-          (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0,
-        ) +
-          wallets.reduce(
-            (sum, wallet) =>
-              sum +
-              wallet.assets
-                .filter((asset) => !asset.isHidden)
-                .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-              (wallet.nfts || []).reduce(
-                (nftSum, nft) => nftSum + (nft.value || 0),
-                0,
-              ),
-            0,
-          )) *
-        0.99,
-    },
-    {
-      date: "Yesterday",
-      value:
-        (investments.reduce(
-          (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0,
-        ) +
-          wallets.reduce(
-            (sum, wallet) =>
-              sum +
-              wallet.assets
-                .filter((asset) => !asset.isHidden)
-                .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-              (wallet.nfts || []).reduce(
-                (nftSum, nft) => nftSum + (nft.value || 0),
-                0,
-              ),
-            0,
-          )) *
-        0.98,
-    },
-    {
-      date: "Today",
-      value:
-        investments.reduce(
-          (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-          0,
-        ) +
-        wallets.reduce(
-          (sum, wallet) =>
-            sum +
-            wallet.assets
-              .filter((asset) => !asset.isHidden)
-              .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-            (wallet.nfts || []).reduce(
-              (nftSum, nft) => nftSum + (nft.value || 0),
-              0,
-            ),
-          0,
-        ),
-    },
-  ];
 
   // Calculs des statistiques
   const investmentsTotalValue = investments.reduce((sum, inv) => {
@@ -902,16 +774,10 @@ const Dashboard: React.FC = () => {
     binanceWalletsTotalValue +
     nftsTotalValue;
 
-  const totalPurchaseValue = investments.reduce(
-    (sum, inv) => sum + inv.quantity * inv.purchasePrice,
-    0,
-  );
-
-  // PEA + PEE uniquement: somme de (lastPrice - buyingPrice) * quantity
-  const totalGainLoss = bankSummary.peaPeePnl || 0;
+  const totalGainLoss = investmentSummary.pnl || 0;
   const totalGainLossPercent =
-    bankSummary.peaPeePurchaseValue > 0
-      ? (totalGainLoss / bankSummary.peaPeePurchaseValue) * 100
+    investmentSummary.purchaseValue > 0
+      ? (totalGainLoss / investmentSummary.purchaseValue) * 100
       : 0;
 
   // Répartition par type
@@ -934,18 +800,6 @@ const Dashboard: React.FC = () => {
           (typeDistribution.crypto || 0) + (asset.value || 0);
       });
   });
-
-  // Top 5 investissements par valeur
-  const topInvestments = investments
-    .map((inv) => ({
-      ...inv,
-      currentValue: inv.quantity * (inv.currentPrice ?? 0),
-      gainLoss:
-        inv.quantity * (inv.currentPrice ?? 0) -
-        inv.quantity * inv.purchasePrice,
-    }))
-    .sort((a, b) => b.currentValue - a.currentValue)
-    .slice(0, 5);
 
   const tabs = [
     {
@@ -988,12 +842,11 @@ const Dashboard: React.FC = () => {
     </div>
   );
 
-  // ===== Totaux incluant CSV (banque / PEA / PEE) =====
-  const bankCash = bankSummary.bankBalance ?? 0;
-  const peaValue = bankSummary.peaBalance ?? 0;
-  const peeValue = bankSummary.peeBalance ?? 0;
-  const totalWealthAll = totalValue + bankCash + peaValue + peeValue;
-  const totalInvestmentsAll = totalValue + peaValue + peeValue; // sans la banque
+  // ===== Totaux incluant CSV (banque / investissement) =====
+  const bankCash = cashSummary.balance ?? 0;
+  const investmentValue = investmentSummary.balance ?? 0;
+  const totalWealthAll = totalValue + bankCash + investmentValue;
+  const totalInvestmentsAll = totalValue + investmentValue; // sans la banque
 
   // ===== Crypto total (investissements crypto + wallets/nfts) =====
   const cryptoInvestmentsValue = investments
@@ -1037,7 +890,7 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="card flex flex-col items-center justify-center text-center">
           <p className="text-sm font-medium text-gray-600 dark:text-white">
-            Gain/Perte (PEA+PEE)
+            Gain/Perte (Investissements CSV)
           </p>
           <p
             className={`text-2xl font-bold ${
@@ -1051,7 +904,7 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="card flex flex-col items-center justify-center text-center">
           <p className="text-sm font-medium text-gray-600 dark:text-white">
-            Rendement (PEA+PEE)
+            Rendement (Investissements CSV)
           </p>
           <p
             className={`text-2xl font-bold ${
@@ -1074,129 +927,73 @@ const Dashboard: React.FC = () => {
         }`}
       >
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="card flex flex-col items-center justify-center text-center">
-            <p className="text-sm font-medium text-gray-600 dark:text-white">
-              Compte bancaire (CSV)
-            </p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">
-              {bankSummary.bankBalance != null
-                ? bankSummary.bankBalance.toLocaleString("fr-FR")
-                : "—"}
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
-              Entrées:{" "}
-              <span className="font-semibold text-success-600 dark:text-success-400">
-                {bankSummary.income.toLocaleString("fr-FR")}
-              </span>{" "}
-              • Sorties:{" "}
-              <span className="font-semibold text-danger-600 dark:text-danger-400">
-                {bankSummary.expenses.toLocaleString("fr-FR")}
-              </span>
-            </p>
-          </div>
-          <div
-            className="card flex flex-col items-center justify-center text-center"
-            onMouseEnter={() => {
-              // only switch if we can compute current value
-              if (bankSummary.peaCurrentValue == null) return;
-              animateToggleValue(
-                peaHoverTimerRef,
-                setPeaAnimating,
-                setPeaShowCurrent,
-                true,
-              );
-            }}
-            onMouseLeave={() => {
-              animateToggleValue(
-                peaHoverTimerRef,
-                setPeaAnimating,
-                setPeaShowCurrent,
-                false,
-              );
-            }}
-          >
-            <p className="text-sm font-medium text-gray-600 dark:text-white">
-              PEA
-            </p>
-            <p
-              className={`text-2xl font-bold transition-all duration-300 ${
-                peaAnimating
-                  ? "transform -translate-y-4 opacity-0"
-                  : "transform translate-y-0 opacity-100"
-              } ${
-                peaShowCurrent &&
-                bankSummary.peaCurrentValue != null &&
-                bankSummary.peaPurchaseValue != null
-                  ? bankSummary.peaCurrentValue >= bankSummary.peaPurchaseValue
-                    ? "text-success-600 dark:text-success-400"
-                    : "text-danger-600 dark:text-danger-400"
-                  : "text-gray-900 dark:text-white"
-              }`}
-            >
-              {(peaShowCurrent
-                ? bankSummary.peaCurrentValue
-                : bankSummary.peaPurchaseValue) != null
-                ? (peaShowCurrent
-                    ? bankSummary.peaCurrentValue
-                    : bankSummary.peaPurchaseValue)!.toLocaleString("fr-FR")
-                : "—"}
-              €
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
-              {peaShowCurrent ? "Valeur actuelle" : "Investissement initial"}
-            </p>
-          </div>
-          <div
-            className="card flex flex-col items-center justify-center text-center"
-            onMouseEnter={() => {
-              if (bankSummary.peeCurrentValue == null) return;
-              animateToggleValue(
-                peeHoverTimerRef,
-                setPeeAnimating,
-                setPeeShowCurrent,
-                true,
-              );
-            }}
-            onMouseLeave={() => {
-              animateToggleValue(
-                peeHoverTimerRef,
-                setPeeAnimating,
-                setPeeShowCurrent,
-                false,
-              );
-            }}
-          >
-            <p className="text-sm font-medium text-gray-600 dark:text-white">
-              PEE
-            </p>
-            <p
-              className={`text-2xl font-bold transition-all duration-300 ${
-                peeAnimating
-                  ? "transform -translate-y-4 opacity-0"
-                  : "transform translate-y-0 opacity-100"
-              } ${
-                peeShowCurrent &&
-                bankSummary.peeCurrentValue != null &&
-                bankSummary.peePurchaseValue != null
-                  ? bankSummary.peeCurrentValue >= bankSummary.peePurchaseValue
-                    ? "text-success-600 dark:text-success-400"
-                    : "text-danger-600 dark:text-danger-400"
-                  : "text-gray-900 dark:text-white"
-              }`}
-            >
-              {(peeShowCurrent
-                ? bankSummary.peeCurrentValue
-                : bankSummary.peePurchaseValue) != null
-                ? (peeShowCurrent
-                    ? bankSummary.peeCurrentValue
-                    : bankSummary.peePurchaseValue)!.toLocaleString("fr-FR")
-                : "—"}
-              €
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
-              {peeShowCurrent ? "Valeur actuelle" : "Investissement initial"}
-            </p>
-          </div>
+          {accountSummaries.map((summary) => {
+            const isInvestment = summary.kind === "investment";
+            const showPnl =
+              isInvestment &&
+              hoveredAccountId === summary.id &&
+              summary.pnl != null;
+            const displayValue = showPnl ? summary.pnl : summary.balance;
+            const isAnimating = hoverAnimatingId === summary.id;
+            const displayClass = showPnl
+              ? summary.pnl && summary.pnl >= 0
+                ? "text-success-600 dark:text-success-400"
+                : "text-danger-600 dark:text-danger-400"
+              : "text-gray-900 dark:text-white";
+
+            return (
+              <div
+                key={summary.id}
+                className="card flex flex-col items-center justify-center text-center"
+                onMouseEnter={() => {
+                  if (isInvestment && summary.pnl != null) {
+                    animateAccountValue(summary.id, true);
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (isInvestment && summary.pnl != null) {
+                    animateAccountValue(summary.id, false);
+                  }
+                }}
+              >
+                <p className="text-sm font-medium text-gray-600 dark:text-white">
+                  {summary.label}
+                </p>
+                <p
+                  className={`text-2xl font-bold transition-all duration-300 ${
+                    isAnimating
+                      ? "transform -translate-y-4 opacity-0"
+                      : "transform translate-y-0 opacity-100"
+                  } ${displayClass}`}
+                >
+                  {displayValue != null
+                    ? displayValue.toLocaleString("fr-FR")
+                    : "—"}
+                  {displayValue != null ? "€" : ""}
+                </p>
+                {summary.kind === "bank" ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
+                    Entrées:{" "}
+                    <span className="font-semibold text-success-600 dark:text-success-400">
+                      {(summary.income || 0).toLocaleString("fr-FR")}
+                    </span>{" "}
+                    • Sorties:{" "}
+                    <span className="font-semibold text-danger-600 dark:text-danger-400">
+                      {(summary.expenses || 0).toLocaleString("fr-FR")}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
+                    {showPnl
+                      ? "Survol: P&L"
+                      : summary.pnl != null
+                        ? `P&L: ${summary.pnl.toLocaleString("fr-FR")}€`
+                        : "P&L: —"}
+                  </p>
+                )}
+              </div>
+            );
+          })}
           <div className="card flex flex-col items-center justify-center text-center">
             <p className="text-sm font-medium text-gray-600 dark:text-white">
               Crypto
@@ -1239,8 +1036,8 @@ const Dashboard: React.FC = () => {
               Comptes (CSV)
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-300">
-              Compte bancaire / PEA / PEE + cashflow & catégories (données
-              issues de tes imports).
+              Comptes personnalisés + cashflow & catégories (données issues de
+              tes imports).
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1291,9 +1088,17 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="h-64">
               <CashflowSpaghetti
-                key={`cashflow-${cashGranularity}-${selectedBucketKey || 'all'}`}
-                incomeByCategory={selectedBucketKey ? incomeByCategoryForBucket : incomeByCategoryForPeriod}
-                expenseByCategory={selectedBucketKey ? expenseByCategoryForBucket : expenseByCategoryForPeriod}
+                key={`cashflow-${cashGranularity}-${selectedBucketKey || "all"}`}
+                incomeByCategory={
+                  selectedBucketKey
+                    ? incomeByCategoryForBucket
+                    : incomeByCategoryForPeriod
+                }
+                expenseByCategory={
+                  selectedBucketKey
+                    ? expenseByCategoryForBucket
+                    : expenseByCategoryForPeriod
+                }
                 colorsByCategory={cashflowSpaghettiColorMap}
                 height={256}
               />
@@ -1317,23 +1122,25 @@ const Dashboard: React.FC = () => {
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart 
-                    key={`balance-${cashGranularity}-${selectedBucketKey || 'all'}`}
+                  <LineChart
+                    key={`balance-${cashGranularity}-${selectedBucketKey || "all"}`}
                     data={balanceChartData}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="dateLabel" 
+                    <XAxis
+                      dataKey="dateLabel"
                       angle={-45}
                       textAnchor="end"
                       height={80}
                     />
                     <YAxis />
-                    <Tooltip 
-                      formatter={(value: any) => `${Number(value).toLocaleString("fr-FR")}€`}
+                    <Tooltip
+                      formatter={(value: any) =>
+                        `${Number(value).toLocaleString("fr-FR")}€`
+                      }
                       labelFormatter={(label) => `Date: ${label}`}
-                      contentStyle={{ color: '#000' }}
-                      labelStyle={{ color: '#000' }}
+                      contentStyle={{ color: "#000" }}
+                      labelStyle={{ color: "#000" }}
                     />
                     <Line
                       type="monotone"

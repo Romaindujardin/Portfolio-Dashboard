@@ -17,9 +17,16 @@ import {
   UserSettings,
 } from "../utils/userSettings";
 import { getBinanceAccountInfo } from "../utils/binanceService";
-import { addWallet, getStoredWallets } from "../utils/storage";
+import {
+  addWallet,
+  deleteBankCsvUpload,
+  getStoredBankCsvUploads,
+  getStoredWallets,
+} from "../utils/storage";
 import { fetchBoursoAccounts } from "../utils/boursoService";
 import type {
+  AccountSectionConfig,
+  AccountSectionKind,
   BoursoAccount,
   BoursoAccountMapping,
   BoursoAccountSection,
@@ -41,6 +48,11 @@ const Settings: React.FC = () => {
     coinGeckoApiKey: "",
     openSeaApiKey: "",
     customApiEndpoint: "",
+    accountSections: [
+      { id: "bank", label: "Compte bancaire", kind: "bank" },
+      { id: "pea", label: "PEA", kind: "investment" },
+      { id: "pee", label: "PEE", kind: "investment" },
+    ],
     boursoClientId: "",
     boursoAccountMappings: [],
     theme: "auto",
@@ -74,6 +86,11 @@ const Settings: React.FC = () => {
   const [boursoPassword, setBoursoPassword] = useState("");
   const [boursoLoading, setBoursoLoading] = useState(false);
   const [boursoError, setBoursoError] = useState("");
+
+  const [sectionLabelDraft, setSectionLabelDraft] = useState("");
+  const [sectionKindDraft, setSectionKindDraft] =
+    useState<AccountSectionKind>("bank");
+  const [sectionError, setSectionError] = useState("");
 
   useEffect(() => {
     loadSettings();
@@ -336,6 +353,68 @@ const Settings: React.FC = () => {
     }));
   };
 
+  const normalizeSectionId = (label: string) => {
+    const base = label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+    return base || `section-${Date.now()}`;
+  };
+
+  const handleAddSection = () => {
+    setSectionError("");
+    const label = sectionLabelDraft.trim();
+    if (!label) {
+      setSectionError("Nom requis.");
+      return;
+    }
+    const id = normalizeSectionId(label);
+    if (settings.accountSections.some((s) => s.id === id)) {
+      setSectionError("Identifiant déjà utilisé.");
+      return;
+    }
+    const nextSections: AccountSectionConfig[] = [
+      ...settings.accountSections,
+      { id, label, kind: sectionKindDraft },
+    ];
+    setSettings((prev) => ({ ...prev, accountSections: nextSections }));
+    setSectionLabelDraft("");
+  };
+
+  const handleDeleteSection = async (section: AccountSectionConfig) => {
+    if (!username) return;
+    if (settings.accountSections.length <= 1) {
+      setSectionError("Au moins un type doit rester actif.");
+      return;
+    }
+    const confirmDelete = window.confirm(
+      `Supprimer "${section.label}" ? Tous les CSV associés seront supprimés.`,
+    );
+    if (!confirmDelete) return;
+
+    try {
+      const uploads = await getStoredBankCsvUploads(
+        username || currentUser,
+        section.id,
+      );
+      await Promise.all(
+        uploads.map((u) => deleteBankCsvUpload(u.id, username || currentUser)),
+      );
+    } catch (error) {
+      console.error("Erreur lors de la suppression des CSV:", error);
+    }
+
+    const nextSections = settings.accountSections.filter(
+      (s) => s.id !== section.id,
+    );
+    const nextSettings = { ...settings, accountSections: nextSections };
+    setSettings(nextSettings);
+    saveUserSettings(username, nextSettings);
+  };
+
   if (!username) {
     return <div>Utilisateur non trouvé</div>;
   }
@@ -584,6 +663,86 @@ const Settings: React.FC = () => {
                 setShowOpenSeaApi,
                 "Votre clé API OpenSea (pour les NFTs)",
               )}
+            </div>
+          </div>
+
+          {/* Section Gestion */}
+          <div className="bg-white dark:bg-[#111111] rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              Gestion
+            </h2>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Nom du type
+                  </label>
+                  <input
+                    type="text"
+                    value={sectionLabelDraft}
+                    onChange={(e) => setSectionLabelDraft(e.target.value)}
+                    placeholder="Ex: Livret A"
+                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Type
+                  </label>
+                  <select
+                    value={sectionKindDraft}
+                    onChange={(e) =>
+                      setSectionKindDraft(e.target.value as AccountSectionKind)
+                    }
+                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                  >
+                    <option value="bank">Compte bancaire</option>
+                    <option value="investment">Investissement</option>
+                  </select>
+                </div>
+              </div>
+
+              {sectionError && (
+                <div className="text-sm text-red-600 dark:text-red-400">
+                  {sectionError}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleAddSection}
+                className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
+              >
+                Ajouter un type
+              </button>
+
+              <div className="space-y-2">
+                {settings.accountSections.map((section) => (
+                  <div
+                    key={section.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-gray-200 dark:border-gray-700 p-3"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900 dark:text-gray-100">
+                        {section.label}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {section.kind === "investment"
+                          ? "Investissement"
+                          : "Compte bancaire"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSection(section)}
+                      className="text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                    >
+                      Supprimer
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

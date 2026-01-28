@@ -741,27 +741,11 @@ class DatabaseManager {
     const setClause = fields.map((f) => `${f} = ?`).join(", ");
     const values = fields.map((f) => updates[f]);
 
-    const effectiveUserId = userId || "Romain";
-    if (effectiveUserId === "Romain") {
-      const stmt = db.prepare(
-        `UPDATE bank_csv_uploads SET ${setClause} WHERE id = ? AND (user_id = ? OR user_id IS NULL)`,
-      );
-      const result = stmt.run(...values, id, effectiveUserId);
-      return result.changes > 0;
-    }
-
     const stmt = db.prepare(
       `UPDATE bank_csv_uploads SET ${setClause} WHERE id = ? AND user_id = ?`,
     );
-    const result = stmt.run(...values, id, effectiveUserId);
-    if (result.changes > 0) return true;
-
-    // Legacy fallback: allow updates on rows without user_id
-    const fallback = db.prepare(
-      `UPDATE bank_csv_uploads SET ${setClause} WHERE id = ? AND user_id IS NULL`,
-    );
-    const fallbackResult = fallback.run(...values, id);
-    return fallbackResult.changes > 0;
+    const result = stmt.run(...values, id, userId || "Romain");
+    return result.changes > 0;
   }
 
   // Statistiques de la base de données

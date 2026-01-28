@@ -125,6 +125,15 @@ export interface BankCsvUploadMeta {
   uploadedAt: string;
 }
 
+// ===== SECTIONS COMPTES CSV =====
+export type AccountSectionKind = "bank" | "investment";
+
+export interface AccountSectionConfig {
+  id: string;
+  label: string;
+  kind: AccountSectionKind;
+}
+
 // ===== BOURSO / BOURSORAMA =====
 export type BoursoAccountKind =
   | "Banking"

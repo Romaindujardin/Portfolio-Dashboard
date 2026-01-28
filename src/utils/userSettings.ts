@@ -1,4 +1,4 @@
-import type { BoursoAccountMapping } from "../types";
+import type { AccountSectionConfig, BoursoAccountMapping } from "../types";
 
 export interface UserSettings {
   binanceApiKey: string;
@@ -8,6 +8,7 @@ export interface UserSettings {
   coinGeckoApiKey: string;
   openSeaApiKey: string;
   customApiEndpoint: string;
+  accountSections: AccountSectionConfig[];
   boursoClientId: string;
   boursoAccountMappings: BoursoAccountMapping[];
   theme: "light" | "dark" | "auto";
@@ -23,6 +24,11 @@ const defaultSettings: UserSettings = {
   coinGeckoApiKey: "",
   openSeaApiKey: "",
   customApiEndpoint: "",
+  accountSections: [
+    { id: "bank", label: "Compte bancaire", kind: "bank" },
+    { id: "pea", label: "PEA", kind: "investment" },
+    { id: "pee", label: "PEE", kind: "investment" },
+  ],
   boursoClientId: "",
   boursoAccountMappings: [],
   theme: "auto",
@@ -35,7 +41,14 @@ export const getUserSettings = (username: string): UserSettings => {
     const stored = localStorage.getItem(`user_settings_${username}`);
     if (stored) {
       const parsedSettings = JSON.parse(stored);
-      return { ...defaultSettings, ...parsedSettings };
+      const merged = { ...defaultSettings, ...parsedSettings } as UserSettings;
+      if (
+        !Array.isArray(merged.accountSections) ||
+        !merged.accountSections.length
+      ) {
+        merged.accountSections = [...defaultSettings.accountSections];
+      }
+      return merged;
     }
   } catch (error) {
     console.error("Erreur lors du chargement des paramètres:", error);
@@ -49,6 +62,11 @@ export const saveUserSettings = (
 ): void => {
   try {
     localStorage.setItem(`user_settings_${username}`, JSON.stringify(settings));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("userSettingsUpdated", { detail: { username } }),
+      );
+    }
   } catch (error) {
     console.error("Erreur lors de la sauvegarde des paramètres:", error);
   }
