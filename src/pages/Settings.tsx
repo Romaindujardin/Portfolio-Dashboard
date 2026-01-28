@@ -4,6 +4,8 @@ import { useUser } from "../contexts/UserContext";
 import {
   Save,
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Eye,
   EyeOff,
   Copy,
@@ -16,20 +18,25 @@ import {
   saveUserSettings,
   UserSettings,
 } from "../utils/userSettings";
+import { sumNumericColumn } from "../utils/csvAnalytics";
 import { getBinanceAccountInfo } from "../utils/binanceService";
 import {
   addWallet,
   deleteBankCsvUpload,
+  getBankCsvUploadById,
   getStoredBankCsvUploads,
   getStoredWallets,
 } from "../utils/storage";
 import { fetchBoursoAccounts } from "../utils/boursoService";
+import { parseCsv } from "../utils/csv";
 import type {
   AccountSectionConfig,
   AccountSectionKind,
+  BankCsvColumnMapping,
   BoursoAccount,
   BoursoAccountMapping,
   BoursoAccountSection,
+  InvestmentCsvColumnMapping,
 } from "../types";
 
 type StringSettingKeys = {
@@ -53,6 +60,7 @@ const Settings: React.FC = () => {
       { id: "pea", label: "PEA", kind: "investment" },
       { id: "pee", label: "PEE", kind: "investment" },
     ],
+    csvColumnMappings: {},
     boursoClientId: "",
     boursoAccountMappings: [],
     theme: "auto",
@@ -91,10 +99,69 @@ const Settings: React.FC = () => {
   const [sectionKindDraft, setSectionKindDraft] =
     useState<AccountSectionKind>("bank");
   const [sectionError, setSectionError] = useState("");
+  const [csvUploadsBySection, setCsvUploadsBySection] = useState<
+    Record<string, Awaited<ReturnType<typeof getStoredBankCsvUploads>>>
+  >({});
+  const [csvHeadersByUpload, setCsvHeadersByUpload] = useState<
+    Record<string, string[]>
+  >({});
+  const [csvContentByUpload, setCsvContentByUpload] = useState<
+    Record<string, string>
+  >({});
+  const [calcOpenBySection, setCalcOpenBySection] = useState<
+    Record<string, boolean>
+  >({});
 
   useEffect(() => {
     loadSettings();
   }, [username]);
+
+  useEffect(() => {
+    const loadCsvUploads = async () => {
+      if (!username) return;
+      try {
+        const nextUploads: Record<
+          string,
+          Awaited<ReturnType<typeof getStoredBankCsvUploads>>
+        > = {};
+        const nextHeaders: Record<string, string[]> = {};
+        const nextContents: Record<string, string> = {};
+
+        for (const section of settings.accountSections) {
+          const metas = await getStoredBankCsvUploads(
+            username || currentUser,
+            section.id,
+          );
+          nextUploads[section.id] = metas;
+
+          const contents = await Promise.all(
+            metas.map(async (meta) => {
+              const upload = await getBankCsvUploadById(
+                meta.id,
+                username || currentUser,
+              );
+              const content = upload?.content || "";
+              nextContents[meta.id] = content;
+              if (!content) return [] as string[];
+              return parseCsv(content).headers;
+            }),
+          );
+
+          metas.forEach((meta, idx) => {
+            nextHeaders[meta.id] = contents[idx] || [];
+          });
+        }
+
+        setCsvUploadsBySection(nextUploads);
+        setCsvHeadersByUpload(nextHeaders);
+        setCsvContentByUpload(nextContents);
+      } catch (error) {
+        console.error("Erreur lors du chargement des CSV:", error);
+      }
+    };
+
+    loadCsvUploads();
+  }, [username, currentUser, settings.accountSections]);
 
   const loadSettings = () => {
     if (username) {
@@ -410,9 +477,75 @@ const Settings: React.FC = () => {
     const nextSections = settings.accountSections.filter(
       (s) => s.id !== section.id,
     );
-    const nextSettings = { ...settings, accountSections: nextSections };
+    const nextMappings = { ...settings.csvColumnMappings };
+    delete nextMappings[section.id];
+    const nextSettings = {
+      ...settings,
+      accountSections: nextSections,
+      csvColumnMappings: nextMappings,
+    };
     setSettings(nextSettings);
     saveUserSettings(username, nextSettings);
+  };
+
+  const getSectionColumns = (sectionId: string) => {
+    const metas = csvUploadsBySection[sectionId] || [];
+    const columns = new Set<string>();
+    metas.forEach((meta) => {
+      (csvHeadersByUpload[meta.id] || []).forEach((h) => columns.add(h));
+    });
+    return Array.from(columns).sort((a, b) => a.localeCompare(b));
+  };
+
+  const getSectionContents = (sectionId: string) => {
+    const metas = csvUploadsBySection[sectionId] || [];
+    return metas
+      .map((meta) => csvContentByUpload[meta.id] || "")
+      .filter((content) => content.length > 0);
+  };
+
+  const sumFromContents = (
+    csvContents: string[],
+    column?: string,
+    multiplierColumn?: string,
+  ): number | null => {
+    if (!column) return null;
+    let total = 0;
+    let used = false;
+    for (const content of csvContents) {
+      const value = sumNumericColumn(content, column, multiplierColumn);
+      if (value == null) continue;
+      total += value;
+      used = true;
+    }
+    return used ? total : null;
+  };
+
+  const updateSectionMapping = (
+    sectionId: string,
+    updates: Partial<BankCsvColumnMapping & InvestmentCsvColumnMapping>,
+  ) => {
+    setSettings((prev) => {
+      const prevMappings = prev.csvColumnMappings || {};
+      const current =
+        (prevMappings[sectionId] as
+          | (BankCsvColumnMapping & InvestmentCsvColumnMapping)
+          | undefined) || {};
+      const next = { ...current, ...updates } as Record<
+        string,
+        string | number | undefined
+      >;
+      Object.keys(next).forEach((key) => {
+        const value = next[key];
+        if (value === "" || value === undefined || value === null) {
+          delete next[key];
+        }
+      });
+      return {
+        ...prev,
+        csvColumnMappings: { ...prevMappings, [sectionId]: next },
+      };
+    });
   };
 
   if (!username) {
@@ -718,30 +851,200 @@ const Settings: React.FC = () => {
               </button>
 
               <div className="space-y-2">
-                {settings.accountSections.map((section) => (
-                  <div
-                    key={section.id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-gray-200 dark:border-gray-700 p-3"
-                  >
-                    <div>
-                      <div className="font-medium text-gray-900 dark:text-gray-100">
-                        {section.label}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {section.kind === "investment"
-                          ? "Investissement"
-                          : "Compte bancaire"}
-                      </div>
+                {settings.accountSections.map((section) => {
+                  const sectionColumns = getSectionColumns(section.id);
+                  const sectionMapping =
+                    (settings.csvColumnMappings?.[section.id] as
+                      | (BankCsvColumnMapping & InvestmentCsvColumnMapping)
+                      | undefined) || {};
+                  const isBank = section.kind === "bank";
+                  const isCalcOpen = calcOpenBySection[section.id] ?? false;
+                  const previewContents = isBank
+                    ? []
+                    : getSectionContents(section.id);
+                  const previewCurrent = isBank
+                    ? null
+                    : sumFromContents(
+                        previewContents,
+                        sectionMapping.currentValueColumn,
+                        sectionMapping.currentValueMultiplierColumn,
+                      );
+                  const previewInitial = isBank
+                    ? null
+                    : sumFromContents(
+                        previewContents,
+                        sectionMapping.initialValueColumn,
+                        sectionMapping.initialValueMultiplierColumn,
+                      );
+                  const previewPnl = isBank
+                    ? null
+                    : sectionMapping.pnlColumn
+                      ? sumFromContents(
+                          previewContents,
+                          sectionMapping.pnlColumn,
+                        )
+                      : previewCurrent != null && previewInitial != null
+                        ? previewCurrent - previewInitial
+                        : null;
+
+                  const renderColumnSelect = (
+                    label: string,
+                    key: keyof (BankCsvColumnMapping &
+                      InvestmentCsvColumnMapping),
+                  ) => (
+                    <div className="space-y-1">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+                        {label}
+                      </label>
+                      <select
+                        value={(sectionMapping[key] as string) || ""}
+                        onChange={(e) =>
+                          updateSectionMapping(section.id, {
+                            [key]: e.target.value || undefined,
+                          })
+                        }
+                        disabled={sectionColumns.length === 0}
+                        className="w-full px-2 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                      >
+                        <option value="">
+                          Auto{" "}
+                          {sectionColumns.length === 0
+                            ? "(aucune colonne)"
+                            : ""}
+                        </option>
+                        {sectionColumns.map((col) => (
+                          <option key={col} value={col}>
+                            {col}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSection(section)}
-                      className="text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                  );
+
+                  return (
+                    <div
+                      key={section.id}
+                      className="rounded-md border border-gray-200 dark:border-gray-700 p-3 space-y-3"
                     >
-                      Supprimer
-                    </button>
-                  </div>
-                ))}
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-gray-100">
+                            {section.label}
+                          </div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {section.kind === "investment"
+                              ? "Investissement"
+                              : "Compte bancaire"}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {!isBank && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCalcOpenBySection((prev) => ({
+                                  ...prev,
+                                  [section.id]: !isCalcOpen,
+                                }))
+                              }
+                              className="p-1 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                              title={
+                                isCalcOpen
+                                  ? "Masquer le calcul"
+                                  : "Afficher le calcul"
+                              }
+                            >
+                              {isCalcOpen ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSection(section)}
+                            className="text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          >
+                            Supprimer
+                          </button>
+                        </div>
+                      </div>
+
+                      {isBank || !isCalcOpen ? null : (
+                        <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            Calcul solde (valeur actuelle)
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {renderColumnSelect(
+                              "Colonne valeur actuelle",
+                              "currentValueColumn",
+                            )}
+                            {renderColumnSelect(
+                              "Multiplier par colonne",
+                              "currentValueMultiplierColumn",
+                            )}
+                            {renderColumnSelect(
+                              "Colonne investi initial",
+                              "initialValueColumn",
+                            )}
+                            {renderColumnSelect(
+                              "Multiplier initial par colonne",
+                              "initialValueMultiplierColumn",
+                            )}
+                            {renderColumnSelect(
+                              "Colonne performance (optionnel)",
+                              "pnlColumn",
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                            Choisis une colonne et, si besoin, une colonne de
+                            multiplication (ex: prix de revient × nombre de
+                            parts).
+                          </div>
+                          <div className="rounded-md border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-[#1a1a1a] p-2 text-xs text-gray-600 dark:text-gray-300">
+                            <div className="font-medium text-gray-700 dark:text-gray-200 mb-1">
+                              Aperçu calculé
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                              <div>
+                                <div className="text-[11px] text-gray-500">
+                                  Valeur actuelle
+                                </div>
+                                <div>
+                                  {previewCurrent != null
+                                    ? previewCurrent.toLocaleString("fr-FR")
+                                    : "—"}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-[11px] text-gray-500">
+                                  Investi initial
+                                </div>
+                                <div>
+                                  {previewInitial != null
+                                    ? previewInitial.toLocaleString("fr-FR")
+                                    : "—"}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-[11px] text-gray-500">
+                                  P&L
+                                </div>
+                                <div>
+                                  {previewPnl != null
+                                    ? previewPnl.toLocaleString("fr-FR")
+                                    : "—"}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

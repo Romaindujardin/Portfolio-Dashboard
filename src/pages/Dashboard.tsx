@@ -18,7 +18,13 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { AccountSectionKind, Investment, Wallet } from "../types";
+import {
+  AccountSectionKind,
+  BankCsvColumnMapping,
+  Investment,
+  InvestmentCsvColumnMapping,
+  Wallet,
+} from "../types";
 import {
   getStoredInvestments,
   getStoredWallets,
@@ -38,6 +44,7 @@ import {
   latestBalance,
   parsePeaCsvHoldings,
   getTimeBucketKey,
+  sumNumericColumn,
 } from "../utils/csvAnalytics";
 
 const PIE_COLORS = [
@@ -300,6 +307,23 @@ const Dashboard: React.FC = () => {
           return { balance, pnl, purchaseValue, currentValue };
         };
 
+        const sumFromContents = (
+          csvContents: string[],
+          column?: string,
+          multiplierColumn?: string,
+        ): number | null => {
+          if (!column) return null;
+          let total = 0;
+          let used = false;
+          for (const content of csvContents) {
+            const value = sumNumericColumn(content, column, multiplierColumn);
+            if (value == null) continue;
+            total += value;
+            used = true;
+          }
+          return used ? total : null;
+        };
+
         for (const section of accountSections) {
           const metas = await getStoredBankCsvUploads(currentUser, section.id);
           const contents = await Promise.all(
@@ -309,8 +333,19 @@ const Dashboard: React.FC = () => {
             }),
           );
 
+          const sectionMapping =
+            (userSettings.csvColumnMappings?.[section.id] as
+              | BankCsvColumnMapping
+              | InvestmentCsvColumnMapping
+              | undefined) || undefined;
+
           if (section.kind === "bank") {
-            const txs = contents.flatMap((c) => parseBankCsvTransactions(c));
+            const txs = contents.flatMap((c) =>
+              parseBankCsvTransactions(
+                c,
+                sectionMapping as BankCsvColumnMapping,
+              ),
+            );
             allBankTxs.push(...txs);
             const balance = latestBalance(txs);
             const income = txs
@@ -335,10 +370,41 @@ const Dashboard: React.FC = () => {
               net,
             });
           } else {
-            const holdings = contents.flatMap((c) => parsePeaCsvHoldings(c));
+            const holdings = contents.flatMap((c) =>
+              parsePeaCsvHoldings(
+                c,
+                sectionMapping as InvestmentCsvColumnMapping,
+              ),
+            );
             const holdingsSummary = buildHoldingsSummary(holdings);
 
-            let balance = holdingsSummary.balance;
+            const investmentMapping =
+              (sectionMapping as InvestmentCsvColumnMapping | undefined) ||
+              undefined;
+            const calcCurrent = sumFromContents(
+              contents,
+              investmentMapping?.currentValueColumn,
+              investmentMapping?.currentValueMultiplierColumn,
+            );
+            const calcInitial = sumFromContents(
+              contents,
+              investmentMapping?.initialValueColumn,
+              investmentMapping?.initialValueMultiplierColumn,
+            );
+            const calcPnl = sumFromContents(
+              contents,
+              investmentMapping?.pnlColumn,
+            );
+            const derivedPnl =
+              calcCurrent != null && calcInitial != null
+                ? calcCurrent - calcInitial
+                : null;
+            const derivedInitial =
+              calcCurrent != null && calcPnl != null
+                ? calcCurrent - calcPnl
+                : null;
+
+            let balance = calcCurrent ?? holdingsSummary.balance;
             if (balance == null && contents.length > 0) {
               const fallbackTxs = contents.flatMap((c) =>
                 c ? parseBankCsvTransactions(c) : [],
@@ -346,23 +412,30 @@ const Dashboard: React.FC = () => {
               balance = latestBalance(fallbackTxs);
             }
 
+            const effectivePnl = calcPnl ?? derivedPnl ?? holdingsSummary.pnl;
+            const effectivePurchase =
+              calcInitial ??
+              derivedInitial ??
+              (holdingsSummary.purchaseValue > 0
+                ? holdingsSummary.purchaseValue
+                : null);
+            const effectiveCurrent =
+              calcCurrent ?? holdingsSummary.currentValue;
+
             summaries.push({
               id: section.id,
               label: section.label,
               kind: section.kind,
               balance,
-              pnl: holdingsSummary.pnl,
-              purchaseValue:
-                holdingsSummary.purchaseValue > 0
-                  ? holdingsSummary.purchaseValue
-                  : null,
-              currentValue: holdingsSummary.currentValue,
+              pnl: effectivePnl,
+              purchaseValue: effectivePurchase,
+              currentValue: effectiveCurrent,
             });
 
             totalInvestmentBalance += balance ?? 0;
-            totalInvestmentPnl += holdingsSummary.pnl ?? 0;
-            totalInvestmentPurchase += holdingsSummary.purchaseValue || 0;
-            totalInvestmentCurrent += holdingsSummary.currentValue || 0;
+            totalInvestmentPnl += effectivePnl ?? 0;
+            totalInvestmentPurchase += effectivePurchase || 0;
+            totalInvestmentCurrent += effectiveCurrent || 0;
           }
         }
 
@@ -929,11 +1002,15 @@ const Dashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           {accountSummaries.map((summary) => {
             const isInvestment = summary.kind === "investment";
+            const baseInvestmentValue =
+              summary.purchaseValue != null
+                ? summary.purchaseValue
+                : summary.balance;
             const showPnl =
               isInvestment &&
               hoveredAccountId === summary.id &&
               summary.pnl != null;
-            const displayValue = showPnl ? summary.pnl : summary.balance;
+            const displayValue = showPnl ? summary.pnl : baseInvestmentValue;
             const isAnimating = hoverAnimatingId === summary.id;
             const displayClass = showPnl
               ? summary.pnl && summary.pnl >= 0
@@ -986,9 +1063,13 @@ const Dashboard: React.FC = () => {
                   <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
                     {showPnl
                       ? "Survol: P&L"
-                      : summary.pnl != null
-                        ? `P&L: ${summary.pnl.toLocaleString("fr-FR")}€`
-                        : "P&L: —"}
+                      : summary.purchaseValue != null
+                        ? `Investi initial: ${summary.purchaseValue.toLocaleString(
+                            "fr-FR",
+                          )}€`
+                        : summary.pnl != null
+                          ? `P&L: ${summary.pnl.toLocaleString("fr-FR")}€`
+                          : "P&L: —"}
                   </p>
                 )}
               </div>

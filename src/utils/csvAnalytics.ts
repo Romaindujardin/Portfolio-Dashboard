@@ -1,4 +1,8 @@
 import { parseCsv } from "./csv";
+import type {
+  BankCsvColumnMapping,
+  InvestmentCsvColumnMapping,
+} from "../types";
 import {
   format,
   parseISO,
@@ -91,7 +95,10 @@ export function getTimeBucketKey(date: Date, g: TimeGranularity): string {
 }
 
 // Helper to get case-insensitive column value
-function getColumnValue(row: Record<string, string>, key: string): string | undefined {
+function getColumnValue(
+  row: Record<string, string>,
+  key: string,
+): string | undefined {
   const lowerKey = key.toLowerCase();
   // Try exact match first
   if (row[key] !== undefined) return row[key];
@@ -102,7 +109,37 @@ function getColumnValue(row: Record<string, string>, key: string): string | unde
   return undefined;
 }
 
-export function parseBankCsvTransactions(csvText: string): ParsedTransaction[] {
+export function sumNumericColumn(
+  csvText: string,
+  column?: string,
+  multiplierColumn?: string,
+): number | null {
+  if (!column) return null;
+  const parsed = parseCsv(csvText || "");
+  if (!parsed.rows.length) return null;
+  let total = 0;
+  let used = 0;
+  for (const row of parsed.rows) {
+    const raw = getColumnValue(row, column);
+    const value = parseFrenchNumber(raw);
+    if (value == null) continue;
+    let multiplier = 1;
+    if (multiplierColumn) {
+      const rawMultiplier = getColumnValue(row, multiplierColumn);
+      const parsedMultiplier = parseFrenchNumber(rawMultiplier);
+      if (parsedMultiplier == null) continue;
+      multiplier = parsedMultiplier;
+    }
+    total += value * multiplier;
+    used++;
+  }
+  return used > 0 ? total : null;
+}
+
+export function parseBankCsvTransactions(
+  csvText: string,
+  mapping?: BankCsvColumnMapping,
+): ParsedTransaction[] {
   const parsed = parseCsv(csvText || "");
   const rows = parsed.rows;
 
@@ -110,22 +147,37 @@ export function parseBankCsvTransactions(csvText: string): ParsedTransaction[] {
   for (const r of rows) {
     // Use DATEOP as primary date column (case-insensitive)
     const date =
+      (mapping?.date ? parseAnyDate(getColumnValue(r, mapping.date)) : null) ||
       parseAnyDate(getColumnValue(r, "DATEOP")) ||
       parseAnyDate(getColumnValue(r, "dateOp")) ||
       parseAnyDate(getColumnValue(r, "dateVal")) ||
       parseAnyDate(getColumnValue(r, "date")) ||
       null;
     const amount = parseFrenchNumber(
-      getColumnValue(r, "amount") || getColumnValue(r, "AMOUNT")
+      (mapping?.amount ? getColumnValue(r, mapping.amount) : undefined) ||
+        getColumnValue(r, "amount") ||
+        getColumnValue(r, "AMOUNT"),
     );
     if (!date || amount == null) continue;
 
     // IMPORTANT: only rely on AI categories from CSV (aiCategory/aiSubCategory)
-    const category = (getColumnValue(r, "aiCategory") || "").trim() || "Non catégorisé";
-    const subCategory = (getColumnValue(r, "aiSubCategory") || "").trim() || "Non catégorisé";
+    const category =
+      (
+        (mapping?.category
+          ? getColumnValue(r, mapping.category)
+          : getColumnValue(r, "aiCategory")) || ""
+      ).trim() || "Non catégorisé";
+    const subCategory =
+      (
+        (mapping?.subCategory
+          ? getColumnValue(r, mapping.subCategory)
+          : getColumnValue(r, "aiSubCategory")) || ""
+      ).trim() || "Non catégorisé";
 
     const balance = parseFrenchNumber(
-      getColumnValue(r, "accountbalance") || getColumnValue(r, "ACCOUNTBALANCE")
+      (mapping?.balance ? getColumnValue(r, mapping.balance) : undefined) ||
+        getColumnValue(r, "accountbalance") ||
+        getColumnValue(r, "ACCOUNTBALANCE"),
     );
 
     txs.push({
@@ -134,9 +186,24 @@ export function parseBankCsvTransactions(csvText: string): ParsedTransaction[] {
       category,
       subCategory,
       accountBalance: balance ?? undefined,
-      label: (getColumnValue(r, "label") || "").trim() || undefined,
-      supplierFound: (getColumnValue(r, "supplierFound") || "").trim() || undefined,
-      comment: (getColumnValue(r, "comment") || "").trim() || undefined,
+      label:
+        (
+          (mapping?.label
+            ? getColumnValue(r, mapping.label)
+            : getColumnValue(r, "label")) || ""
+        ).trim() || undefined,
+      supplierFound:
+        (
+          (mapping?.supplierFound
+            ? getColumnValue(r, mapping.supplierFound)
+            : getColumnValue(r, "supplierFound")) || ""
+        ).trim() || undefined,
+      comment:
+        (
+          (mapping?.comment
+            ? getColumnValue(r, mapping.comment)
+            : getColumnValue(r, "comment")) || ""
+        ).trim() || undefined,
     });
   }
 
@@ -145,16 +212,37 @@ export function parseBankCsvTransactions(csvText: string): ParsedTransaction[] {
   return txs;
 }
 
-export function parsePeaCsvHoldings(csvText: string): PeaHolding[] {
+export function parsePeaCsvHoldings(
+  csvText: string,
+  mapping?: InvestmentCsvColumnMapping,
+): PeaHolding[] {
   const parsed = parseCsv(csvText || "");
   const rows = parsed.rows;
 
   const holdings: PeaHolding[] = [];
   for (const r of rows) {
-    const name = (r.name || "").trim();
-    const isin = (r.isin || "").trim();
-    const quantity = parseFrenchNumber(r.quantity) ?? 0;
-    const amount = parseFrenchNumber(r.amount) ?? 0;
+    const name = (
+      (mapping?.name
+        ? getColumnValue(r, mapping.name)
+        : getColumnValue(r, "name")) || ""
+    ).trim();
+    const isin = (
+      (mapping?.isin
+        ? getColumnValue(r, mapping.isin)
+        : getColumnValue(r, "isin")) || ""
+    ).trim();
+    const quantity =
+      parseFrenchNumber(
+        mapping?.quantity
+          ? getColumnValue(r, mapping.quantity)
+          : getColumnValue(r, "quantity"),
+      ) ?? 0;
+    const amount =
+      parseFrenchNumber(
+        mapping?.amount
+          ? getColumnValue(r, mapping.amount)
+          : getColumnValue(r, "amount"),
+      ) ?? 0;
 
     if (!name && !isin) continue;
 
@@ -162,12 +250,37 @@ export function parsePeaCsvHoldings(csvText: string): PeaHolding[] {
       name: name || isin || "Position",
       isin,
       quantity,
-      buyingPrice: parseFrenchNumber(r.buyingPrice) ?? undefined,
-      lastPrice: parseFrenchNumber(r.lastPrice) ?? undefined,
+      buyingPrice:
+        parseFrenchNumber(
+          mapping?.buyingPrice
+            ? getColumnValue(r, mapping.buyingPrice)
+            : getColumnValue(r, "buyingPrice"),
+        ) ?? undefined,
+      lastPrice:
+        parseFrenchNumber(
+          mapping?.lastPrice
+            ? getColumnValue(r, mapping.lastPrice)
+            : getColumnValue(r, "lastPrice"),
+        ) ?? undefined,
       amount,
-      amountVariation: parseFrenchNumber(r.amountVariation) ?? undefined,
-      variationPercent: parseFrenchNumber(r.variation) ?? undefined,
-      lastMovementDate: parseAnyDate(r.lastMovementDate) ?? undefined,
+      amountVariation:
+        parseFrenchNumber(
+          mapping?.amountVariation
+            ? getColumnValue(r, mapping.amountVariation)
+            : getColumnValue(r, "amountVariation"),
+        ) ?? undefined,
+      variationPercent:
+        parseFrenchNumber(
+          mapping?.variation
+            ? getColumnValue(r, mapping.variation)
+            : getColumnValue(r, "variation"),
+        ) ?? undefined,
+      lastMovementDate:
+        parseAnyDate(
+          mapping?.lastMovementDate
+            ? getColumnValue(r, mapping.lastMovementDate)
+            : getColumnValue(r, "lastMovementDate"),
+        ) ?? undefined,
     });
   }
 
@@ -183,8 +296,9 @@ export function buildCashflowSeries(
   if (txs.length === 0) return [];
 
   // Trouver la date la plus ancienne
-  const oldestDate = txs.reduce((oldest, t) => 
-    t.date < oldest ? t.date : oldest, txs[0].date
+  const oldestDate = txs.reduce(
+    (oldest, t) => (t.date < oldest ? t.date : oldest),
+    txs[0].date,
   );
 
   // Date de début : début de la période de la date la plus ancienne
@@ -201,7 +315,7 @@ export function buildCashflowSeries(
   while (current <= endPeriodStart) {
     const key = groupKey(current, g);
     const periodStart = new Date(groupStart(current, g));
-    
+
     // Créer le bucket s'il n'existe pas déjà
     if (!map.has(key)) {
       map.set(key, { key, date: periodStart, income: 0, expenses: 0, net: 0 });

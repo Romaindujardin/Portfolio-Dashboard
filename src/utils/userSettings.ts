@@ -1,4 +1,9 @@
-import type { AccountSectionConfig, BoursoAccountMapping } from "../types";
+import type {
+  AccountSectionConfig,
+  BankCsvColumnMapping,
+  BoursoAccountMapping,
+  InvestmentCsvColumnMapping,
+} from "../types";
 
 export interface UserSettings {
   binanceApiKey: string;
@@ -9,6 +14,10 @@ export interface UserSettings {
   openSeaApiKey: string;
   customApiEndpoint: string;
   accountSections: AccountSectionConfig[];
+  csvColumnMappings: Record<
+    string,
+    BankCsvColumnMapping | InvestmentCsvColumnMapping
+  >;
   boursoClientId: string;
   boursoAccountMappings: BoursoAccountMapping[];
   theme: "light" | "dark" | "auto";
@@ -29,6 +38,7 @@ const defaultSettings: UserSettings = {
     { id: "pea", label: "PEA", kind: "investment" },
     { id: "pee", label: "PEE", kind: "investment" },
   ],
+  csvColumnMappings: {},
   boursoClientId: "",
   boursoAccountMappings: [],
   theme: "auto",
@@ -47,6 +57,9 @@ export const getUserSettings = (username: string): UserSettings => {
         !merged.accountSections.length
       ) {
         merged.accountSections = [...defaultSettings.accountSections];
+      }
+      if (!merged.csvColumnMappings) {
+        merged.csvColumnMappings = {};
       }
       return merged;
     }

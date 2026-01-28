@@ -134,6 +134,34 @@ export interface AccountSectionConfig {
   kind: AccountSectionKind;
 }
 
+export type BankCsvColumnMapping = {
+  date?: string;
+  amount?: string;
+  balance?: string;
+  category?: string;
+  subCategory?: string;
+  label?: string;
+  supplierFound?: string;
+  comment?: string;
+};
+
+export type InvestmentCsvColumnMapping = {
+  name?: string;
+  isin?: string;
+  quantity?: string;
+  amount?: string;
+  buyingPrice?: string;
+  lastPrice?: string;
+  amountVariation?: string;
+  variation?: string;
+  lastMovementDate?: string;
+  currentValueColumn?: string;
+  currentValueMultiplierColumn?: string;
+  initialValueColumn?: string;
+  initialValueMultiplierColumn?: string;
+  pnlColumn?: string;
+};
+
 // ===== BOURSO / BOURSORAMA =====
 export type BoursoAccountKind =
   | "Banking"
