@@ -890,11 +890,12 @@ const Dashboard: React.FC = () => {
     binanceWalletsTotalValue +
     nftsTotalValue;
 
-  const totalGainLoss = investmentSummary.pnl || 0;
+  const totalInvestedInitial = investmentSummary.purchaseValue || 0;
+  const totalCurrentInvestments =
+    investmentSummary.currentValue ?? investmentSummary.balance ?? 0;
+  const totalGainLoss = totalCurrentInvestments - totalInvestedInitial;
   const totalGainLossPercent =
-    investmentSummary.purchaseValue > 0
-      ? (totalGainLoss / investmentSummary.purchaseValue) * 100
-      : 0;
+    totalInvestedInitial > 0 ? (totalGainLoss / totalInvestedInitial) * 100 : 0;
 
   // Répartition par type
   const typeDistribution = investments.reduce(
@@ -961,8 +962,8 @@ const Dashboard: React.FC = () => {
   // ===== Totaux incluant CSV (banque / investissement) =====
   const bankCash = cashSummary.balance ?? 0;
   const investmentValue = investmentSummary.balance ?? 0;
-  const totalWealthAll = totalValue + bankCash + investmentValue;
-  const totalInvestmentsAll = totalValue + investmentValue; // sans la banque
+  const totalWealthAll = bankCash + investmentValue;
+  const totalInvestmentsAll = investmentValue;
 
   // ===== Crypto total (investissements crypto + wallets/nfts) =====
   const cryptoInvestmentsValue = investments
@@ -1003,10 +1004,13 @@ const Dashboard: React.FC = () => {
           <p className="text-2xl font-bold text-gray-900 dark:text-white">
             {formatCurrency(totalInvestmentsAll)}
           </p>
+          <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
+            Investi initial: {formatCurrency(totalInvestedInitial)}
+          </p>
         </div>
         <div className="card flex flex-col items-center justify-center text-center">
           <p className="text-sm font-medium text-gray-600 dark:text-white">
-            Gain/Perte (Investissements CSV)
+            Gain/Perte
           </p>
           <p
             className={`text-2xl font-bold ${
@@ -1015,12 +1019,13 @@ const Dashboard: React.FC = () => {
                 : "text-danger-600 dark:text-danger-400"
             }`}
           >
-            {formatCurrency(totalGainLoss)}
+            {totalGainLoss >= 0 ? "+" : "-"}
+            {formatCurrency(Math.abs(totalGainLoss))}
           </p>
         </div>
         <div className="card flex flex-col items-center justify-center text-center">
           <p className="text-sm font-medium text-gray-600 dark:text-white">
-            Rendement (Investissements CSV)
+            Rendement
           </p>
           <p
             className={`text-2xl font-bold ${
@@ -1029,7 +1034,8 @@ const Dashboard: React.FC = () => {
                 : "text-danger-600 dark:text-danger-400"
             }`}
           >
-            {formatPercent(totalGainLossPercent, 2)}
+            {totalGainLossPercent >= 0 ? "+" : "-"}
+            {formatPercent(Math.abs(totalGainLossPercent), 2)}
           </p>
         </div>
       </div>
@@ -1159,7 +1165,7 @@ const Dashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
           <div>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Comptes (CSV)
+              Comptes
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-300">
               Comptes personnalisés + cashflow & catégories (données issues de
