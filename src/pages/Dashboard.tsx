@@ -1045,33 +1045,40 @@ const Dashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           {accountSummaries.map((summary) => {
             const isInvestment = summary.kind === "investment";
-            const baseInvestmentValue =
-              summary.purchaseValue != null
-                ? summary.purchaseValue
-                : summary.balance;
-            const showPnl =
+            const investedValue = summary.purchaseValue ?? null;
+            const currentValue =
+              summary.currentValue ?? summary.balance ?? summary.purchaseValue;
+            const showInvested =
               isInvestment &&
               hoveredAccountId === summary.id &&
-              summary.pnl != null;
-            const displayValue = showPnl ? summary.pnl : baseInvestmentValue;
+              investedValue != null;
+            const displayValue = showInvested ? investedValue : currentValue;
+            const variationPercent =
+              investedValue != null &&
+              currentValue != null &&
+              investedValue !== 0
+                ? ((currentValue - investedValue) / investedValue) * 100
+                : null;
             const isAnimating = hoverAnimatingId === summary.id;
-            const displayClass = showPnl
-              ? summary.pnl && summary.pnl >= 0
-                ? "text-success-600 dark:text-success-400"
-                : "text-danger-600 dark:text-danger-400"
-              : "text-gray-900 dark:text-white";
+            const displayClass = showInvested
+              ? "text-gray-900 dark:text-white"
+              : investedValue != null && currentValue != null
+                ? currentValue >= investedValue
+                  ? "text-success-600 dark:text-success-400"
+                  : "text-danger-600 dark:text-danger-400"
+                : "text-gray-900 dark:text-white";
 
             return (
               <div
                 key={summary.id}
                 className="card flex flex-col items-center justify-center text-center"
                 onMouseEnter={() => {
-                  if (isInvestment && summary.pnl != null) {
+                  if (isInvestment && investedValue != null) {
                     animateAccountValue(summary.id, true);
                   }
                 }}
                 onMouseLeave={() => {
-                  if (isInvestment && summary.pnl != null) {
+                  if (isInvestment && investedValue != null) {
                     animateAccountValue(summary.id, false);
                   }
                 }}
@@ -1101,15 +1108,13 @@ const Dashboard: React.FC = () => {
                   </p>
                 ) : (
                   <p className="text-xs text-gray-500 dark:text-gray-300 mt-2">
-                    {showPnl
-                      ? "Survol: P&L"
-                      : summary.purchaseValue != null
-                        ? `Investi initial: ${formatNumber(
-                            summary.purchaseValue,
-                          )}€`
-                        : summary.pnl != null
-                          ? `P&L: ${formatNumber(summary.pnl)}€`
-                          : "P&L: —"}
+                    <span
+                      className={showInvested ? "opacity-0" : "opacity-100"}
+                    >
+                      {variationPercent != null
+                        ? `Variation: ${formatPercent(variationPercent, 2)}`
+                        : "Variation: —"}
+                    </span>
                   </p>
                 )}
               </div>
