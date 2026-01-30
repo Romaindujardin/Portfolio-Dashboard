@@ -120,6 +120,8 @@ const Banking: React.FC = () => {
     {},
   );
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
+  const [editRowsMode, setEditRowsMode] = useState(false);
+  const [rowDeleting, setRowDeleting] = useState(false);
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
 
@@ -1339,6 +1341,44 @@ const Banking: React.FC = () => {
       setError(e?.message || "Erreur lors de la sauvegarde de la catégorie");
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  const deleteRowFromCsv = async (row: Record<string, string>) => {
+    const uploadId = row.__uploadId;
+    const rowIndexStr = row.__rowIndex;
+    const rowIndex = Number(rowIndexStr);
+    if (!uploadId || !Number.isFinite(rowIndex)) return;
+
+    const ok = window.confirm("Supprimer cette ligne du CSV ?");
+    if (!ok) return;
+
+    setRowDeleting(true);
+    setError(null);
+    try {
+      const text = csvCache[uploadId] ?? "";
+      const parsed = parseCsv(text);
+      if (!parsed.rows[rowIndex]) throw new Error("Ligne introuvable");
+
+      const nextRows = parsed.rows.filter((_, i) => i !== rowIndex);
+      const updatedText = stringifyCsv({
+        headers: parsed.headers,
+        rows: nextRows,
+        delimiter: parsed.delimiter || ";",
+      });
+
+      const saved = await updateBankCsvUpload(
+        uploadId,
+        { content: updatedText, sizeBytes: updatedText.length },
+        currentUser,
+      );
+      if (!saved) throw new Error("Échec suppression ligne");
+
+      setCsvCache((prev) => ({ ...prev, [uploadId]: updatedText }));
+    } catch (e: any) {
+      setError(e?.message || "Erreur lors de la suppression de la ligne");
+    } finally {
+      setRowDeleting(false);
     }
   };
 
@@ -2573,6 +2613,14 @@ const Banking: React.FC = () => {
                     <Columns size={18} />
                     <span>Colonnes</span>
                   </button>
+                  <button
+                    className="btn-secondary flex items-center gap-2"
+                    onClick={() => setEditRowsMode((v) => !v)}
+                    type="button"
+                  >
+                    <Pencil size={18} />
+                    <span>{editRowsMode ? "Terminer" : "Edit"}</span>
+                  </button>
                 </div>
               </div>
 
@@ -2666,6 +2714,11 @@ const Banking: React.FC = () => {
                               </th>
                             );
                           })}
+                          {editRowsMode && (
+                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-white">
+                              Actions
+                            </th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="bg-white dark:bg-[#111111]">
@@ -2764,6 +2817,23 @@ const Banking: React.FC = () => {
                                   : (row[h] ?? "").toString()}
                               </td>
                             ))}
+                            {editRowsMode && (
+                              <td className="px-3 py-2 border-t border-gray-100 dark:border-gray-700 text-right">
+                                <button
+                                  type="button"
+                                  className="text-gray-400 hover:text-danger-500 disabled:opacity-50"
+                                  title="Supprimer la ligne"
+                                  onClick={() =>
+                                    deleteRowFromCsv(
+                                      row as Record<string, string>,
+                                    )
+                                  }
+                                  disabled={rowDeleting}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
