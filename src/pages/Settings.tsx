@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  Pencil,
+  Trash2,
   Eye,
   EyeOff,
   Copy,
@@ -488,6 +490,20 @@ const Settings: React.FC = () => {
     saveUserSettings(username, nextSettings);
   };
 
+  const handleRenameSection = (section: AccountSectionConfig) => {
+    const nextLabel = window
+      .prompt("Nouveau nom pour ce type", section.label)
+      ?.trim();
+    if (!nextLabel || nextLabel === section.label) return;
+
+    setSettings((prev) => ({
+      ...prev,
+      accountSections: prev.accountSections.map((s) =>
+        s.id === section.id ? { ...s, label: nextLabel } : s,
+      ),
+    }));
+  };
+
   const getSectionColumns = (sectionId: string) => {
     const metas = csvUploadsBySection[sectionId] || [];
     const columns = new Set<string>();
@@ -963,10 +979,19 @@ const Settings: React.FC = () => {
                           )}
                           <button
                             type="button"
-                            onClick={() => handleDeleteSection(section)}
-                            className="text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            onClick={() => handleRenameSection(section)}
+                            className="p-1 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                            title="Renommer"
                           >
-                            Supprimer
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSection(section)}
+                            className="p-1 rounded-md text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            title="Supprimer"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       </div>
