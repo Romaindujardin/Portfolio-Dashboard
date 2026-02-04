@@ -178,7 +178,7 @@ export interface BoursoAccount {
   kind: BoursoAccountKind;
 }
 
-export type BoursoAccountSection = "bank" | "pea" | "ignore";
+export type BoursoAccountSection = string;
 
 export interface BoursoAccountMapping {
   accountId: string;

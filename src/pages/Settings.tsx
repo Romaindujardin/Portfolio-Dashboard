@@ -96,6 +96,11 @@ const Settings: React.FC = () => {
   const [boursoPassword, setBoursoPassword] = useState("");
   const [boursoLoading, setBoursoLoading] = useState(false);
   const [boursoError, setBoursoError] = useState("");
+  const [showBoursoAccountsDetails, setShowBoursoAccountsDetails] =
+    useState(false);
+  const [detectedBoursoAccounts, setDetectedBoursoAccounts] = useState<
+    BoursoAccountMapping[]
+  >([]);
 
   const [sectionLabelDraft, setSectionLabelDraft] = useState("");
   const [sectionKindDraft, setSectionKindDraft] =
@@ -356,10 +361,37 @@ const Settings: React.FC = () => {
   const inferBoursoSection = (account: BoursoAccount): BoursoAccountSection => {
     const name = account.name.toLowerCase();
     const kind = account.kind.toLowerCase();
-    if (name.includes("pea") || kind.includes("trading")) {
-      return "pea";
+
+    // Chercher une section correspondante dans les sections configurées
+    for (const section of settings.accountSections) {
+      const sectionLabel = section.label.toLowerCase();
+      const sectionId = section.id.toLowerCase();
+
+      // Si le nom du compte ou son type contient le label/id de la section
+      if (
+        name.includes(sectionLabel) ||
+        name.includes(sectionId) ||
+        kind.includes(sectionLabel) ||
+        kind.includes(sectionId)
+      ) {
+        return section.id;
+      }
     }
-    return "bank";
+
+    // Vérifier si c'est un PEA ou trading
+    if (name.includes("pea") || kind.includes("trading")) {
+      const peaSection = settings.accountSections.find(
+        (s) =>
+          s.id.toLowerCase().includes("pea") ||
+          s.label.toLowerCase().includes("pea") ||
+          s.kind === "investment",
+      );
+      if (peaSection) return peaSection.id;
+    }
+
+    // Par défaut, retourner la première section bancaire ou la première section
+    const bankSection = settings.accountSections.find((s) => s.kind === "bank");
+    return bankSection?.id || settings.accountSections[0]?.id || "bank";
   };
 
   const handleDetectBoursoAccounts = async () => {
@@ -397,6 +429,7 @@ const Settings: React.FC = () => {
         };
       });
 
+      setDetectedBoursoAccounts(nextMappings);
       setSettings((prev) => ({
         ...prev,
         boursoAccountMappings: nextMappings,
@@ -414,6 +447,11 @@ const Settings: React.FC = () => {
     accountId: string,
     section: BoursoAccountSection,
   ) => {
+    setDetectedBoursoAccounts((prev) =>
+      prev.map((mapping) =>
+        mapping.accountId === accountId ? { ...mapping, section } : mapping,
+      ),
+    );
     setSettings((prev) => ({
       ...prev,
       boursoAccountMappings: prev.boursoAccountMappings.map((mapping) =>
@@ -758,14 +796,59 @@ const Settings: React.FC = () => {
               </div>
 
               <div className="text-sm text-gray-600 dark:text-gray-400">
-                {settings.boursoAccountMappings.length
-                  ? `${settings.boursoAccountMappings.length} compte(s) configuré(s)`
-                  : "Aucun compte configuré"}
+                {settings.boursoAccountMappings.length ? (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowBoursoAccountsDetails(!showBoursoAccountsDetails)
+                      }
+                      className="flex items-center gap-1 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+                    >
+                      {showBoursoAccountsDetails ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                      <span>
+                        {settings.boursoAccountMappings.length} compte(s)
+                        configuré(s)
+                      </span>
+                    </button>
+                    {showBoursoAccountsDetails && (
+                      <div className="mt-2 pl-5 space-y-1 text-xs">
+                        {settings.boursoAccountMappings.map((mapping) => {
+                          const sectionLabel =
+                            mapping.section === "ignore"
+                              ? "ignorer"
+                              : settings.accountSections.find(
+                                  (s) => s.id === mapping.section,
+                                )?.label || mapping.section;
+                          return (
+                            <div
+                              key={mapping.accountId}
+                              className="text-gray-500 dark:text-gray-400"
+                            >
+                              {mapping.accountName} → {sectionLabel}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  "Aucun compte configuré"
+                )}
               </div>
 
               <button
                 type="button"
-                onClick={() => setShowBoursoModal(true)}
+                onClick={() => {
+                  setDetectedBoursoAccounts([]);
+                  setBoursoPassword("");
+                  setBoursoError("");
+                  setShowBoursoModal(true);
+                }}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
               >
                 Détecter et mapper les comptes
@@ -1133,13 +1216,13 @@ const Settings: React.FC = () => {
               )}
 
               <div className="space-y-3">
-                {settings.boursoAccountMappings.length === 0 && (
+                {detectedBoursoAccounts.length === 0 && (
                   <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Aucun compte détecté pour le moment.
+                    Cliquez sur "Détecter les comptes" pour lancer la détection.
                   </div>
                 )}
 
-                {settings.boursoAccountMappings.map((mapping) => (
+                {detectedBoursoAccounts.map((mapping) => (
                   <div
                     key={mapping.accountId}
                     className="flex flex-col gap-2 rounded-md border border-gray-200 dark:border-gray-700 p-3"
@@ -1166,8 +1249,11 @@ const Settings: React.FC = () => {
                         }
                         className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
                       >
-                        <option value="bank">Banque</option>
-                        <option value="pea">PEA</option>
+                        {settings.accountSections.map((section) => (
+                          <option key={section.id} value={section.id}>
+                            {section.label}
+                          </option>
+                        ))}
                         <option value="ignore">Ignorer</option>
                       </select>
                     </div>
