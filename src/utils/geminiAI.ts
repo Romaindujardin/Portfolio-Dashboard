@@ -49,9 +49,9 @@ const getMarketContext = async (
         if (asset.type === "crypto") {
           const crypto = getCryptoBySymbol(asset.symbol);
           if (crypto) {
-            return `${asset.symbol}: Prix actuel $${
+            return `${asset.symbol}: Prix actuel ${
               crypto.current_price
-            }, Rang #${
+            } €, Rang #${
               crypto.market_cap_rank
             }, Variation 24h: ${crypto.price_change_percentage_24h?.toFixed(
               2
@@ -60,20 +60,13 @@ const getMarketContext = async (
         }
         return `${
           asset.symbol
-        }: Valeur actuelle $${asset.value.toLocaleString()}`;
+        }: Valeur actuelle ${asset.value.toLocaleString("fr-FR")} €`;
       })
       .join("\n");
 
     return `
 CONTEXTE MARCHÉ EN TEMPS RÉEL:
 ${marketInfo}
-
-TENDANCES GÉNÉRALES (Décembre 2024):
-- Bitcoin maintient ses niveaux élevés autour de 97k-100k USD
-- Altcoins montrent une volatilité accrue
-- Secteur tech sous pression avec les taux d'intérêt
-- Rotation sectorielle vers la value et les dividendes
-- Incertitudes géopolitiques affectant les marchés
 `;
   } catch (error) {
     console.warn("Erreur lors de la récupération du contexte marché:", error);

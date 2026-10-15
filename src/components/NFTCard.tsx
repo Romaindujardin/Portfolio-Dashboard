@@ -8,9 +8,9 @@ interface NFTCardProps {
 
 const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
   const formatValue = (value: number) => {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat("fr-FR", {
       style: "currency",
-      currency: "USD",
+      currency: "EUR",
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(value);

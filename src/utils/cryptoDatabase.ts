@@ -45,7 +45,7 @@ export const fetchCryptoDatabase = async (): Promise<CryptoData[]> => {
 
     // Récupérer les top 1000 cryptos avec toutes les données
     const response = await fetch(
-      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=1000&page=1&sparkline=false&price_change_percentage=24h`
+      `https://api.coingecko.com/api/v3/coins/markets?vs_currency=eur&order=market_cap_desc&per_page=1000&page=1&sparkline=false&price_change_percentage=24h`
     );
 
     if (!response.ok) {
@@ -178,24 +178,24 @@ const getBasicCryptos = (): CryptoData[] => [
     symbol: "btc",
     name: "Bitcoin",
     image: "https://assets.coingecko.com/coins/images/1/large/bitcoin.png",
-    current_price: 97000,
-    market_cap: 1920000000000,
+    current_price: 90000,
+    market_cap: 1800000000000,
     market_cap_rank: 1,
-    fully_diluted_valuation: 2030000000000,
-    total_volume: 45000000000,
-    high_24h: 98000,
-    low_24h: 95000,
-    price_change_24h: 2400,
+    fully_diluted_valuation: 1900000000000,
+    total_volume: 42000000000,
+    high_24h: 91000,
+    low_24h: 88000,
+    price_change_24h: 2200,
     price_change_percentage_24h: 2.5,
-    market_cap_change_24h: 48000000000,
+    market_cap_change_24h: 44000000000,
     market_cap_change_percentage_24h: 2.6,
     circulating_supply: 19800000,
     total_supply: 19800000,
     max_supply: 21000000,
-    ath: 108135,
+    ath: 100000,
     ath_change_percentage: -10.3,
     ath_date: "2024-03-14T07:10:36.635Z",
-    atl: 67.81,
+    atl: 62.79,
     atl_change_percentage: 143000.8,
     atl_date: "2013-07-06T00:00:00.000Z",
     last_updated: new Date().toISOString(),
@@ -205,23 +205,23 @@ const getBasicCryptos = (): CryptoData[] => [
     symbol: "eth",
     name: "Ethereum",
     image: "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
-    current_price: 3800,
-    market_cap: 460000000000,
+    current_price: 3500,
+    market_cap: 430000000000,
     market_cap_rank: 2,
-    fully_diluted_valuation: 460000000000,
-    total_volume: 25000000000,
-    high_24h: 3850,
-    low_24h: 3720,
-    price_change_24h: 67,
+    fully_diluted_valuation: 430000000000,
+    total_volume: 23000000000,
+    high_24h: 3600,
+    low_24h: 3400,
+    price_change_24h: 62.04,
     price_change_percentage_24h: 1.8,
-    market_cap_change_24h: 8100000000,
+    market_cap_change_24h: 7500000000,
     market_cap_change_percentage_24h: 1.8,
     circulating_supply: 120000000,
     total_supply: 120000000,
-    ath: 4878.26,
+    ath: 4500,
     ath_change_percentage: -22.1,
     ath_date: "2021-11-10T14:24:19.604Z",
-    atl: 0.432979,
+    atl: 0.4009,
     atl_change_percentage: 878000.2,
     atl_date: "2015-10-20T00:00:00.000Z",
     last_updated: new Date().toISOString(),
@@ -231,23 +231,23 @@ const getBasicCryptos = (): CryptoData[] => [
     symbol: "sol",
     name: "Solana",
     image: "https://assets.coingecko.com/coins/images/4128/large/solana.png",
-    current_price: 240,
-    market_cap: 115000000000,
+    current_price: 222.22,
+    market_cap: 110000000000,
     market_cap_rank: 4,
-    fully_diluted_valuation: 140000000000,
-    total_volume: 8000000000,
-    high_24h: 245,
-    low_24h: 232,
-    price_change_24h: 7.5,
+    fully_diluted_valuation: 130000000000,
+    total_volume: 7400000000,
+    high_24h: 226.85,
+    low_24h: 214.81,
+    price_change_24h: 6.94,
     price_change_percentage_24h: 3.2,
-    market_cap_change_24h: 3600000000,
+    market_cap_change_24h: 3300000000,
     market_cap_change_percentage_24h: 3.2,
     circulating_supply: 480000000,
     total_supply: 580000000,
-    ath: 259.96,
+    ath: 240.7,
     ath_change_percentage: -7.7,
     ath_date: "2024-11-23T16:05:38.250Z",
-    atl: 0.500801,
+    atl: 0.4637,
     atl_change_percentage: 47844.5,
     atl_date: "2020-05-11T19:35:23.449Z",
     last_updated: new Date().toISOString(),
@@ -258,24 +258,24 @@ const getBasicCryptos = (): CryptoData[] => [
     name: "BNB",
     image:
       "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png",
-    current_price: 710,
-    market_cap: 103000000000,
+    current_price: 657.41,
+    market_cap: 95000000000,
     market_cap_rank: 5,
-    fully_diluted_valuation: 142000000000,
-    total_volume: 2000000000,
-    high_24h: 720,
-    low_24h: 700,
-    price_change_24h: 8.4,
+    fully_diluted_valuation: 130000000000,
+    total_volume: 1900000000,
+    high_24h: 666.67,
+    low_24h: 648.15,
+    price_change_24h: 7.78,
     price_change_percentage_24h: 1.2,
-    market_cap_change_24h: 1200000000,
+    market_cap_change_24h: 1100000000,
     market_cap_change_percentage_24h: 1.2,
     circulating_supply: 145000000,
     total_supply: 145000000,
     max_supply: 200000000,
-    ath: 720.67,
+    ath: 667.29,
     ath_change_percentage: -1.5,
     ath_date: "2024-12-04T08:30:00.000Z",
-    atl: 0.0398177,
+    atl: 0.0369,
     atl_change_percentage: 1783000.3,
     atl_date: "2017-10-19T00:00:00.000Z",
     last_updated: new Date().toISOString(),
@@ -286,24 +286,24 @@ const getBasicCryptos = (): CryptoData[] => [
     name: "XRP",
     image:
       "https://assets.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png",
-    current_price: 2.8,
-    market_cap: 160000000000,
+    current_price: 2.59,
+    market_cap: 150000000000,
     market_cap_rank: 7,
-    fully_diluted_valuation: 280000000000,
-    total_volume: 12000000000,
-    high_24h: 2.95,
-    low_24h: 2.64,
-    price_change_24h: 0.15,
+    fully_diluted_valuation: 260000000000,
+    total_volume: 11000000000,
+    high_24h: 2.73,
+    low_24h: 2.44,
+    price_change_24h: 0.1389,
     price_change_percentage_24h: 5.8,
-    market_cap_change_24h: 8800000000,
+    market_cap_change_24h: 8100000000,
     market_cap_change_percentage_24h: 5.8,
     circulating_supply: 57000000000,
     total_supply: 99988000000,
     max_supply: 100000000000,
-    ath: 3.4,
+    ath: 3.15,
     ath_change_percentage: -17.6,
     ath_date: "2018-01-07T00:00:00.000Z",
-    atl: 0.00268621,
+    atl: 0.0025,
     atl_change_percentage: 104000.2,
     atl_date: "2014-05-22T00:00:00.000Z",
     last_updated: new Date().toISOString(),
@@ -335,7 +335,7 @@ export const refreshCryptoPrice = async (
 
     // Utiliser l'API CoinGecko pour obtenir le prix actuel
     const response = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.id}&vs_currencies=usd&include_24hr_change=true`
+      `https://api.coingecko.com/api/v3/simple/price?ids=${crypto.id}&vs_currencies=eur&include_24hr_change=true`
     );
 
     if (!response.ok) {
@@ -345,9 +345,9 @@ export const refreshCryptoPrice = async (
     const data = await response.json();
     const priceData = data[crypto.id];
 
-    if (priceData && priceData.usd) {
-      const newPrice = priceData.usd;
-      const change24h = priceData.usd_24h_change || 0;
+    if (priceData && priceData.eur) {
+      const newPrice = priceData.eur;
+      const change24h = priceData.eur_24h_change || 0;
 
       // Mettre à jour dans la base de données locale
       const cryptoIndex = cryptoCache.findIndex((c) => c.id === crypto.id);
@@ -360,7 +360,7 @@ export const refreshCryptoPrice = async (
         };
       }
 
-      console.log(`✅ Prix rafraîchi pour ${symbol}: $${newPrice}`);
+      console.log(`✅ Prix rafraîchi pour ${symbol}: ${newPrice} €`);
       return newPrice;
     }
   } catch (error) {

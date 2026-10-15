@@ -6,6 +6,19 @@ async function getCryptoPrices(
   try {
     const prices: Record<string, number> = {};
 
+    // Taux USDT -> EUR (1 EUR = X USDT) pour convertir les paires Binance
+    let eurUsdt = 1;
+    try {
+      const rateResponse = await fetch(
+        "https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT"
+      );
+      const rateData = await rateResponse.json();
+      const rate = parseFloat(rateData.price);
+      if (rate > 0) eurUsdt = rate;
+    } catch {
+      // Taux indisponible : approximation à 1
+    }
+
     // Récupérer les prix un par un depuis Binance
     for (const symbol of symbols) {
       try {
@@ -17,7 +30,7 @@ async function getCryptoPrices(
         const data = await response.json();
 
         if (data.price) {
-          prices[symbol] = parseFloat(data.price);
+          prices[symbol] = parseFloat(data.price) / eurUsdt;
         }
       } catch {
         console.log(`Prix non disponible pour ${symbol}`);

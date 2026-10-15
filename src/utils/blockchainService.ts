@@ -3,7 +3,7 @@ import { getCryptoBySymbol } from "./cryptoDatabase";
 import { getEtherscanApiKey, getCoinGeckoApiKey } from "./userSettings";
 import { getNFTsForAddress, getCollectionFloorPrice } from "./openSeaService";
 
-// Fonction pour récupérer le prix de l'ETH en USD
+// Fonction pour récupérer le prix de l'ETH en EUR
 async function getETHPrice(_username: string = "Romain"): Promise<number> {
   try {
     // Essayer d'abord depuis la base de données locale
@@ -13,12 +13,12 @@ async function getETHPrice(_username: string = "Romain"): Promise<number> {
     }
 
     // Sinon, utiliser l'API publique de CoinGecko
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd`;
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=eur`;
     const response = await fetch(url);
 
     if (response.ok) {
       const data = await response.json();
-      return data.ethereum?.usd || 2000;
+      return data.ethereum?.eur || 2000;
     }
 
     return 2000; // Prix par défaut en cas d'erreur
@@ -260,21 +260,21 @@ async function getTokenPriceFromCoinGecko(
       } else {
         // Fallback: essayer l'API CoinGecko avec l'ID
         if (cryptoData && cryptoData.id) {
-          const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoData.id}&vs_currencies=usd`;
+          const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoData.id}&vs_currencies=eur`;
 
           const data = await coinGeckoApiCall(url, username);
           const symbolData = data[cryptoData.id];
-          if (symbolData && symbolData.usd) {
-            price = symbolData.usd;
+          if (symbolData && symbolData.eur) {
+            price = symbolData.eur;
           }
         } else {
           // Dernier recours: essayer l'API des contrats pour Ethereum
-          const url = `https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=${contractAddress}&vs_currencies=usd`;
+          const url = `https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=${contractAddress}&vs_currencies=eur`;
 
           const data = await coinGeckoApiCall(url, username);
           const tokenData = data[contractAddress.toLowerCase()];
-          if (tokenData && tokenData.usd) {
-            price = tokenData.usd;
+          if (tokenData && tokenData.eur) {
+            price = tokenData.eur;
           }
         }
       }
@@ -288,12 +288,12 @@ async function getTokenPriceFromCoinGecko(
       } else {
         // Fallback: essayer l'API CoinGecko avec l'ID
         if (cryptoData && cryptoData.id) {
-          const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoData.id}&vs_currencies=usd`;
+          const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoData.id}&vs_currencies=eur`;
 
           const data = await coinGeckoApiCall(url, username);
           const symbolData = data[cryptoData.id];
-          if (symbolData && symbolData.usd) {
-            price = symbolData.usd;
+          if (symbolData && symbolData.eur) {
+            price = symbolData.eur;
           }
         }
       }
@@ -515,7 +515,7 @@ export const scanWalletAssets = async (
 
       // Récupérer le prix de l'ETH pour la conversion
       const ethPrice = await getETHPrice(username);
-      console.log(`💱 [Conversion] Prix ETH: $${ethPrice.toFixed(2)}`);
+      console.log(`💱 [Conversion] Prix ETH: ${ethPrice.toFixed(2)} €`);
 
       // Récupérer les floor prices pour toutes les collections uniques
       const uniqueCollections = [...new Set(nfts.map((nft) => nft.collection))];
@@ -532,8 +532,8 @@ export const scanWalletAssets = async (
             username
           );
           if (floorPriceETH) {
-            const floorPriceUSD = floorPriceETH * ethPrice;
-            floorPrices[collection] = floorPriceUSD;
+            const floorPriceEUR = floorPriceETH * ethPrice;
+            floorPrices[collection] = floorPriceEUR;
           }
         } catch (error) {
           console.warn(
@@ -543,17 +543,17 @@ export const scanWalletAssets = async (
         }
       }
 
-      // Convertir les NFTs en WalletAsset avec les floor prices en USD
+      // Convertir les NFTs en WalletAsset avec les floor prices en EUR
       nftAssets = nfts.map((nft) => {
-        const floorPriceUSD = floorPrices[nft.collection] || 0;
-        const value = floorPriceUSD; // Valeur = floor price en USD
+        const floorPriceEUR = floorPrices[nft.collection] || 0;
+        const value = floorPriceEUR; // Valeur = floor price en EUR
 
         return {
           symbol: "NFT",
           name: nft.name || `NFT #${nft.token_id}`,
           balance: 1, // Chaque NFT a un balance de 1
           value: value,
-          price: floorPriceUSD,
+          price: floorPriceEUR,
           logo: nft.image_url,
           blockchain: "ethereum", // NFTs principalement sur Ethereum
           contractAddress: nft.contract,
@@ -569,7 +569,7 @@ export const scanWalletAssets = async (
       });
 
       console.log(
-        `🎨 NFTs préparés: ${nftAssets.length} (avec floor prices en USD)`
+        `🎨 NFTs préparés: ${nftAssets.length} (avec floor prices en EUR)`
       );
     }
   } catch (error) {

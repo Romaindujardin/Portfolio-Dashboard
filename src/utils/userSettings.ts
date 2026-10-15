@@ -44,7 +44,7 @@ const defaultSettings: UserSettings = {
   boursoClientId: "",
   boursoAccountMappings: [],
   theme: "auto",
-  currency: "USD",
+  currency: "EUR",
   language: "fr",
   accentColor: "blue",
 };
