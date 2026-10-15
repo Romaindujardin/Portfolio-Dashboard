@@ -250,7 +250,7 @@ ${rows
     decoded = safeJsonParse<
       Array<{ index: number; aiCategory: string; aiSubCategory: string }>
     >(text);
-  } catch (e: any) {
+  } catch {
     // Fallback: ask Gemini to repair JSON if the response is malformed/truncated
     const repairPrompt = `Répare en JSON strict (sans texte autour) le JSON ci-dessous.
 Tu dois retourner un tableau JSON au format:

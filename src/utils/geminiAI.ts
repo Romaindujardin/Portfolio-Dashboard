@@ -1,6 +1,6 @@
 // Service d'analyse de portefeuille avec Gemini AI
 import { Investment, Wallet } from "../types";
-import { getCryptoBySymbol, getAllCryptos } from "./cryptoDatabase";
+import { getCryptoBySymbol } from "./cryptoDatabase";
 import { getGeminiApiKey } from "./userSettings";
 
 // Fonction pour obtenir l'URL de l'API Gemini avec la clé de l'utilisateur
@@ -520,14 +520,9 @@ const extractListItems = (
 const cleanText = (text: string): string => {
   return text
     .replace(/\*\*/g, "") // Supprimer les astérisques
-    .replace(/^\s*[\*\-]\s*/gm, "") // Supprimer les puces en début de ligne
+    .replace(/^\s*[*-]\s*/gm, "") // Supprimer les puces en début de ligne
     .replace(/^\d+\.\s*/gm, "") // Supprimer la numérotation
     .trim();
-};
-
-// Fonction utilitaire pour échapper les caractères spéciaux regex
-const escapeRegex = (string: string): string => {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
 // Calcul du score de diversification

@@ -5,7 +5,6 @@ import {
   BarChart3,
   PiggyBank,
   Sparkles,
-  PlusCircle,
   ChevronDown,
   X,
   Plus,
@@ -15,7 +14,6 @@ import {
   EyeOff,
   Receipt,
   Menu,
-  TrendingUp,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 

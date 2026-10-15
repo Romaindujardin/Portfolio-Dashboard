@@ -4,7 +4,7 @@ import { getEtherscanApiKey, getCoinGeckoApiKey } from "./userSettings";
 import { getNFTsForAddress, getCollectionFloorPrice } from "./openSeaService";
 
 // Fonction pour récupérer le prix de l'ETH en USD
-async function getETHPrice(username: string = "Romain"): Promise<number> {
+async function getETHPrice(_username: string = "Romain"): Promise<number> {
   try {
     // Essayer d'abord depuis la base de données locale
     const ethData = getCryptoBySymbol("ETH");
@@ -141,16 +141,6 @@ export const isValidAddress = (address: string): boolean => {
   return /^0x[a-fA-F0-9]{40}$/.test(address);
 };
 
-// Fonction pour construire l'URL de l'API V2 Etherscan
-function buildApiV2Url(
-  module: string,
-  action: string,
-  address: string,
-  additionalParams: string = ""
-): string {
-  return `${module}?module=${module}&action=${action}&address=${address}&apikey=${additionalParams}`;
-}
-
 // Fonction pour attendre un délai (rate limiting)
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -253,7 +243,6 @@ async function getTokenPriceFromCoinGecko(
     const cacheKey = contractAddress || symbol;
     const cached = coinGeckoCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < COINGECKO_CACHE_DURATION) {
-      console.log(`💰 Prix en cache pour ${symbol}: $${cached.price}`);
       return cached.price;
     }
 
@@ -261,9 +250,6 @@ async function getTokenPriceFromCoinGecko(
 
     if (contractAddress) {
       // Pour les tokens avec contrat, essayer d'abord par symbole puis par contrat
-      console.log(
-        `🔍 [CoinGecko] Récupération du prix pour ${symbol} (contrat: ${contractAddress})...`
-      );
 
       // D'abord essayer de trouver le prix par symbole dans notre base
       const { getCryptoBySymbol } = await import("./cryptoDatabase");
@@ -271,14 +257,10 @@ async function getTokenPriceFromCoinGecko(
 
       if (cryptoData && cryptoData.current_price) {
         price = cryptoData.current_price;
-        console.log(`💰 Prix depuis la base crypto pour ${symbol}: $${price}`);
       } else {
         // Fallback: essayer l'API CoinGecko avec l'ID
         if (cryptoData && cryptoData.id) {
           const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoData.id}&vs_currencies=usd`;
-          console.log(
-            `🔍 [CoinGecko] Récupération du prix pour ${symbol} (ID: ${cryptoData.id})...`
-          );
 
           const data = await coinGeckoApiCall(url, username);
           const symbolData = data[cryptoData.id];
@@ -288,9 +270,6 @@ async function getTokenPriceFromCoinGecko(
         } else {
           // Dernier recours: essayer l'API des contrats pour Ethereum
           const url = `https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=${contractAddress}&vs_currencies=usd`;
-          console.log(
-            `🔍 [CoinGecko] Récupération du prix pour le contrat ${contractAddress}...`
-          );
 
           const data = await coinGeckoApiCall(url, username);
           const tokenData = data[contractAddress.toLowerCase()];
@@ -306,14 +285,10 @@ async function getTokenPriceFromCoinGecko(
 
       if (cryptoData && cryptoData.current_price) {
         price = cryptoData.current_price;
-        console.log(`💰 Prix depuis la base crypto pour ${symbol}: $${price}`);
       } else {
         // Fallback: essayer l'API CoinGecko avec l'ID
         if (cryptoData && cryptoData.id) {
           const url = `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoData.id}&vs_currencies=usd`;
-          console.log(
-            `🔍 [CoinGecko] Récupération du prix pour ${symbol} (ID: ${cryptoData.id})...`
-          );
 
           const data = await coinGeckoApiCall(url, username);
           const symbolData = data[cryptoData.id];
@@ -331,7 +306,6 @@ async function getTokenPriceFromCoinGecko(
         timestamp: Date.now(),
       });
 
-      console.log(`💰 Prix CoinGecko pour ${symbol}: $${price}`);
       return price;
     } else {
       console.warn(`⚠️ Prix non trouvé pour ${symbol} sur CoinGecko`);
@@ -359,13 +333,8 @@ const getNativeBalance = async (
     // Construire l'URL avec le chainid pour Etherscan v2
     const url = `${config.apiUrl}?module=account&action=balance&address=${address}&chainid=${config.chainId}&apikey=${config.apiKey}`;
 
-    console.log(`🔍 [API] Récupération du solde natif ${blockchain}`);
 
     const response = await apiCallWithRetry(url);
-    console.log(
-      `🔍 [API] Réponse complète pour ${blockchain}:`,
-      JSON.stringify(response, null, 2)
-    );
 
     // Vérifier si la réponse est valide
     if (response.status === "0" || response.status === 0) {
@@ -374,16 +343,11 @@ const getNativeBalance = async (
     }
 
     const balance = response.result;
-    console.log(`🔍 [API] Balance brute pour ${blockchain}:`, balance);
 
     // Vérifier que la balance est un nombre valide
     if (balance && balance !== "0" && !isNaN(parseFloat(balance))) {
       const balanceInEth =
         parseFloat(balance) / Math.pow(10, config.nativeToken.decimals);
-      console.log(
-        `🔍 [API] Balance convertie pour ${blockchain}:`,
-        balanceInEth
-      );
 
       const price = await getTokenPriceFromCoinGecko(
         config.nativeToken.symbol,
@@ -425,7 +389,6 @@ const getTokenBalances = async (
     // Construire l'URL avec le chainid pour Etherscan v2
     const url = `${config.apiUrl}?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=asc&chainid=${config.chainId}&apikey=${config.apiKey}`;
 
-    console.log(`🔍 [API] Récupération des tokens ${blockchain}`);
 
     const response = await apiCallWithRetry(url);
     const transactions = response.result;
@@ -515,7 +478,6 @@ export const scanWalletAssets = async (
 
   // Scanner les blockchains SÉQUENTIELLEMENT pour éviter le rate limiting
   for (const blockchain of supportedBlockchains) {
-    console.log(`🔍 [API] Scan de ${blockchain}...`);
 
     try {
       // Récupérer le solde natif
@@ -526,15 +488,11 @@ export const scanWalletAssets = async (
       );
       if (nativeBalance) {
         allAssets.push(nativeBalance);
-        console.log(
-          `💰 Solde natif ${blockchain}: ${nativeBalance.balance} ${nativeBalance.symbol}`
-        );
       }
 
       // Récupérer les tokens
       const tokens = await getTokenBalances(address, blockchain, username);
       allAssets.push(...tokens);
-      console.log(`💰 ${tokens.length} tokens trouvés sur ${blockchain}`);
 
       // Pause entre les blockchains pour éviter le rate limiting
       await delay(1000);
@@ -576,11 +534,6 @@ export const scanWalletAssets = async (
           if (floorPriceETH) {
             const floorPriceUSD = floorPriceETH * ethPrice;
             floorPrices[collection] = floorPriceUSD;
-            console.log(
-              `💰 [OpenSea] Floor price pour ${collection}: ${floorPriceETH} ETH ($${floorPriceUSD.toFixed(
-                2
-              )})`
-            );
           }
         } catch (error) {
           console.warn(
@@ -734,9 +687,6 @@ export const updateWallet = async (
             ? hiddenAsset.price
             : updatedAssets[existingIndex].price,
       };
-      console.log(
-        `👁️ Asset ${hiddenAsset.symbol} marqué comme suspect et préservé`
-      );
     } else {
       // Ajouter l'asset caché s'il n'existe plus dans le scan
       updatedAssets.push({
@@ -745,9 +695,6 @@ export const updateWallet = async (
         value: 0,
         price: 0,
       });
-      console.log(
-        `👁️ Asset suspect ${hiddenAsset.symbol} ajouté avec balance 0 (plus détecté)`
-      );
     }
   });
 

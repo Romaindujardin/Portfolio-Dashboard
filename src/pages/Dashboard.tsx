@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   PieChart,
   Pie,
   Cell,
   ResponsiveContainer,
-  LineChart,
-  Line,
   AreaChart,
   Area,
   BarChart,
@@ -14,28 +12,20 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
 } from "recharts";
 import {
   TrendingUp,
   BarChart3,
-  Activity,
-  ChevronDown,
-  ChevronUp,
   Briefcase,
   Layers,
   ArrowUpRight,
   ArrowDownRight,
   Search,
-  Filter,
   Landmark,
   Wallet as WalletIcon,
   Coins,
   ShieldCheck,
-  CheckCircle2,
-  PieChart as PieIcon,
   ArrowRight,
-  Sparkles,
   Building2,
 } from "lucide-react";
 import {
@@ -118,11 +108,6 @@ const Dashboard: React.FC = () => {
   const [sectionHoldings, setSectionHoldings] = useState<
     Record<string, PeaHolding[]>
   >({});
-  const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
-  const [showWalletsDetail, setShowWalletsDetail] = useState(false);
-  const [showCryptoDetail, setShowCryptoDetail] = useState(false);
-  const [showTradfiDetail, setShowTradfiDetail] = useState(false);
-  const [showNFTsDetail, setShowNFTsDetail] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isAnonymous, setIsAnonymous] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -210,11 +195,8 @@ const Dashboard: React.FC = () => {
     maskDigits(Number(value || 0).toLocaleString(locale));
   const formatCurrency = (value: number, locale: string = "fr-FR") =>
     `${formatNumber(value, locale)}€`;
-  const formatDollar = (value: number, locale: string = "fr-FR") =>
-    `$${formatNumber(value, locale)}`;
   const formatPercent = (value: number, digits: number = 2) =>
     `${maskDigits(Number(value || 0).toFixed(digits))}%`;
-  const maskText = (text: string) => maskDigits(text);
 
   const loadWallets = async () => {
     try {
@@ -452,11 +434,12 @@ const Dashboard: React.FC = () => {
               holdingsSummary.balance != null &&
               holdingsSummary.balance > 0;
 
-            let balance = hasHoldings
-              ? (calcCurrent != null && calcCurrent > holdingsSummary.balance
-                  ? calcCurrent
-                  : holdingsSummary.balance)
-              : (calcCurrent ?? holdingsSummary.balance);
+            const summaryBalance = holdingsSummary.balance ?? 0;
+            let balance: number | null = hasHoldings
+              ? calcCurrent != null && calcCurrent > summaryBalance
+                ? calcCurrent
+                : summaryBalance
+              : calcCurrent ?? holdingsSummary.balance ?? null;
 
             if (balance == null && contents.length > 0) {
               const fallbackTxs = contents.flatMap((c) =>
@@ -664,23 +647,6 @@ const Dashboard: React.FC = () => {
       .sort((a, b) => b.value - a.value);
   }, [bankTxs, selectedBucketKey, cashGranularity]);
 
-  const expenseBySubCategoryForBucket = React.useMemo(() => {
-    if (!selectedBucketKey || !focusedCategory) return [];
-    const map = new Map<string, number>();
-    for (const t of bankTxs) {
-      const k = getTimeBucketKey(t.date, cashGranularity);
-      if (k !== selectedBucketKey) continue;
-      if (t.amount >= 0) continue;
-      const cat = (t.category || "Non catégorisé").toString();
-      if (cat !== focusedCategory) continue;
-      const sub = (t.subCategory || "Non catégorisé").toString();
-      map.set(sub, (map.get(sub) || 0) + Math.abs(t.amount));
-    }
-    return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [bankTxs, selectedBucketKey, focusedCategory, cashGranularity]);
-
   const topTransactionsForHover = React.useMemo(() => {
     if (!selectedBucketKey || !focusedCategory) return [];
     const filtered = bankTxs.filter((t: any) => {
@@ -746,90 +712,6 @@ const Dashboard: React.FC = () => {
   const cashflowSpaghettiColorMap = React.useMemo(() => {
     return { ...incomeColorMapForCashflow, ...categoryColorMapForCashflow };
   }, [incomeColorMapForCashflow, categoryColorMapForCashflow]);
-
-  const hexToRgb = (hex: string) => {
-    const h = hex.replace("#", "").trim();
-    const full =
-      h.length === 3
-        ? h
-            .split("")
-            .map((c) => c + c)
-            .join("")
-        : h;
-    const n = parseInt(full, 16);
-    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-  };
-
-  const rgbToHsl = (r: number, g: number, b: number) => {
-    r /= 255;
-    g /= 255;
-    b /= 255;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0;
-    let s = 0;
-    const l = (max + min) / 2;
-
-    if (max !== min) {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch (max) {
-        case r:
-          h = (g - b) / d + (g < b ? 6 : 0);
-          break;
-        case g:
-          h = (b - r) / d + 2;
-          break;
-        default:
-          h = (r - g) / d + 4;
-          break;
-      }
-      h /= 6;
-    }
-
-    return { h, s, l };
-  };
-
-  const hslToRgb = (h: number, s: number, l: number) => {
-    const hue2rgb = (p: number, q: number, t: number) => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-
-    let r: number, g: number, b: number;
-    if (s === 0) {
-      r = g = b = l;
-    } else {
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1 / 3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1 / 3);
-    }
-    return {
-      r: Math.round(r * 255),
-      g: Math.round(g * 255),
-      b: Math.round(b * 255),
-    };
-  };
-
-  const rgbToHex = (r: number, g: number, b: number) =>
-    `#${[r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
-
-  const shadeFromBase = (baseHex: string, idx: number, total: number) => {
-    // Create shades by varying lightness around base
-    const { r, g, b } = hexToRgb(baseHex);
-    const hsl = rgbToHsl(r, g, b);
-    const span = 0.28; // how much lightness range
-    const t = total <= 1 ? 0.5 : idx / (total - 1);
-    const l = Math.min(0.92, Math.max(0.18, hsl.l * (1 - span) + span * t));
-    const rgb = hslToRgb(hsl.h, Math.min(1, hsl.s * 0.95), l);
-    return rgbToHex(rgb.r, rgb.g, rgb.b);
-  };
 
   // Ensure we always display something (memory): if no focusedCategory, use top category
   useEffect(() => {
@@ -1319,6 +1201,16 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Erreur / chargement des comptes CSV */}
+      {accountsError && (
+        <div className="card border border-red-500/30 bg-red-500/10 text-red-300 text-sm px-4 py-3">
+          Erreur lors du chargement des comptes : {accountsError}
+        </div>
+      )}
+      {accountsLoading && (
+        <div className="text-xs text-[#8a8a8a]">Chargement des comptes...</div>
+      )}
+
       {/* Horloge des bourses */}
       <div className="flex justify-center">
         <MarketClock />

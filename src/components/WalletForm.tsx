@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { X, Wallet, AlertCircle, Loader } from "lucide-react";
 import { Wallet as WalletType } from "../types";
 import { createWallet, isValidAddress } from "../utils/blockchainService";
-import { WALLET_TYPES, getWalletTypeConfig } from "../utils/walletTypes";
+import { WALLET_TYPES } from "../utils/walletTypes";
 
 interface WalletFormProps {
   wallet?: WalletType; // Prop optionnel pour l'édition

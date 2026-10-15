@@ -87,7 +87,7 @@ const MarketClock: React.FC = () => {
         minute: "2-digit",
         second: "2-digit",
       });
-    } catch (error) {
+    } catch {
       return "00:00:00";
     }
   };

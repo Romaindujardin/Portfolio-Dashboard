@@ -8,14 +8,12 @@ import {
   Trash2,
   ChevronDown,
   ChevronUp,
-  DollarSign,
   EyeOff,
   Eye,
 } from "lucide-react";
 import { Wallet as WalletType } from "../types";
 import {
   getExplorerUrl,
-  getSupportedBlockchains,
 } from "../utils/blockchainService";
 import { getWalletTypeConfig } from "../utils/walletTypes";
 import NFTCard from "./NFTCard";

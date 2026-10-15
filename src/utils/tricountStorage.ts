@@ -14,8 +14,6 @@ import {
   PocketCategory,
 } from "../types";
 import {
-  getSavingsStrategy,
-  getAllConfiguredStrategyMonths,
   getPocketMonthlyAmount,
   getTotalMonthlyIncome,
   calculateHouseholdSummary,
@@ -246,7 +244,7 @@ export const deleteExpense = (id: string, userId: string = "Romain"): void => {
     fetch(`${API_BASE}/expenses/${encodeURIComponent(id)}?user_id=${encodeURIComponent(userId)}`, {
       method: "DELETE",
     }).catch(() => {});
-  } catch (e) {
+  } catch {
     // ignore
   }
 };
@@ -303,7 +301,7 @@ export const deleteIncome = (id: string, userId: string = "Romain"): void => {
     fetch(`${API_BASE}/incomes/${encodeURIComponent(id)}?user_id=${encodeURIComponent(userId)}`, {
       method: "DELETE",
     }).catch(() => {});
-  } catch (e) {
+  } catch {
     // ignore
   }
 };
@@ -556,7 +554,6 @@ export const calculateTricountBalance = (
 
   // Équilibrage : Person 1 net = total payé - part due
   const p1Net = totalP1Paid - p1ShouldPay;
-  const p2Net = totalP2Paid - p2ShouldPay;
 
   let debtor: "person1" | "person2" | "none" = "none";
   let creditor: "person1" | "person2" | "none" = "none";
@@ -751,8 +748,8 @@ export const calculateMonthlyBudgetSummary = (
   let p2LivingDue = 0;
 
   const realIncomeSum = p1Income + p2Income;
-  const plannedP1Income = strategy.household?.person1?.monthlyIncome || 0;
-  const plannedP2Income = strategy.household?.person2?.monthlyIncome || 0;
+  const plannedP1Income = plannedHousehold.p1.monthlyIncome || 0;
+  const plannedP2Income = plannedHousehold.p2.monthlyIncome || 0;
   const plannedSum = plannedP1Income + plannedP2Income;
   const fallbackRatio = plannedSum > 0 ? plannedP1Income / plannedSum : 0.5;
   const defaultP1Ratio =

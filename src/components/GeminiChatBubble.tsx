@@ -68,7 +68,7 @@ const GeminiChatBubble: React.FC = () => {
         aiText = data.candidates[0].content.parts[0].text;
       }
       setMessages((msgs) => [...msgs, { role: "ai", text: aiText }]);
-    } catch (e) {
+    } catch {
       setMessages((msgs) => [
         ...msgs,
         {

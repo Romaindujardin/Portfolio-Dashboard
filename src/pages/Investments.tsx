@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Search, Wallet, ChevronDown } from "lucide-react";
 import { Wallet as WalletType } from "../types";
 import {

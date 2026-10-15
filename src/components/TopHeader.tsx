@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Search, Eye, EyeOff, Plus, Bell, Sun, Moon } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Search, Eye, EyeOff, Plus, Sun, Moon } from "lucide-react";
 import { toggleThemeWithTransition } from "../utils/themeToggle";
 
 interface TopHeaderProps {

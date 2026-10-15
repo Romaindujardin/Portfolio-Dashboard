@@ -1,12 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import {
-  TrendingUp,
-  DollarSign,
-  PieChart as PieChartIcon,
   Search,
   ChevronRight,
-  ChevronDown,
-  Users,
   Clock,
 } from "lucide-react";
 import {
@@ -26,11 +21,9 @@ import {
 } from "recharts";
 import { useUser } from "../contexts/UserContext";
 import {
-  SavingsPocket,
   SavingsStrategy,
   PocketCategory,
   TricountExpense,
-  TricountIncome,
   PocketSubItem,
 } from "../types";
 import {
@@ -41,12 +34,11 @@ import {
 import {
   getStoredExpenses,
   getStoredIncomes,
-  getAvailableMonths,
   getCurrentMonthKey,
   formatMonthLabel,
   isPlacementPocket,
 } from "../utils/tricountStorage";
-import { getUserAccentColor, getPersonTheme } from "../utils/theme";
+import { getUserAccentColor } from "../utils/theme";
 import SavingsProjectionPanel from "../components/SavingsProjectionPanel";
 
 const formatEur = (val: number | null | undefined): string => {
@@ -204,15 +196,13 @@ export const Savings: React.FC = () => {
   }, [currentUser, refreshKey]);
 
   // 3. Registre intelligent des poches (Actives vs Historiques)
-  const { pocketsMap, pocketsList, activePockets, historicalPockets } =
-    useMemo(() => {
+  const { pocketsList, activePockets, historicalPockets } = useMemo(() => {
       const map = new Map<string, PocketStats>();
 
       // Initialiser d'abord avec les poches de la stratégie du mois courant
       const activePocketsLatest = latestStrategy.pockets.filter((p) =>
         isPlacementPocket(p),
       );
-      const activeIdsSet = new Set(activePocketsLatest.map((p) => p.id));
 
       activePocketsLatest.forEach((poc, idx) => {
         map.set(poc.id, {
@@ -300,7 +290,7 @@ export const Savings: React.FC = () => {
         stat.placementsCount += 1;
 
         // Répartition Romain / Sophie
-        if (item.payerPersonId === "person2" || item.paidBy === "person2") {
+        if (item.payerPersonId === "person2") {
           stat.p2Placed = Math.round((stat.p2Placed + amt) * 100) / 100;
         } else {
           stat.p1Placed = Math.round((stat.p1Placed + amt) * 100) / 100;
@@ -371,8 +361,7 @@ export const Savings: React.FC = () => {
         allPlacements
           .filter(
             (p) =>
-              p.payerPersonId === "person1" ||
-              (!p.payerPersonId && p.paidBy !== "person2"),
+              p.payerPersonId === "person1" || !p.payerPersonId,
           )
           .reduce((sum, p) => sum + (p.amount || 0), 0) * 100,
       ) / 100,
@@ -384,7 +373,7 @@ export const Savings: React.FC = () => {
       Math.round(
         allPlacements
           .filter(
-            (p) => p.payerPersonId === "person2" || p.paidBy === "person2",
+            (p) => p.payerPersonId === "person2",
           )
           .reduce((sum, p) => sum + (p.amount || 0), 0) * 100,
       ) / 100,
@@ -528,11 +517,9 @@ export const Savings: React.FC = () => {
         return false;
       }
       if (journalPersonFilter === "person1") {
-        if (item.payerPersonId === "person2" || item.paidBy === "person2")
-          return false;
+        if (item.payerPersonId === "person2") return false;
       } else if (journalPersonFilter === "person2") {
-        if (item.payerPersonId !== "person2" && item.paidBy !== "person2")
-          return false;
+        if (item.payerPersonId !== "person2") return false;
       }
       if (journalSearch.trim()) {
         const query = journalSearch.toLowerCase();
@@ -761,7 +748,7 @@ export const Savings: React.FC = () => {
                   width={60}
                 />
                 <RechartsTooltip
-                  content={({ active, payload, label }) => {
+                  content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const totalMonth = payload.reduce(
                         (sum, item) => sum + (Number(item.value) || 0),
@@ -1418,9 +1405,7 @@ export const Savings: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800/60 font-medium">
                 {filteredPlacementsLog.map((item) => {
-                  const isP2 =
-                    item.payerPersonId === "person2" ||
-                    item.paidBy === "person2";
+                  const isP2 = item.payerPersonId === "person2";
                   return (
                     <tr
                       key={item.id}

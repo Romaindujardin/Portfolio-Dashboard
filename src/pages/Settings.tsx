@@ -14,7 +14,6 @@ import {
   Check,
   Wallet,
   Loader2,
-  Palette,
 } from "lucide-react";
 import { ACCENT_COLORS, applyUserTheme, getAccentColorDef } from "../utils/theme";
 import {
@@ -44,7 +43,7 @@ import type {
 } from "../types";
 
 type StringSettingKeys = {
-  [K in keyof UserSettings]: UserSettings[K] extends string ? K : never;
+  [K in keyof UserSettings]-?: UserSettings[K] extends string ? K : never;
 }[keyof UserSettings];
 
 const Settings: React.FC = () => {
@@ -191,7 +190,7 @@ const Settings: React.FC = () => {
       }
       setMessage("Paramètres sauvegardés avec succès !");
       setTimeout(() => setMessage(""), 3000);
-    } catch (error) {
+    } catch {
       setMessage("Erreur lors de la sauvegarde des paramètres");
       setTimeout(() => setMessage(""), 3000);
     } finally {

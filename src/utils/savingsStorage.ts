@@ -1,6 +1,5 @@
 import {
   IncomeSource,
-  PocketSubItem,
   SavingsPocket,
   SavingsStrategy,
   HouseholdConfig,
@@ -1059,7 +1058,6 @@ export const calculateHouseholdSummary = (
       const ownership: PocketOwnership = pocket.ownership || "shared";
       const pocketSplitMethod: SplitMode = pocket.splitMethod || "50_50";
       const pocketRatioP1 = pocketSplitMethod === "50_50" ? 0.5 : ratioP1;
-      const pocketRatioP2 = pocketSplitMethod === "50_50" ? 0.5 : ratioP2;
       const subItemsTotal = roundCents(getSubItemsTotal(pocket));
 
       let paidByP1 = 0;
@@ -1118,7 +1116,6 @@ export const calculateHouseholdSummary = (
   const netAvailableP2 = isEnabled ? Math.max(0, roundCents(incomeP2 - fixedChargesP2)) : 0;
   const totalNetAvailable = roundCents(netAvailableP1 + netAvailableP2);
   const netRatioP1 = totalNetAvailable > 0 ? netAvailableP1 / totalNetAvailable : ratioP1;
-  const netRatioP2 = totalNetAvailable > 0 ? netAvailableP2 / totalNetAvailable : ratioP2;
 
   // ÉTAPE 3 : Poches d'épargne, investissements & loisirs (Section 3)
   strategy.pockets.forEach((pocket) => {
@@ -1350,9 +1347,19 @@ export const calculateSavingsProjection = (
   const p2Name = strategy.household?.person2?.name || "Sophie";
   const isHouseholdEnabled = strategy.household?.enabled ?? true;
 
-  const projectionEntries = strategy.pockets
+  type ProjectionEntry = {
+    id: string;
+    name: string;
+    color: string;
+    parentPocketId?: string;
+    currentAmount: number;
+    monthlyAmount: number;
+    expectedReturnRate: number;
+  };
+
+  const projectionEntries: ProjectionEntry[] = strategy.pockets
     .filter(isProjectedSavingsPocket)
-    .flatMap((pocket) => {
+    .flatMap((pocket): ProjectionEntry[] => {
       const isDossier = isHouseholdEnabled && pocket.ownership === "dossier";
       if (isDossier && (pocket.subItems || []).length > 0) {
         return (pocket.subItems || []).map((subItem) => ({
@@ -1373,6 +1380,7 @@ export const calculateSavingsProjection = (
         id: pocket.id,
         name: pocket.name,
         color: pocket.color,
+        parentPocketId: undefined,
         currentAmount: Number(pocket.currentAmount) || 0,
         monthlyAmount: getPocketMonthlyAmount(pocket, totalIncome),
         expectedReturnRate: Number(pocket.expectedReturnRate) || 0,

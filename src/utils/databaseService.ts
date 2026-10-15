@@ -138,7 +138,7 @@ class DatabaseService {
     walletId: string,
     assetIndex: number,
     isHidden: boolean,
-    userId: string = "Romain"
+    _userId: string = "Romain"
   ): Promise<void> {
     const response = await fetch(
       `${this.apiBase}/database/wallets/${walletId}/assets/${assetIndex}/visibility`,

@@ -91,7 +91,7 @@ const resolveBoursoCliPath = () => {
     if (candidate && fs.existsSync(candidate)) {
       try {
         fs.accessSync(candidate, fs.constants.X_OK);
-      } catch (error) {
+      } catch {
         throw new Error(
           `bourso-cli non exécutable: ${candidate}. Vérifie les permissions (chmod +x) ou Gatekeeper.`,
         );
@@ -183,7 +183,7 @@ const parseAccountsFromOutput = (stdout) => {
     const block = match[1];
     const idMatch = block.match(/id:\s*"([^"]+)"/);
     const nameMatch = block.match(/name:\s*"([^"]+)"/);
-    const balanceMatch = block.match(/balance:\s*([0-9.\-]+)/);
+    const balanceMatch = block.match(/balance:\s*([0-9.-]+)/);
     const bankMatch = block.match(/bank_name:\s*"([^"]+)"/);
     const kindMatch = block.match(/kind:\s*([A-Za-z]+)/);
     if (!idMatch || !nameMatch || !balanceMatch || !bankMatch || !kindMatch) {
@@ -493,7 +493,7 @@ const detectAuthorizationDuplicates = (existingRows, allFetchedRows) => {
     const authLabel = (authRow.label || "").toLowerCase().trim();
     // Extract significant words (≥3 chars) from auth label
     const authWords = authLabel
-      .split(/[\s\-_\/.,;:!?'"()]+/)
+      .split(/[\s\-_/.,;:!?'"()]+/)
       .filter((w) => w.length >= 3)
       .filter(
         (w) =>
@@ -1114,7 +1114,7 @@ app.get("/api/database/tricount/data", (req, res) => {
     if (rawExpenses.length !== expenses.length) {
       try {
         dbManager.db.prepare("DELETE FROM tricount_expenses WHERE id IN ('exp-1', 'exp-2')").run();
-      } catch (err) {}
+      } catch {}
     }
 
     let incomes = dbManager.getAllTricountIncomes(userId) || [];
@@ -1149,7 +1149,7 @@ app.get("/api/database/tricount/data", (req, res) => {
       delete configs["2026-09"];
       try {
         dbManager.db.prepare("DELETE FROM tricount_configs WHERE month = '2026-09'").run();
-      } catch (err) {}
+      } catch {}
     }
 
     res.json({ expenses, incomes, configs });
@@ -1186,7 +1186,7 @@ app.post("/api/database/tricount/sync", (req, res) => {
       delete cleanConfigs["2026-09"];
       try {
         dbManager.db.prepare("DELETE FROM tricount_configs WHERE month = '2026-09'").run();
-      } catch (err) {}
+      } catch {}
     }
 
     if (cleanConfigs && typeof cleanConfigs === "object") {

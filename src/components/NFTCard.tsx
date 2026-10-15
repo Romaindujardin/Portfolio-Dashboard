@@ -52,12 +52,12 @@ const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
       {/* Image du NFT - Petite taille */}
       <div className="flex-shrink-0">
         <img
-          src={nft.logo || "/placeholder-nft.png"}
+          src={nft.logo || "/placeholder-nft.svg"}
           alt={nft.name}
           className="w-16 h-16 object-contain rounded-md bg-[#1a1a1a] bg-[#1a1a1a]"
           onError={(e) => {
             const target = e.target as HTMLImageElement;
-            target.src = "/placeholder-nft.png";
+            target.src = "/placeholder-nft.svg";
           }}
         />
       </div>

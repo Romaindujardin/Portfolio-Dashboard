@@ -1,4 +1,3 @@
-import { Wallet } from "lucide-react";
 
 export interface WalletTypeConfig {
   id: string;

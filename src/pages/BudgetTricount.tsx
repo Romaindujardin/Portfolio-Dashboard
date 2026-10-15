@@ -1,38 +1,17 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
-  Receipt,
   Plus,
   Trash2,
   Edit2,
   Calendar,
-  Sparkles,
   Search,
-  Filter,
-  ArrowUpDown,
   CheckCircle2,
-  AlertTriangle,
-  Scale,
-  Split,
-  User,
-  Users,
   ChevronDown,
   ChevronUp,
-  TrendingUp,
   DollarSign,
-  PieChart as PieChartIcon,
-  Landmark,
   X,
-  Check,
-  Info,
-  Clock,
-  ExternalLink,
-  Wallet,
-  PiggyBank,
-  ArrowRight,
   Sliders,
-  RefreshCcw,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 import {
   TricountExpense,
   TricountIncome,
@@ -54,13 +33,11 @@ import {
   deleteIncome,
   getMonthlyConfig,
   saveMonthlyConfig,
-  applyStrategyToMonth,
   calculateMonthlyBudgetSummary,
   isPlacementPocket,
   syncTricountWithDatabase,
 } from "../utils/tricountStorage";
 import {
-  getSavingsStrategy,
   getSavingsStrategyForMonth,
   DEFAULT_SAVINGS_STRATEGY,
   getTotalMonthlyIncome,
@@ -238,23 +215,6 @@ const BudgetTricount: React.FC = () => {
       ...prev,
       [pocketId]: !prev[pocketId],
     }));
-  };
-
-  // Appliquer le modèle de la stratégie
-  const handleApplyStrategy = () => {
-    if (
-      window.confirm(
-        `Voulez-vous synchroniser le modèle de la Stratégie pour le mois de ${formatMonthLabel(
-          selectedMonth,
-        )} ? Les revenus et objectifs prévisionnels seront mis à jour.`,
-      )
-    ) {
-      applyStrategyToMonth(selectedMonth, strategy);
-      loadData();
-      showToast(
-        `Modèle de stratégie appliqué pour ${formatMonthLabel(selectedMonth)} !`,
-      );
-    }
   };
 
   // Ouvrir modale ajout opération (avec poche et nature optionnelles)
@@ -1650,18 +1610,13 @@ const BudgetTricount: React.FC = () => {
                   !!expandedPockets[comp.pocketId] ||
                   (searchTerm.trim().length > 0 && placementOps.length > 0);
 
+                const allocatedFromReal = comp.allocatedFromReal ?? 0;
                 const percentPlaced =
-                  comp.allocatedFromReal > 0
-                    ? Math.round(
-                        (comp.realSpent / comp.allocatedFromReal) * 100,
-                      )
+                  allocatedFromReal > 0
+                    ? Math.round((comp.realSpent / allocatedFromReal) * 100)
                     : comp.realSpent > 0
                       ? 100
                       : 0;
-
-                const pocketObj = strategy.pockets.find(
-                  (p) => p.id === comp.pocketId,
-                );
 
                 return (
                   <div
@@ -1744,8 +1699,8 @@ const BudgetTricount: React.FC = () => {
                     <div className="w-full bg-[#1a1a1a] bg-[#1a1a1a] h-2.5 rounded-full overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 ${
-                          comp.remainingToPlace === 0 &&
-                          comp.allocatedFromReal > 0
+                          (comp.remainingToPlace ?? 0) === 0 &&
+                          (comp.allocatedFromReal ?? 0) > 0
                             ? "bg-emerald-500"
                             : "bg-indigo-500"
                         }`}
@@ -1807,7 +1762,7 @@ const BudgetTricount: React.FC = () => {
                                   );
                                 }}
                                 className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md text-white transition hover:opacity-90 shadow-2xs"
-                                style={{ backgroundColor: p1Theme.color }}
+                                style={{ backgroundColor: p1Theme.hex }}
                               >
                                 <Plus size={11} />
                                 <span>
@@ -1867,7 +1822,7 @@ const BudgetTricount: React.FC = () => {
                                   );
                                 }}
                                 className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md text-white transition hover:opacity-90 shadow-2xs"
-                                style={{ backgroundColor: p2Theme.color }}
+                                style={{ backgroundColor: p2Theme.hex }}
                               >
                                 <Plus size={11} />
                                 <span>
@@ -1909,7 +1864,7 @@ const BudgetTricount: React.FC = () => {
                                   );
                                 }}
                                 className="flex items-center gap-1 text-xs font-semibold hover:underline"
-                                style={{ color: p1Theme.color }}
+                                style={{ color: p1Theme.hex }}
                               >
                                 <Plus size={12} />
                                 <span>+ {p1Name}</span>
@@ -1931,7 +1886,7 @@ const BudgetTricount: React.FC = () => {
                                   );
                                 }}
                                 className="flex items-center gap-1 text-xs font-semibold hover:underline"
-                                style={{ color: p2Theme.color }}
+                                style={{ color: p2Theme.hex }}
                               >
                                 <Plus size={12} />
                                 <span>+ {p2Name}</span>
@@ -1947,7 +1902,7 @@ const BudgetTricount: React.FC = () => {
                                     : comp.pocketId,
                                   undefined,
                                   "placement",
-                                  comp.remainingToPlace > 0
+                                  (comp.remainingToPlace ?? 0) > 0
                                     ? comp.remainingToPlace
                                     : undefined,
                                 );

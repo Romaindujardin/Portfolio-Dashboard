@@ -120,7 +120,7 @@ class DatabaseManager {
       db.exec(
         "ALTER TABLE bank_csv_uploads ADD COLUMN section TEXT NOT NULL DEFAULT 'bank'",
       );
-    } catch (e) {
+    } catch {
       // ignore si la colonne existe déjà
     }
 
@@ -129,7 +129,7 @@ class DatabaseManager {
       db.exec(
         "ALTER TABLE bank_csv_uploads ADD COLUMN source_label TEXT NOT NULL DEFAULT ''",
       );
-    } catch (e) {
+    } catch {
       // ignore si la colonne existe déjà
     }
     // Backfill: si source_label est vide, on prend le filename actuel
@@ -137,7 +137,7 @@ class DatabaseManager {
       db.exec(
         "UPDATE bank_csv_uploads SET source_label = filename WHERE source_label IS NULL OR source_label = ''",
       );
-    } catch (e) {
+    } catch {
       // ignore si la colonne n'existe pas (DB très ancienne)
     }
 
@@ -229,7 +229,7 @@ class DatabaseManager {
 
     try {
       db.exec("ALTER TABLE tricount_configs ADD COLUMN notes TEXT");
-    } catch (e) {
+    } catch {
       // ignore
     }
 
@@ -1143,7 +1143,7 @@ class DatabaseManager {
     if (!row) return null;
     try {
       return JSON.parse(row.strategy_json);
-    } catch (e) {
+    } catch {
       return null;
     }
   }

@@ -453,11 +453,11 @@ export function parsePeaCsvHoldings(
       name: name || isin || "Position",
       isin,
       quantity,
-      buyingPrice,
-      lastPrice,
+      buyingPrice: buyingPrice ?? undefined,
+      lastPrice: lastPrice ?? undefined,
       amount,
-      amountVariation,
-      variationPercent,
+      amountVariation: amountVariation ?? undefined,
+      variationPercent: variationPercent ?? undefined,
       lastMovementDate: parseAnyDate(
         mapping?.lastMovementDate
           ? getColumnValue(r, mapping.lastMovementDate)

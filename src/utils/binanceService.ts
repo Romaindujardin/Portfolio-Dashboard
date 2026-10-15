@@ -1,13 +1,4 @@
-import crypto from "crypto-js";
 import { WalletAsset } from "../types";
-
-const BINANCE_API_URL = "https://api.binance.com";
-
-// Génère la signature HMAC SHA256 pour Binance
-function signBinanceQuery(queryString: string, apiSecret: string): string {
-  return crypto.HmacSHA256(queryString, apiSecret).toString(crypto.enc.Hex);
-}
-
 // Récupère les prix depuis l'API Binance (pas besoin d'authentification)
 async function getCryptoPrices(
   symbols: string[]
@@ -28,7 +19,7 @@ async function getCryptoPrices(
         if (data.price) {
           prices[symbol] = parseFloat(data.price);
         }
-      } catch (error) {
+      } catch {
         console.log(`Prix non disponible pour ${symbol}`);
       }
     }

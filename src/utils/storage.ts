@@ -128,7 +128,7 @@ export const updateWalletNFTVisibility = async (
 
 export const deleteWallet = async (
   id: string,
-  userId: string = "Romain"
+  _userId: string = "Romain"
 ): Promise<void> => {
   try {
     await databaseService.deleteWallet(id);

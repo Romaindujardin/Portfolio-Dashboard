@@ -14,7 +14,6 @@ import {
   Pencil,
   Loader2,
   RefreshCcw,
-  Receipt,
   CheckCircle2,
   ArrowRight,
   Split,
@@ -494,9 +493,9 @@ const Banking: React.FC = () => {
     }
 
     const auto = computeAutoSplit(detectedPocketId, detectedSubPocketId);
-    let detectedSplit: TricountSplitMethod = auto.splitMethod;
-    let detectedPayer: TricountPayer = auto.payer;
-    let detectedBeneficiary: TricountBeneficiary =
+    const detectedSplit: TricountSplitMethod = auto.splitMethod;
+    const detectedPayer: TricountPayer = auto.payer;
+    const detectedBeneficiary: TricountBeneficiary =
       currentUser.toLowerCase() === p2Name.toLowerCase() && !isSoloMode ? "person2" : "person1";
 
     const foundPocket = savingsStrategy?.pockets.find((p) => p.id === detectedPocketId);

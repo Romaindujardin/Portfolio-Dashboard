@@ -6,19 +6,13 @@ import {
   Check,
   X,
   TrendingUp,
-  Target,
-  DollarSign,
-  AlertTriangle,
   CheckCircle2,
   Calendar,
-  Sparkles,
   Info,
   ShieldCheck,
   Building,
   Heart,
-  Briefcase,
   Coffee,
-  Percent,
   Users,
   User,
   ChevronDown,
@@ -27,11 +21,11 @@ import {
   Split,
   Layers,
   Folder,
-  FolderOpen,
   Sliders,
   RotateCcw,
   Save,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import {
   PieChart as RePieChart,
   Pie,
@@ -65,10 +59,8 @@ import {
   getSourceStrategyMonthFor,
   copySavingsStrategyFromMonth,
   getAllConfiguredStrategyMonths,
-  getTotalMonthlyIncome,
   getPocketMonthlyAmount,
   getPocketPercent,
-  getSubItemsTotal,
   calculateHouseholdSummary,
   calculateSavingsProjection,
   DEFAULT_SAVINGS_STRATEGY,
@@ -103,7 +95,7 @@ const CATEGORY_META: Record<
   PocketCategory,
   {
     label: string;
-    icon: React.ComponentType<{ className?: string; size?: number }>;
+    icon: LucideIcon;
     desc: string;
   }
 > = {
@@ -481,7 +473,6 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
   }, [strategy, selectedHorizon]);
 
   // Quick preset horizons
-  const HORIZONS = [1, 3, 5, 10, 15, 20, 25];
 
   // Handle Incomes
   const handleSaveIncome = (e: React.FormEvent) => {
@@ -1203,6 +1194,8 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
         ...DEFAULT_SAVINGS_STRATEGY,
         household: {
           ...DEFAULT_SAVINGS_STRATEGY.household,
+          splitMode:
+            DEFAULT_SAVINGS_STRATEGY.household?.splitMode ?? "proportional",
           enabled: availableUsers.length >= 2,
           person1: {
             id: "person1",
@@ -1227,25 +1220,6 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
       pocketSubItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0),
     [pocketSubItems],
   );
-
-  const dossierSubTotalP1 = useMemo(
-    () =>
-      pocketSubItems
-        .filter((s) => s.personId === "person1")
-        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0),
-    [pocketSubItems],
-  );
-
-  const dossierSubTotalP2 = useMemo(
-    () =>
-      pocketSubItems
-        .filter((s) => s.personId === "person2")
-        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0),
-    [pocketSubItems],
-  );
-
-  const hasDossierSubItems =
-    pocketOwnership === "dossier" && pocketSubItems.length > 0;
 
   return (
     <div className={`space-y-8 ${isModal ? "p-4 sm:p-6" : "pb-12"}`}>
@@ -3388,7 +3362,6 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                   pocketBreakdown?.monthlyAmount ??
                   getPocketMonthlyAmount(p, totalMonthlyIncome);
                 const percentVal = getPocketPercent(p, totalMonthlyIncome);
-                const CatIcon = CATEGORY_META[p.category]?.icon || Target;
                 const catLabel = CATEGORY_META[p.category]?.label || p.category;
                 const ownership = p.ownership || "shared";
                 const isDossierPocket =
