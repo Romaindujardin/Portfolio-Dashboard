@@ -14,6 +14,7 @@ import {
   EyeOff,
   Receipt,
   Menu,
+  Wallet2,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 
@@ -135,10 +136,10 @@ const Sidebar: React.FC = () => {
     <>
       {/* Logo */}
       <div className="px-5 py-6 flex items-center gap-2.5">
-        <svg className="w-6 h-6 flex-shrink-0" viewBox="0 0 24 24" fill="none">
-          <path d="M7 19L11 5" stroke="#c8a55e" strokeWidth="2.8" strokeLinecap="round" />
-          <path d="M13 19L17 5" stroke="#c8a55e" strokeWidth="2.8" strokeLinecap="round" />
-        </svg>
+        <Wallet2
+          className="w-6 h-6 flex-shrink-0 text-[#c8a55e]"
+          strokeWidth={2.2}
+        />
         <span className="text-xl font-bold tracking-tight text-[#f5f5f5]">
           Portfolio
         </span>
