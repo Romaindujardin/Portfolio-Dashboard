@@ -140,7 +140,7 @@ const Sidebar: React.FC = () => {
           <path d="M13 19L17 5" stroke="#c8a55e" strokeWidth="2.8" strokeLinecap="round" />
         </svg>
         <span className="text-xl font-bold tracking-tight text-[#f5f5f5]">
-          finary
+          Portfolio
         </span>
       </div>
 

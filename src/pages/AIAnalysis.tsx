@@ -14,7 +14,6 @@ import {
   PiggyBank,
   RotateCcw,
   Send,
-  ShieldCheck,
   Sparkles,
   X,
 } from "lucide-react";
@@ -592,7 +591,7 @@ const AIAnalysis: React.FC = () => {
       )}
 
       {/* Conversation */}
-      {messages.length > 0 ? (
+      {messages.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="section-title">Conversation</h2>
@@ -650,29 +649,6 @@ const AIAnalysis: React.FC = () => {
             )}
             <div ref={messagesEndRef} />
           </div>
-        </div>
-      ) : (
-        <div className="card">
-          <h2 className="section-title mb-3 flex items-center gap-2">
-            <ShieldCheck size={20} className="text-[#c8a55e]" />
-            Comment ça marche ?
-          </h2>
-          <ul className="space-y-2 text-sm text-[#8a8a8a]">
-            <li>
-              1. Cochez les données à joindre : comptes et lignes (PEA, PEE,
-              assurance vie...), portefeuille crypto, stratégie d'épargne et
-              poches réelles du mois.
-            </li>
-            <li>
-              2. Posez votre question en langage naturel : « comment préparer un
-              achat immobilier dans 10 ans ? », « comment réduire mes positions
-              européennes ? »...
-            </li>
-            <li>
-              3. Échangez avec le conseiller : vous pouvez poser des questions
-              de suivi, il garde le contexte de votre patrimoine.
-            </li>
-          </ul>
         </div>
       )}
 
