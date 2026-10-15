@@ -106,6 +106,9 @@ const extractCandidateText = (data: unknown): string => {
   const parts = content?.parts;
   if (!Array.isArray(parts)) return "";
   return parts
+    // Les éventuels segments de "réflexion interne" (thought) ne font pas
+    // partie de la réponse visible.
+    .filter((p) => !(p as { thought?: boolean } | null)?.thought)
     .map((p) => (p as { text?: string } | null)?.text || "")
     .join("")
     .trim();
@@ -139,7 +142,9 @@ export const askGeminiAdvisor = async ({
     contents,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 4096,
+      // 8192 = maximum sûr commun aux trois modèles de la cascade
+      // (gemini-2.0-flash plafonne à 8192 tokens de sortie).
+      maxOutputTokens: 8192,
     },
   };
 
@@ -171,12 +176,13 @@ export const askGeminiAdvisor = async ({
     }
 
     const data: unknown = await response.json();
+    const finishReason = (
+      (data as { candidates?: Array<{ finishReason?: string }> } | null)
+        ?.candidates?.[0]?.finishReason || ""
+    ).toUpperCase();
     const text = extractCandidateText(data);
+
     if (!text) {
-      const finishReason = (
-        (data as { candidates?: Array<{ finishReason?: string }> } | null)
-          ?.candidates?.[0]?.finishReason || ""
-      ).toUpperCase();
       const blockReason = (
         data as { promptFeedback?: { blockReason?: string } } | null
       )?.promptFeedback?.blockReason;
@@ -188,6 +194,10 @@ export const askGeminiAdvisor = async ({
       throw new Error(
         "Gemini n'a renvoyé aucune réponse exploitable. Réessayez dans un instant.",
       );
+    }
+
+    if (finishReason === "MAX_TOKENS") {
+      return `${text}\n\n---\n⚠️ Réponse tronquée : la limite de longueur du modèle a été atteinte. Répondez « continue » pour obtenir la suite.`;
     }
 
     return text;

@@ -392,6 +392,7 @@ describe("geminiAI — conseiller contextualisé", () => {
     const body = JSON.parse(String(calls[0].init?.body)) as {
       systemInstruction: { parts: Array<{ text: string }> };
       contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+      generationConfig: { maxOutputTokens: number };
     };
     expect(body.systemInstruction.parts[0].text).toContain(
       "PEA Test — 7 247,60 €",
@@ -403,6 +404,44 @@ describe("geminiAI — conseiller contextualisé", () => {
     expect(body.contents[2].parts[0].text).toBe(
       "Et pour un achat immobilier ?",
     );
+    expect(body.generationConfig.maxOutputTokens).toBeGreaterThanOrEqual(8192);
+  });
+
+  it("signale une réponse tronquée et ignore la réflexion interne", async () => {
+    seedUser();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                finishReason: "MAX_TOKENS",
+                content: {
+                  parts: [
+                    { text: "Début de la réponse détaillée" },
+                    { text: " (réflexion interne à ignorer)", thought: true },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const answer = await askGeminiAdvisor({
+      username: USER,
+      contextText: "contexte",
+      history: [],
+      question: "Question très large",
+    });
+
+    expect(answer).toContain("Début de la réponse détaillée");
+    expect(answer).not.toContain("réflexion interne");
+    expect(answer).toContain("Réponse tronquée");
+    expect(answer).toContain("« continue »");
   });
 
   it("remonte une erreur HTTP proprement après la cascade de modèles", async () => {
