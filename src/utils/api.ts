@@ -1,4 +1,4 @@
-import { MarketData, NewsItem } from "../types";
+import { MarketData } from "../types";
 import { searchCryptos, getCryptoBySymbol, CryptoData } from "./cryptoDatabase";
 import { searchStocks, getStockBySymbol, getStockPrice } from "./stockDatabase";
 
@@ -160,90 +160,7 @@ const fetchStockMarketData = async (
   };
 };
 
-export const fetchFinancialNews = async (
-  category: string
-): Promise<NewsItem[]> => {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 1000));
 
-  // Mock news data
-  const mockNews: NewsItem[] = [
-    {
-      id: "1",
-      title: "Stock Market Reaches New Highs Amid Economic Recovery",
-      description:
-        "Major indices continue to climb as investors show confidence in the economic outlook. The S&P 500 and Dow Jones both posted significant gains.",
-      url: "https://example.com/news/1",
-      source: "Financial Times",
-      publishedAt: new Date().toISOString(),
-      urlToImage:
-        "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=400",
-    },
-    {
-      id: "2",
-      title: "Cryptocurrency Market Shows Signs of Stabilization",
-      description:
-        "Bitcoin and Ethereum prices stabilize after recent volatility, showing renewed investor interest in digital assets.",
-      url: "https://example.com/news/2",
-      source: "CoinDesk",
-      publishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      urlToImage:
-        "https://images.unsplash.com/photo-1621504450181-5d356f61d307?w=400",
-    },
-    {
-      id: "3",
-      title: "Tech Giants Report Strong Quarterly Earnings",
-      description:
-        "Leading technology companies exceed expectations with robust revenue growth driven by cloud computing and AI services.",
-      url: "https://example.com/news/3",
-      source: "TechCrunch",
-      publishedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-      urlToImage:
-        "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400",
-    },
-    {
-      id: "4",
-      title: "Federal Reserve Maintains Interest Rates",
-      description:
-        "The central bank keeps rates steady while monitoring inflation trends and employment data.",
-      url: "https://example.com/news/4",
-      source: "Reuters",
-      publishedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-      urlToImage:
-        "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=400",
-    },
-    {
-      id: "5",
-      title: "ESG Investing Continues to Gain Momentum",
-      description:
-        "Environmental, Social, and Governance factors increasingly influence investment decisions across institutional and retail investors.",
-      url: "https://example.com/news/5",
-      source: "Bloomberg",
-      publishedAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
-      urlToImage:
-        "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400",
-    },
-  ];
-
-  // Filter by category (basic filtering for demo)
-  if (category === "crypto") {
-    return mockNews.filter(
-      (item) =>
-        item.title.toLowerCase().includes("crypto") ||
-        item.title.toLowerCase().includes("bitcoin")
-    );
-  }
-
-  if (category === "technology") {
-    return mockNews.filter(
-      (item) =>
-        item.title.toLowerCase().includes("tech") ||
-        item.source === "TechCrunch"
-    );
-  }
-
-  return mockNews;
-};
 
 export interface SymbolSuggestion {
   symbol: string;

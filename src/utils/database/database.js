@@ -175,8 +175,80 @@ class DatabaseManager {
       // ignore si la colonne n'existe pas (DB très ancienne)
     }
 
-    // Index pour améliorer les performances
+    // ===== TRICOUNT / BUDGET FAMILLE =====
     db.exec(`
+      CREATE TABLE IF NOT EXISTS tricount_expenses (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL DEFAULT 'Romain',
+        month TEXT NOT NULL,
+        date TEXT NOT NULL,
+        label TEXT NOT NULL,
+        amount REAL NOT NULL,
+        payer_person_id TEXT NOT NULL DEFAULT 'person1',
+        pocket_id TEXT NOT NULL DEFAULT 'unallocated',
+        pocket_name TEXT,
+        sub_pocket_id TEXT,
+        sub_pocket_name TEXT,
+        split_method TEXT NOT NULL DEFAULT '50_50',
+        nature TEXT NOT NULL DEFAULT 'expense',
+        source TEXT DEFAULT 'manual',
+        bank_account TEXT,
+        bank_reference TEXT,
+        bank_row_id TEXT,
+        notes TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS tricount_incomes (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL DEFAULT 'Romain',
+        month TEXT NOT NULL,
+        date TEXT NOT NULL,
+        label TEXT NOT NULL,
+        amount REAL NOT NULL,
+        beneficiary_person_id TEXT NOT NULL DEFAULT 'person1',
+        source TEXT DEFAULT 'manual',
+        bank_account TEXT,
+        bank_reference TEXT,
+        bank_row_id TEXT,
+        notes TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS tricount_configs (
+        id TEXT PRIMARY KEY,
+        month TEXT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT 'Romain',
+        p1_income REAL NOT NULL DEFAULT 0,
+        p2_income REAL NOT NULL DEFAULT 0,
+        is_strategy_applied INTEGER NOT NULL DEFAULT 0,
+        applied_strategy_date TEXT,
+        target_savings_rate REAL,
+        notes TEXT
+      );
+
+      -- ===== PLAN D'ÉPARGNE & STRATÉGIE =====
+      CREATE TABLE IF NOT EXISTS savings_strategies (
+        user_id TEXT PRIMARY KEY,
+        strategy_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS savings_monthly_strategies (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        month TEXT NOT NULL,
+        strategy_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      -- ===== PARAMÈTRES UTILISATEUR =====
+      CREATE TABLE IF NOT EXISTS user_settings (
+        user_id TEXT PRIMARY KEY,
+        settings_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_investments_user_id ON investments (user_id);
       CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments (symbol);
       CREATE INDEX IF NOT EXISTS idx_watchlist_user_id ON watchlist (user_id);
@@ -186,7 +258,18 @@ class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_wallet_assets_symbol ON wallet_assets (symbol);
       CREATE INDEX IF NOT EXISTS idx_bank_csv_uploads_user_id ON bank_csv_uploads (user_id);
       CREATE INDEX IF NOT EXISTS idx_bank_csv_uploads_uploaded_at ON bank_csv_uploads (uploaded_at);
+      CREATE INDEX IF NOT EXISTS idx_tricount_expenses_user_month ON tricount_expenses (user_id, month);
+      CREATE INDEX IF NOT EXISTS idx_tricount_incomes_user_month ON tricount_incomes (user_id, month);
+      CREATE INDEX IF NOT EXISTS idx_tricount_configs_user_month ON tricount_configs (user_id, month);
+      CREATE INDEX IF NOT EXISTS idx_savings_monthly_user ON savings_monthly_strategies (user_id);
+      CREATE INDEX IF NOT EXISTS idx_savings_monthly_user_month ON savings_monthly_strategies (user_id, month);
     `);
+
+    try {
+      db.exec("ALTER TABLE tricount_configs ADD COLUMN notes TEXT");
+    } catch (e) {
+      // ignore
+    }
 
     console.log("✅ Tables de base de données initialisées");
   }
@@ -748,6 +831,554 @@ class DatabaseManager {
     return result.changes > 0;
   }
 
+  // ===== GESTION TRICOUNT / BUDGET FAMILLE =====
+
+  getAllTricountExpenses(userId = "Romain") {
+    const db = this.getDatabase();
+    const rows = db
+      .prepare(
+        "SELECT * FROM tricount_expenses WHERE user_id = ? OR user_id IS NULL ORDER BY date DESC, created_at DESC",
+      )
+      .all(userId || "Romain");
+    return rows.map((r) => ({
+      id: r.id,
+      month: r.month,
+      date: r.date,
+      label: r.label,
+      amount: r.amount,
+      payerPersonId: r.payer_person_id,
+      pocketId: r.pocket_id,
+      pocketName: r.pocket_name,
+      subPocketId: r.sub_pocket_id,
+      subPocketName: r.sub_pocket_name,
+      splitMethod: r.split_method,
+      nature: r.nature,
+      source: r.source,
+      bankAccount: r.bank_account,
+      bankReference: r.bank_reference,
+      bankRowId: r.bank_row_id,
+      notes: r.notes,
+      createdAt: r.created_at,
+    }));
+  }
+
+  saveTricountExpense(exp, userId = "Romain") {
+    const db = this.getDatabase();
+    const stmt = db.prepare(`
+      INSERT INTO tricount_expenses (
+        id, user_id, month, date, label, amount, payer_person_id,
+        pocket_id, pocket_name, sub_pocket_id, sub_pocket_name,
+        split_method, nature, source, bank_account, bank_reference,
+        bank_row_id, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        month = excluded.month,
+        date = excluded.date,
+        label = excluded.label,
+        amount = excluded.amount,
+        payer_person_id = excluded.payer_person_id,
+        pocket_id = excluded.pocket_id,
+        pocket_name = excluded.pocket_name,
+        sub_pocket_id = excluded.sub_pocket_id,
+        sub_pocket_name = excluded.sub_pocket_name,
+        split_method = excluded.split_method,
+        nature = excluded.nature,
+        source = excluded.source,
+        bank_account = excluded.bank_account,
+        bank_reference = excluded.bank_reference,
+        bank_row_id = excluded.bank_row_id,
+        notes = excluded.notes
+    `);
+
+    stmt.run(
+      exp.id,
+      userId || "Romain",
+      exp.month,
+      exp.date,
+      exp.label,
+      exp.amount,
+      exp.payerPersonId || "person1",
+      exp.pocketId || "unallocated",
+      exp.pocketName || null,
+      exp.subPocketId || null,
+      exp.subPocketName || null,
+      exp.splitMethod || "50_50",
+      exp.nature || "expense",
+      exp.source || "manual",
+      exp.bankAccount || null,
+      exp.bankReference || null,
+      exp.bankRowId || null,
+      exp.notes || null,
+      exp.createdAt || Date.now(),
+    );
+    return exp.id;
+  }
+
+  saveTricountExpensesBatch(expenses, userId = "Romain") {
+    if (!Array.isArray(expenses) || expenses.length === 0) return 0;
+    const db = this.getDatabase();
+    const insertMany = db.transaction((items) => {
+      for (const exp of items) {
+        this.saveTricountExpense(exp, userId);
+      }
+    });
+    insertMany(expenses);
+    return expenses.length;
+  }
+
+  deleteTricountExpense(id, userId = "Romain") {
+    const db = this.getDatabase();
+    const result = db
+      .prepare(
+        "DELETE FROM tricount_expenses WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+      )
+      .run(id, userId || "Romain");
+    return result.changes > 0;
+  }
+
+  getAllTricountIncomes(userId = "Romain") {
+    const db = this.getDatabase();
+    const rows = db
+      .prepare(
+        "SELECT * FROM tricount_incomes WHERE user_id = ? OR user_id IS NULL ORDER BY date DESC, created_at DESC",
+      )
+      .all(userId || "Romain");
+    return rows.map((r) => ({
+      id: r.id,
+      month: r.month,
+      date: r.date,
+      label: r.label,
+      amount: r.amount,
+      beneficiaryPersonId: r.beneficiary_person_id,
+      source: r.source,
+      bankAccount: r.bank_account,
+      bankReference: r.bank_reference,
+      bankRowId: r.bank_row_id,
+      notes: r.notes,
+      createdAt: r.created_at,
+    }));
+  }
+
+  saveTricountIncome(inc, userId = "Romain") {
+    const db = this.getDatabase();
+    const stmt = db.prepare(`
+      INSERT INTO tricount_incomes (
+        id, user_id, month, date, label, amount, beneficiary_person_id,
+        source, bank_account, bank_reference, bank_row_id, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        month = excluded.month,
+        date = excluded.date,
+        label = excluded.label,
+        amount = excluded.amount,
+        beneficiary_person_id = excluded.beneficiary_person_id,
+        source = excluded.source,
+        bank_account = excluded.bank_account,
+        bank_reference = excluded.bank_reference,
+        bank_row_id = excluded.bank_row_id,
+        notes = excluded.notes
+    `);
+
+    stmt.run(
+      inc.id,
+      userId || "Romain",
+      inc.month,
+      inc.date,
+      inc.label,
+      inc.amount,
+      inc.beneficiaryPersonId || "person1",
+      inc.source || "manual",
+      inc.bankAccount || null,
+      inc.bankReference || null,
+      inc.bankRowId || null,
+      inc.notes || null,
+      inc.createdAt || Date.now(),
+    );
+    return inc.id;
+  }
+
+  saveTricountIncomesBatch(incomes, userId = "Romain") {
+    if (!Array.isArray(incomes) || incomes.length === 0) return 0;
+    const db = this.getDatabase();
+    const insertMany = db.transaction((items) => {
+      for (const inc of items) {
+        this.saveTricountIncome(inc, userId);
+      }
+    });
+    insertMany(incomes);
+    return incomes.length;
+  }
+
+  deleteTricountIncome(id, userId = "Romain") {
+    const db = this.getDatabase();
+    const result = db
+      .prepare(
+        "DELETE FROM tricount_incomes WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+      )
+      .run(id, userId || "Romain");
+    return result.changes > 0;
+  }
+
+  getAllTricountConfigs(userId = "Romain") {
+    const db = this.getDatabase();
+    const rows = db
+      .prepare(
+        "SELECT * FROM tricount_configs WHERE user_id = ? OR user_id IS NULL",
+      )
+      .all(userId || "Romain");
+    const map = {};
+    for (const r of rows) {
+      map[r.month] = {
+        month: r.month,
+        p1Income: r.p1_income,
+        p2Income: r.p2_income,
+        isStrategyApplied: Boolean(r.is_strategy_applied),
+        appliedStrategyDate: r.applied_strategy_date,
+        targetSavingsRate: r.target_savings_rate,
+        notes: r.notes,
+      };
+    }
+    return map;
+  }
+
+  saveTricountConfig(conf, userId = "Romain") {
+    const db = this.getDatabase();
+    const id = `${userId || "Romain"}_${conf.month}`;
+    const stmt = db.prepare(`
+      INSERT INTO tricount_configs (
+        id, month, user_id, p1_income, p2_income, is_strategy_applied,
+        applied_strategy_date, target_savings_rate, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        p1_income = excluded.p1_income,
+        p2_income = excluded.p2_income,
+        is_strategy_applied = excluded.is_strategy_applied,
+        applied_strategy_date = excluded.applied_strategy_date,
+        target_savings_rate = excluded.target_savings_rate,
+        notes = excluded.notes
+    `);
+
+    stmt.run(
+      id,
+      conf.month,
+      userId || "Romain",
+      conf.p1Income || 0,
+      conf.p2Income || 0,
+      conf.isStrategyApplied ? 1 : 0,
+      conf.appliedStrategyDate || null,
+      conf.targetSavingsRate || null,
+      conf.notes || null,
+    );
+    return id;
+  }
+
+  restoreTricountFromBankCsv(userId = "Romain", targetMonths = ["2026-09", "2026-10"]) {
+    const db = this.getDatabase();
+    // Trouver le dernier upload BoursoBank
+    const upload = db
+      .prepare(
+        "SELECT id, filename, content FROM bank_csv_uploads WHERE user_id = ? AND (filename LIKE '%bourso-bank%' OR section = 'bank') ORDER BY uploaded_at DESC LIMIT 1",
+      )
+      .get(userId || "Romain");
+
+    if (!upload) {
+      return { expenses: 0, incomes: 0, message: "Aucun fichier bancaire trouvé" };
+    }
+
+    const lines = upload.content
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/)
+      .filter((l) => l.trim().length > 0);
+
+    if (lines.length <= 1) {
+      return { expenses: 0, incomes: 0, message: "Fichier bancaire vide" };
+    }
+
+    const parseLine = (line, delimiter = ";") => {
+      const out = [];
+      let cur = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            cur += '"';
+            i++;
+            continue;
+          }
+          inQuotes = !inQuotes;
+          continue;
+        }
+        if (!inQuotes && ch === delimiter) {
+          out.push(cur);
+          cur = "";
+          continue;
+        }
+        cur += ch;
+      }
+      out.push(cur);
+      return out.map((v) => v.trim());
+    };
+
+    const headers = parseLine(lines[0], ";");
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = parseLine(lines[i], ";");
+      const r = {};
+      for (let c = 0; c < headers.length; c++) {
+        r[headers[c]] = values[c] || "";
+      }
+      rows.push(r);
+    }
+
+    const filtered = rows.filter((r) =>
+      targetMonths.some((m) => (r.dateOp || "").startsWith(m)),
+    );
+
+    const expenses = [];
+    const incomes = [];
+
+    filtered.forEach((r, idx) => {
+      const rawAmt = parseFloat((r.amount || "0").replace(",", "."));
+      const month = (r.dateOp || "").slice(0, 7);
+      const date = r.dateOp || `${month}-01`;
+      const cleanLabel = (r.label || "")
+        .replace(/&#039;/g, "'")
+        .replace(/&amp;/g, "&");
+
+      if (rawAmt > 0) {
+        incomes.push({
+          id: `inc-bank-${r.reference || idx}`,
+          month,
+          date,
+          label: cleanLabel,
+          amount: Math.round(rawAmt * 100) / 100,
+          beneficiaryPersonId: cleanLabel.toLowerCase().includes("caf")
+            ? "shared"
+            : "person1",
+          source: "bank_import",
+          bankAccount: r.accountLabel || "BoursoBank",
+          bankReference: r.reference || undefined,
+          bankRowId: `${upload.id}:${idx}`,
+          createdAt: Date.now() + idx,
+        });
+      } else if (rawAmt < 0) {
+        const absAmt = Math.abs(rawAmt);
+        let pocketId = "unallocated";
+        let pocketName = "Autre / Non classé";
+        let subPocketId = undefined;
+        let subPocketName = undefined;
+
+        const cat = (r.category || "").toLowerCase();
+        const lbl = cleanLabel.toLowerCase();
+
+        if (
+          cat.includes("alimentation") ||
+          cat.includes("restaurant") ||
+          lbl.includes("deliveroo") ||
+          lbl.includes("intermarché") ||
+          lbl.includes("boulangerie") ||
+          lbl.includes("too good to go") ||
+          lbl.includes("kfc") ||
+          lbl.includes("chicken street")
+        ) {
+          pocketId = "poc-2";
+          pocketName = "Alimentation & quotidien";
+          subPocketId = "sub-5";
+          subPocketName = "Courses supermarché";
+        } else if (
+          cat.includes("carburant") ||
+          cat.includes("péages") ||
+          cat.includes("transport") ||
+          lbl.includes("totalenergies") ||
+          lbl.includes("cofiroute") ||
+          lbl.includes("sanef")
+        ) {
+          pocketId = "poc-2";
+          pocketName = "Alimentation & quotidien";
+          subPocketId = "sub-6";
+          subPocketName = "Transports en commun";
+        } else if (
+          cat.includes("médecin") ||
+          cat.includes("santé") ||
+          cat.includes("pharmacie") ||
+          lbl.includes("docteur") ||
+          lbl.includes("pharmacie") ||
+          lbl.includes("dr boudart")
+        ) {
+          pocketId = "poc-2";
+          pocketName = "Alimentation & quotidien";
+          subPocketId = "sub-7";
+          subPocketName = "Santé & pharmacie";
+        } else if (
+          cat.includes("loyer") ||
+          cat.includes("prêt") ||
+          cat.includes("energie") ||
+          lbl.includes("edf") ||
+          lbl.includes("la banque postale") ||
+          lbl.includes("sci ctm")
+        ) {
+          pocketId = "poc-1";
+          pocketName = "Loyer & charges fixes";
+          if (lbl.includes("edf")) {
+            subPocketId = "sub-2";
+            subPocketName = "Électricité & Gaz";
+          } else {
+            subPocketId = "sub-1";
+            subPocketName = "Loyer";
+          }
+        }
+
+        expenses.push({
+          id: `exp-bank-${r.reference || idx}`,
+          month,
+          date,
+          label: cleanLabel,
+          amount: Math.round(absAmt * 100) / 100,
+          payerPersonId: "person1",
+          pocketId,
+          pocketName,
+          subPocketId,
+          subPocketName,
+          splitMethod: "50_50",
+          nature: "expense",
+          source: "bank_import",
+          bankAccount: r.accountLabel || "BoursoBank",
+          bankReference: r.reference || undefined,
+          bankRowId: `${upload.id}:${idx}`,
+          createdAt: Date.now() + idx,
+        });
+      }
+    });
+
+    this.saveTricountExpensesBatch(expenses, userId);
+    this.saveTricountIncomesBatch(incomes, userId);
+
+    return {
+      expenses: expenses.length,
+      incomes: incomes.length,
+      message: `${expenses.length} dépenses et ${incomes.length} revenus restaurés pour ${targetMonths.join(", ")}`,
+    };
+  }
+
+  // ===== GESTION DE LA STRATÉGIE D'ÉPARGNE =====
+  getSavingsStrategy(userId = "Romain") {
+    const db = this.getDatabase();
+    const row = db
+      .prepare("SELECT strategy_json FROM savings_strategies WHERE user_id = ?")
+      .get(userId || "Romain");
+    if (!row) return null;
+    try {
+      return JSON.parse(row.strategy_json);
+    } catch (e) {
+      console.error("Erreur parsing strategy_json:", e);
+      return null;
+    }
+  }
+
+  saveSavingsStrategy(userId = "Romain", strategy) {
+    if (!strategy) return false;
+    const db = this.getDatabase();
+    const jsonStr = typeof strategy === "string" ? strategy : JSON.stringify(strategy);
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO savings_strategies (user_id, strategy_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        strategy_json = excluded.strategy_json,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(userId || "Romain", jsonStr, now);
+    return true;
+  }
+
+  getAllSavingsMonthlyStrategies(userId = "Romain") {
+    const db = this.getDatabase();
+    const rows = db
+      .prepare("SELECT month, strategy_json FROM savings_monthly_strategies WHERE user_id = ?")
+      .all(userId || "Romain");
+    const result = {};
+    for (const r of rows) {
+      try {
+        result[r.month] = JSON.parse(r.strategy_json);
+      } catch (e) {
+        console.error("Erreur parsing monthly strategy_json:", e);
+      }
+    }
+    return result;
+  }
+
+  getSavingsStrategyForMonth(userId = "Romain", month) {
+    if (!month) return null;
+    const db = this.getDatabase();
+    const id = `${userId || "Romain"}_${month}`;
+    const row = db
+      .prepare("SELECT strategy_json FROM savings_monthly_strategies WHERE id = ?")
+      .get(id);
+    if (!row) return null;
+    try {
+      return JSON.parse(row.strategy_json);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  saveSavingsStrategyForMonth(userId = "Romain", month, strategy) {
+    if (!strategy || !month) return false;
+    const db = this.getDatabase();
+    const id = `${userId || "Romain"}_${month}`;
+    const jsonStr = typeof strategy === "string" ? strategy : JSON.stringify(strategy);
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO savings_monthly_strategies (id, user_id, month, strategy_json, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        strategy_json = excluded.strategy_json,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(id, userId || "Romain", month, jsonStr, now);
+    return true;
+  }
+
+  saveAllSavingsMonthlyStrategies(userId = "Romain", map) {
+    if (!map || typeof map !== "object") return false;
+    for (const month of Object.keys(map)) {
+      this.saveSavingsStrategyForMonth(userId, month, map[month]);
+    }
+    return true;
+  }
+
+  // ===== GESTION DES PARAMÈTRES UTILISATEUR =====
+  getUserSettings(userId = "Romain") {
+    const db = this.getDatabase();
+    const row = db
+      .prepare("SELECT settings_json FROM user_settings WHERE user_id = ?")
+      .get(userId || "Romain");
+    if (!row) return null;
+    try {
+      return JSON.parse(row.settings_json);
+    } catch (e) {
+      console.error("Erreur parsing settings_json:", e);
+      return null;
+    }
+  }
+
+  saveUserSettings(userId = "Romain", settings) {
+    if (!settings) return false;
+    const db = this.getDatabase();
+    const jsonStr = typeof settings === "string" ? settings : JSON.stringify(settings);
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      INSERT INTO user_settings (user_id, settings_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        settings_json = excluded.settings_json,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(userId || "Romain", jsonStr, now);
+    return true;
+  }
+
   // Statistiques de la base de données
   getDatabaseStats() {
     const db = this.getDatabase();
@@ -767,6 +1398,12 @@ class DatabaseManager {
     const bankCsvCount = db
       .prepare("SELECT COUNT(*) as count FROM bank_csv_uploads")
       .get();
+    const tricountExpenseCount = db
+      .prepare("SELECT COUNT(*) as count FROM tricount_expenses")
+      .get();
+    const tricountIncomeCount = db
+      .prepare("SELECT COUNT(*) as count FROM tricount_incomes")
+      .get();
 
     return {
       investments: investmentCount.count,
@@ -774,6 +1411,8 @@ class DatabaseManager {
       wallets: walletCount.count,
       assets: assetCount.count,
       bankCsvUploads: bankCsvCount.count,
+      tricountExpenses: tricountExpenseCount.count,
+      tricountIncomes: tricountIncomeCount.count,
       databasePath: this.dbPath,
       lastUpdated: new Date().toISOString(),
     };

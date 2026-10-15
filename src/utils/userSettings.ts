@@ -23,6 +23,7 @@ export interface UserSettings {
   theme: "light" | "dark" | "auto";
   currency: string;
   language: string;
+  accentColor?: string;
 }
 
 const defaultSettings: UserSettings = {
@@ -37,6 +38,7 @@ const defaultSettings: UserSettings = {
     { id: "bank", label: "Compte bancaire", kind: "bank" },
     { id: "pea", label: "PEA", kind: "investment" },
     { id: "pee", label: "PEE", kind: "investment" },
+    { id: "assurance-vie", label: "Assurance vie", kind: "investment" },
   ],
   csvColumnMappings: {},
   boursoClientId: "",
@@ -44,6 +46,7 @@ const defaultSettings: UserSettings = {
   theme: "auto",
   currency: "USD",
   language: "fr",
+  accentColor: "blue",
 };
 
 export const getUserSettings = (username: string): UserSettings => {
@@ -52,11 +55,29 @@ export const getUserSettings = (username: string): UserSettings => {
     if (stored) {
       const parsedSettings = JSON.parse(stored);
       const merged = { ...defaultSettings, ...parsedSettings } as UserSettings;
+      if (!merged.accentColor) {
+        merged.accentColor = username.toLowerCase().includes("sophie") ? "emerald" : "blue";
+      }
       if (
         !Array.isArray(merged.accountSections) ||
         !merged.accountSections.length
       ) {
         merged.accountSections = [...defaultSettings.accountSections];
+      } else {
+        // Nettoyer automatiquement l'éventuel "per" injecté précédemment par erreur
+        if (merged.accountSections.some((s) => s.id === "per")) {
+          merged.accountSections = merged.accountSections.filter(
+            (s) => s.id !== "per",
+          );
+          try {
+            localStorage.setItem(
+              `user_settings_${username}`,
+              JSON.stringify(merged),
+            );
+          } catch (e) {
+            console.error("Erreur lors de la mise à jour des paramètres:", e);
+          }
+        }
       }
       if (!merged.csvColumnMappings) {
         merged.csvColumnMappings = {};
@@ -66,7 +87,10 @@ export const getUserSettings = (username: string): UserSettings => {
   } catch (error) {
     console.error("Erreur lors du chargement des paramètres:", error);
   }
-  return defaultSettings;
+  return {
+    ...defaultSettings,
+    accentColor: username.toLowerCase().includes("sophie") ? "emerald" : "blue",
+  };
 };
 
 export const saveUserSettings = (
@@ -80,10 +104,82 @@ export const saveUserSettings = (
         new CustomEvent("userSettingsUpdated", { detail: { username } }),
       );
     }
+    // Sauvegarder sur la base de données et disque
+    pushUserSettingsToDatabase(username, settings);
   } catch (error) {
     console.error("Erreur lors de la sauvegarde des paramètres:", error);
   }
 };
+
+const SETTINGS_API_BASE = "http://localhost:3001/api/database/user-settings";
+
+export const fetchUserSettingsFromDatabase = async (
+  username: string = "Romain"
+): Promise<UserSettings | null> => {
+  try {
+    const res = await fetch(
+      `${SETTINGS_API_BASE}?user_id=${encodeURIComponent(username)}`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.settings || null;
+  } catch (e) {
+    console.warn("Impossible de récupérer les paramètres utilisateur depuis le serveur:", e);
+    return null;
+  }
+};
+
+export const pushUserSettingsToDatabase = async (
+  username: string = "Romain",
+  settings?: UserSettings
+): Promise<boolean> => {
+  try {
+    const stg = settings || getUserSettings(username);
+    const res = await fetch(SETTINGS_API_BASE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: stg, userId: username }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn("Impossible de pousser les paramètres utilisateur vers le serveur:", e);
+    return false;
+  }
+};
+
+export const syncUserSettingsWithDatabase = async (
+  username: string = "Romain"
+): Promise<void> => {
+  try {
+    const serverSettings = await fetchUserSettingsFromDatabase(username);
+    const localRaw =
+      typeof window !== "undefined"
+        ? localStorage.getItem(`user_settings_${username}`)
+        : null;
+
+    if (localRaw) {
+      pushUserSettingsToDatabase(username);
+    } else if (serverSettings) {
+      localStorage.setItem(
+        `user_settings_${username}`,
+        JSON.stringify(serverSettings)
+      );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("userSettingsUpdated", { detail: { username } })
+        );
+      }
+    }
+  } catch (e) {
+    console.error("Erreur syncUserSettingsWithDatabase:", e);
+  }
+};
+
+if (typeof window !== "undefined") {
+  setTimeout(() => {
+    syncUserSettingsWithDatabase("Romain");
+  }, 120);
+}
 
 export const getSetting = (
   username: string,

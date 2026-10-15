@@ -312,13 +312,13 @@ const PriceChart: React.FC<PriceChartProps> = ({
     return (
       <div className="price-chart">
         <div className="mb-2">
-          <h4 className="text-sm font-medium text-gray-500">
+          <h4 className="text-sm font-medium text-[#555555]">
             Évolution sur 30 jours - {name}
           </h4>
         </div>
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-          <span className="ml-2 text-gray-600">Chargement des données...</span>
+          <span className="ml-2 text-[#8a8a8a]">Chargement des données...</span>
         </div>
       </div>
     );
@@ -328,7 +328,7 @@ const PriceChart: React.FC<PriceChartProps> = ({
     return (
       <div className="price-chart">
         <div className="mb-2">
-          <h4 className="text-sm font-medium text-gray-500">
+          <h4 className="text-sm font-medium text-[#555555]">
             Évolution sur 30 jours - {name}
           </h4>
         </div>
@@ -346,11 +346,11 @@ const PriceChart: React.FC<PriceChartProps> = ({
   return (
     <div className="price-chart">
       <div className="mb-2">
-        <h4 className="text-sm font-medium text-gray-500">
+        <h4 className="text-sm font-medium text-[#555555]">
           Évolution sur 30 jours - {name}
           {isCrypto ? "🪙" : "📈"}
           {isCrypto && (
-            <span className="text-xs text-gray-500 ml-1">
+            <span className="text-xs text-[#555555] ml-1">
               (données simulées basées sur 24h high/low)
             </span>
           )}

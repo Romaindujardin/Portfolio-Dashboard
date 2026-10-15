@@ -84,12 +84,12 @@ const WalletCard: React.FC<WalletCardProps> = ({
       avalanche: "bg-red-100 text-red-800",
     };
     return (
-      colors[blockchain as keyof typeof colors] || "bg-gray-100 text-gray-800"
+      colors[blockchain as keyof typeof colors] || "bg-[#1a1a1a] text-[#f5f5f5]"
     );
   };
 
   return (
-    <div className="card hover:shadow-lg transition-shadow duration-200">
+    <div className="card hover: transition-shadow duration-200">
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-start space-x-3">
@@ -103,7 +103,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
             </span>
           </div>
           <div className="flex-1">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
+            <h3 className="text-lg font-semibold text-[#f5f5f5] mb-1">
               {wallet.name}
             </h3>
             <div className="flex items-center space-x-2 mb-2">
@@ -121,37 +121,37 @@ const WalletCard: React.FC<WalletCardProps> = ({
                   ))}
                 {(!Array.isArray(wallet.blockchains) ||
                   wallet.blockchains.length === 0) && (
-                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-[#1a1a1a] text-[#f5f5f5] bg-[#161616] ">
                     MIGRATION REQUISE
                   </span>
                 )}
               </div>
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-xs text-[#555555]">
                 {new Date(wallet.lastUpdated).toLocaleDateString()}
               </span>
             </div>
             {/* Ne pas afficher l'adresse pour les wallets Binance */}
             {wallet.walletType !== "binance" && (
               <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-600 font-mono">
+                <span className="text-sm text-[#8a8a8a] font-mono">
                   {formatAddress(wallet.address)}
                 </span>
                 <button
                   onClick={handleCopyAddress}
-                  className="p-1 hover:bg-gray-100 rounded transition-colors"
+                  className="p-1 hover:bg-[#1a1a1a] rounded transition-colors"
                   title="Copier l'adresse"
                 >
                   <Copy
                     size={14}
-                    className={copySuccess ? "text-green-500" : "text-gray-400"}
+                    className={copySuccess ? "text-green-500" : "text-[#555555]"}
                   />
                 </button>
                 <button
                   onClick={handleExplorerLink}
-                  className="p-1 hover:bg-gray-100 rounded transition-colors"
+                  className="p-1 hover:bg-[#1a1a1a] rounded transition-colors"
                   title="Voir sur l'explorateur"
                 >
-                  <ExternalLink size={14} className="text-gray-400" />
+                  <ExternalLink size={14} className="text-[#555555]" />
                 </button>
               </div>
             )}
@@ -159,7 +159,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
             {/* Message informatif pour les wallets Binance */}
             {wallet.walletType === "binance" && (
               <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">
+                <span className="text-sm text-[#555555]">
                   Compte connecté via API Binance
                 </span>
               </div>
@@ -172,24 +172,24 @@ const WalletCard: React.FC<WalletCardProps> = ({
           <button
             onClick={() => onRefresh(wallet)}
             disabled={isLoading}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-[#1a1a1a] rounded-lg transition-colors"
             title="Actualiser"
           >
             <RefreshCw
               size={16}
-              className={`text-gray-400 ${isLoading ? "animate-spin" : ""}`}
+              className={`text-[#555555] ${isLoading ? "animate-spin" : ""}`}
             />
           </button>
           <button
             onClick={() => onUpdate(wallet)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-[#1a1a1a] rounded-lg transition-colors"
             title="Modifier"
           >
-            <Edit size={16} className="text-gray-400" />
+            <Edit size={16} className="text-[#555555]" />
           </button>
           <button
             onClick={() => onDelete(wallet.id)}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 hover:bg-[#1a1a1a] rounded-lg transition-colors"
             title="Supprimer"
           >
             <Trash2 size={16} className="text-red-400" />
@@ -201,7 +201,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
       <div className="mb-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-primary-600 dark:text-white font-medium">
+            <p className="text-sm text-[#c8a55e] text-[#f5f5f5] font-medium">
               Valeur totale
             </p>
             <p className="text-2xl font-bold text-green-600 dark:text-green-400">
@@ -224,13 +224,13 @@ const WalletCard: React.FC<WalletCardProps> = ({
         onClick={() => setShowAssets(!showAssets)}
         className="w-full flex items-center justify-between p-3 rounded-lg transition-colors"
       >
-        <span className="font-medium text-gray-700 dark:text-gray-200">
+        <span className="font-medium text-[#f5f5f5]">
           Assets ({wallet.assets.filter((asset) => !asset.isHidden).length})
         </span>
         {showAssets ? (
-          <ChevronUp size={20} className="text-gray-400" />
+          <ChevronUp size={20} className="text-[#555555]" />
         ) : (
-          <ChevronDown size={20} className="text-gray-400" />
+          <ChevronDown size={20} className="text-[#555555]" />
         )}
       </button>
 
@@ -252,14 +252,14 @@ const WalletCard: React.FC<WalletCardProps> = ({
                   className="flex items-center justify-between p-3 rounded-lg"
                 >
                   <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center border border-gray-200 dark:border-gray-700">
-                      <span className="text-xs font-bold text-gray-600 dark:text-gray-200">
+                    <div className="w-8 h-8 bg-[#111111] bg-[#0a0a0a] rounded-full flex items-center justify-center border border-[rgba(255,255,255,0.06)]">
+                      <span className="text-xs font-bold text-[#8a8a8a] ">
                         {asset.symbol.slice(0, 2).toUpperCase()}
                       </span>
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center space-x-2">
-                        <p className="font-medium text-gray-900 dark:text-gray-100">
+                        <p className="font-medium text-[#f5f5f5]">
                           {asset.symbol}
                         </p>
                         <span
@@ -270,26 +270,26 @@ const WalletCard: React.FC<WalletCardProps> = ({
                           {asset.blockchain.toUpperCase()}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                      <p className="text-xs text-[#555555]">
                         {asset.name}
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    <p className="text-sm font-medium text-[#f5f5f5]">
                       {formatValue(asset.value || 0)}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                    <p className="text-xs text-[#555555]">
                       {asset.balance} {asset.symbol}
                     </p>
                     <button
                       onClick={() =>
                         onToggleAssetVisibility(wallet.id, originalIndex)
                       }
-                      className="ml-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                      className="ml-2 p-1 rounded hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.06)]"
                       title="Masquer l'asset"
                     >
-                      <EyeOff size={16} className="text-gray-400" />
+                      <EyeOff size={16} className="text-[#555555]" />
                     </button>
                   </div>
                 </div>
@@ -300,7 +300,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
             <div className="mt-2">
               <button
                 onClick={() => setShowHiddenAssets((v) => !v)}
-                className="flex items-center text-xs text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 mb-2"
+                className="flex items-center text-xs text-[#555555] hover:text-[#c8a55e] dark:hover:text-primary-400 mb-2"
               >
                 <EyeOff size={16} className="mr-1" />
                 {showHiddenAssets
@@ -331,8 +331,8 @@ const WalletCard: React.FC<WalletCardProps> = ({
                           className="flex items-center justify-between p-3 border border-red-200 rounded-lg dark:border-red-700"
                         >
                           <div className="flex items-center space-x-3">
-                            <div className="w-8 h-8 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center border border-gray-200 dark:border-gray-700">
-                              <span className="text-xs font-bold text-gray-600 dark:text-gray-200">
+                            <div className="w-8 h-8 bg-[#111111] bg-[#0a0a0a] rounded-full flex items-center justify-center border border-[rgba(255,255,255,0.06)]">
+                              <span className="text-xs font-bold text-[#8a8a8a] ">
                                 {asset.symbol.slice(0, 2).toUpperCase()}
                               </span>
                             </div>
@@ -352,7 +352,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
                                   MASQUÉ
                                 </span>
                               </div>
-                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                              <p className="text-xs text-[#555555]">
                                 {asset.name}
                               </p>
                             </div>
@@ -361,7 +361,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
                             <p className="text-sm font-medium text-red-600 dark:text-red-300">
                               {formatValue(asset.value || 0)}
                             </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <p className="text-xs text-[#555555]">
                               {asset.balance} {asset.symbol}
                             </p>
                             <button
@@ -371,10 +371,10 @@ const WalletCard: React.FC<WalletCardProps> = ({
                                   originalIndex
                                 )
                               }
-                              className="ml-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                              className="ml-2 p-1 rounded hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.06)]"
                               title="Rendre l'asset visible"
                             >
-                              <Eye size={16} className="text-gray-400" />
+                              <Eye size={16} className="text-[#555555]" />
                             </button>
                           </div>
                         </div>
@@ -389,7 +389,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
 
       {/* No Assets */}
       {showAssets && wallet.assets.length === 0 && (
-        <div className="mt-4 text-center py-6 text-gray-500">
+        <div className="mt-4 text-center py-6 text-[#555555]">
           <Wallet size={32} className="mx-auto mb-2 opacity-50" />
           <p className="text-sm">Aucun asset trouvé</p>
         </div>
@@ -401,13 +401,13 @@ const WalletCard: React.FC<WalletCardProps> = ({
           onClick={() => setShowNFTs(!showNFTs)}
           className="w-full flex items-center justify-between p-3 rounded-lg transition-colors"
         >
-          <span className="font-medium text-gray-700 dark:text-gray-200">
+          <span className="font-medium text-[#f5f5f5]">
             NFTs ({wallet.nfts.length})
           </span>
           {showNFTs ? (
-            <ChevronUp size={20} className="text-gray-400" />
+            <ChevronUp size={20} className="text-[#555555]" />
           ) : (
-            <ChevronDown size={20} className="text-gray-400" />
+            <ChevronDown size={20} className="text-[#555555]" />
           )}
         </button>
       )}

@@ -2,29 +2,607 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   FINARY-INSPIRED DESIGN SYSTEM
+   Premium dark fintech aesthetic
+   ============================================================ */
+
+:root {
+  --color-primary-50: 239 246 255;
+  --color-primary-100: 219 234 254;
+  --color-primary-200: 191 219 254;
+  --color-primary-300: 147 197 253;
+  --color-primary-400: 96 165 250;
+  --color-primary-500: 59 130 246;
+  --color-primary-600: 37 99 235;
+  --color-primary-700: 29 78 216;
+  --color-primary-800: 30 64 175;
+  --color-primary-900: 30 58 138;
+  --color-primary-950: 23 37 84;
+  --color-primary-hex: #3b82f6;
+
+  /* Finary signature colors */
+  --finary-bg: #0a0a0a;
+  --finary-surface: #111111;
+  --finary-surface-hover: #1a1a1a;
+  --finary-surface-elevated: #161616;
+  --finary-border: rgba(255, 255, 255, 0.06);
+  --finary-border-hover: rgba(255, 255, 255, 0.12);
+  --finary-gold: #c8a55e;
+  --finary-gold-soft: rgba(200, 165, 94, 0.15);
+  --finary-text-primary: #f5f5f5;
+  --finary-text-secondary: #8a8a8a;
+  --finary-text-tertiary: #555555;
+  --finary-green: #22c55e;
+  --finary-red: #ef4444;
+  --finary-sidebar-width: 220px;
+}
+
 @layer base {
   * {
-    @apply border-gray-200 dark:border-gray-700;
+    @apply border-[rgba(255,255,255,0.06)];
   }
+
+  html {
+    color-scheme: dark;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html:not(.dark) {
+    color-scheme: light;
+  }
+
   body {
-    @apply bg-gray-50 text-gray-900 font-sans dark:bg-black dark:text-gray-100;
+    @apply bg-[#0a0a0a] text-[#f5f5f5] antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Universal inputs, selects and textareas styling across the entire app */
+  input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+  select,
+  textarea {
+    color: #f5f5f5;
+    background-color: #161616;
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .dark input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+  .dark select,
+  .dark textarea {
+    color: #f5f5f5 !important;
+    background-color: #161616 !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #555555;
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: #555555 !important;
+  }
+
+  option {
+    background-color: #161616;
+    color: #f5f5f5;
+  }
+
+  .dark option {
+    background-color: #161616 !important;
+    color: #f5f5f5 !important;
+  }
+
+  /* Prevent browser autofill from turning inputs white with white text in dark mode */
+  .dark input:-webkit-autofill,
+  .dark input:-webkit-autofill:hover,
+  .dark input:-webkit-autofill:focus,
+  .dark textarea:-webkit-autofill,
+  .dark textarea:-webkit-autofill:hover,
+  .dark textarea:-webkit-autofill:focus,
+  .dark select:-webkit-autofill,
+  .dark select:-webkit-autofill:hover,
+  .dark select:-webkit-autofill:focus {
+    -webkit-text-fill-color: #f5f5f5 !important;
+    -webkit-box-shadow: 0 0 0px 1000px #161616 inset !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
   }
 }
 
 @layer components {
+  /* ---- Finary Card ---- */
   .card {
-    @apply bg-white rounded-lg shadow-md border border-gray-200 p-6 dark:bg-[#111111] dark:border-0;
+    @apply rounded-xl p-6 transition-all duration-200;
+    background-color: #111111;
+    border: 1px solid rgba(255, 255, 255, 0.06);
   }
 
+  .card:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  /* ---- Buttons ---- */
   .btn-primary {
-    @apply bg-[#111111] hover:bg-[#1a1a1a] text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 border border-gray-600 dark:bg-[#111111] dark:hover:bg-[#1a1a1a] dark:text-white dark:border-gray-600 dark:focus:ring-offset-black;
+    @apply font-medium py-2.5 px-5 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 text-sm;
+    background: linear-gradient(135deg, #c8a55e 0%, #b8944e 100%);
+    color: #0a0a0a;
+    border: none;
+    font-weight: 600;
+  }
+
+  .btn-primary:hover {
+    background: linear-gradient(135deg, #d4b06a 0%, #c8a55e 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(200, 165, 94, 0.25);
   }
 
   .btn-secondary {
-    @apply bg-[#111111] hover:bg-[#1a1a1a] text-gray-300 font-medium py-2 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 border border-gray-600 dark:bg-[#111111] dark:hover:bg-[#1a1a1a] dark:text-gray-300 dark:border-gray-600 dark:focus:ring-gray-400 dark:focus:ring-offset-black;
+    @apply font-medium py-2.5 px-5 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 text-sm;
+    background-color: #1a1a1a;
+    color: #e5e5e5;
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
-  .input-field {
-    @apply w-full px-3 py-2 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100 dark:placeholder-gray-500;
+  .btn-secondary:hover {
+    background-color: #222222;
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  /* ---- Input fields ---- */
+  .input-field,
+  .input {
+    @apply w-full px-4 py-2.5 rounded-lg text-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1;
+    background-color: #161616;
+    color: #f5f5f5;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    --tw-ring-color: rgba(200, 165, 94, 0.4);
+    --tw-ring-offset-color: #0a0a0a;
+  }
+
+  .input-field:focus,
+  .input:focus {
+    border-color: rgba(200, 165, 94, 0.4);
+  }
+
+  .input-field::placeholder,
+  .input::placeholder {
+    color: #555555;
+  }
+
+  /* ---- Finary Sidebar ---- */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: var(--finary-sidebar-width);
+    background-color: #0e0e0e;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200;
+    color: #8a8a8a;
+  }
+
+  .sidebar-link:hover {
+    color: #f5f5f5;
+    background-color: rgba(255, 255, 255, 0.04);
+  }
+
+  .sidebar-link.active {
+    color: #f5f5f5;
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .sidebar-link.active svg {
+    color: #c8a55e;
+  }
+
+  /* ---- Main content area with sidebar offset ---- */
+  .main-content {
+    margin-left: var(--finary-sidebar-width);
+    min-height: 100vh;
+    background-color: #0a0a0a;
+  }
+
+  /* ---- Stats number display ---- */
+  .stat-value {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  /* ---- Badge ---- */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
+  }
+
+  .badge-green {
+    background-color: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+  }
+
+  .badge-red {
+    background-color: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+  }
+
+  .badge-gold {
+    background-color: rgba(200, 165, 94, 0.12);
+    color: #c8a55e;
+  }
+
+  /* ---- Table rows ---- */
+  .table-row {
+    @apply transition-colors duration-150;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .table-row:hover {
+    background-color: rgba(255, 255, 255, 0.02);
+  }
+
+  /* ---- Modal ---- */
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center;
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-content {
+    @apply rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl;
+    background-color: #111111;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  /* ---- Section header ---- */
+  .section-title {
+    @apply text-lg font-semibold tracking-tight;
+    color: #f5f5f5;
+  }
+
+  .section-subtitle {
+    @apply text-sm;
+    color: #8a8a8a;
+  }
+
+  /* ---- Recharts theme overrides ---- */
+  .recharts-cartesian-grid line {
+    stroke: rgba(255, 255, 255, 0.04) !important;
+  }
+  html:not(.dark) .recharts-cartesian-grid line {
+    stroke: rgba(0, 0, 0, 0.06) !important;
+  }
+
+  .recharts-text {
+    fill: #8a8a8a !important;
+    font-size: 11px !important;
+  }
+  html:not(.dark) .recharts-text {
+    fill: #64748b !important;
+    font-size: 11px !important;
+  }
+
+  /* Default / Dark Mode Tooltip */
+  .recharts-tooltip-wrapper .recharts-default-tooltip,
+  .dark .recharts-tooltip-wrapper .recharts-default-tooltip,
+  .dark .recharts-default-tooltip {
+    background-color: #161616 !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+    color: #f5f5f5 !important;
+    padding: 10px 14px !important;
+  }
+
+  .recharts-default-tooltip .recharts-tooltip-label,
+  .recharts-default-tooltip .recharts-tooltip-item,
+  .recharts-default-tooltip .recharts-tooltip-item-name,
+  .recharts-default-tooltip .recharts-tooltip-item-separator,
+  .recharts-default-tooltip .recharts-tooltip-item-value,
+  .recharts-default-tooltip .recharts-tooltip-item-unit,
+  .dark .recharts-default-tooltip .recharts-tooltip-label,
+  .dark .recharts-default-tooltip .recharts-tooltip-item,
+  .dark .recharts-default-tooltip .recharts-tooltip-item-name,
+  .dark .recharts-default-tooltip .recharts-tooltip-item-separator,
+  .dark .recharts-default-tooltip .recharts-tooltip-item-value,
+  .dark .recharts-default-tooltip .recharts-tooltip-item-unit,
+  .dark .recharts-tooltip-item,
+  .dark .recharts-tooltip-label {
+    color: #f5f5f5 !important;
+  }
+
+  /* Light Mode Tooltip */
+  html:not(.dark) .recharts-tooltip-wrapper .recharts-default-tooltip,
+  html:not(.dark) .recharts-default-tooltip {
+    background-color: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12) !important;
+    color: #0f172a !important;
+    padding: 10px 14px !important;
+  }
+
+  html:not(.dark) .recharts-default-tooltip .recharts-tooltip-label,
+  html:not(.dark) .recharts-default-tooltip .recharts-tooltip-item,
+  html:not(.dark) .recharts-default-tooltip .recharts-tooltip-item-name,
+  html:not(.dark) .recharts-default-tooltip .recharts-tooltip-item-separator,
+  html:not(.dark) .recharts-default-tooltip .recharts-tooltip-item-value,
+  html:not(.dark) .recharts-default-tooltip .recharts-tooltip-item-unit,
+  html:not(.dark) .recharts-tooltip-item,
+  html:not(.dark) .recharts-tooltip-label {
+    color: #0f172a !important;
+  }
+
+  /* ---- Pill tabs (like Finary period selector) ---- */
+  .pill-tabs {
+    @apply inline-flex items-center gap-1 p-1 rounded-lg;
+    background-color: rgba(255, 255, 255, 0.04);
+  }
+
+  .pill-tab {
+    @apply px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 cursor-pointer;
+    color: #8a8a8a;
+  }
+
+  .pill-tab:hover {
+    color: #f5f5f5;
+  }
+
+  .pill-tab.active {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #f5f5f5;
+  }
+
+  /* ---- Responsive: hide sidebar on mobile ---- */
+  @media (max-width: 768px) {
+    .sidebar {
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+    }
+
+    .sidebar.open {
+      transform: translateX(0);
+    }
+
+    .main-content {
+      margin-left: 0;
+    }
   }
 }
+
+/* ---- Animations ---- */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease-out both;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.03) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* ============================================================
+   PROGRESSIVE CIRCULAR REVEAL ANIMATION (View Transitions API)
+   ============================================================ */
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
+}
+
+/* Fallback smooth transition */
+.theme-transitioning,
+.theme-transitioning *,
+.theme-transitioning *:before,
+.theme-transitioning *:after {
+  transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease !important;
+  transition-delay: 0s !important;
+}
+
+/* ============================================================
+   LIGHT MODE DESIGN SYSTEM
+   Finary-style clean white fintech aesthetic
+   ============================================================ */
+
+html:not(.dark) body {
+  background-color: #f8f9fa !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) .main-content {
+  background-color: #f8f9fa !important;
+}
+
+html:not(.dark) header {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+html:not(.dark) .sidebar {
+  background-color: #ffffff !important;
+  border-right-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+html:not(.dark) .sidebar-link {
+  color: #64748b;
+}
+
+html:not(.dark) .sidebar-link:hover {
+  color: #0f172a;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+html:not(.dark) .sidebar-link.active {
+  color: #0f172a;
+  background-color: rgba(200, 165, 94, 0.16);
+}
+
+html:not(.dark) .card {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.07) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+html:not(.dark) .card:hover {
+  border-color: rgba(0, 0, 0, 0.14) !important;
+}
+
+html:not(.dark) .modal-content {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+}
+
+html:not(.dark) .btn-secondary {
+  background-color: #ffffff !important;
+  color: #1e293b !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+html:not(.dark) .btn-secondary:hover {
+  background-color: #f1f5f9 !important;
+  border-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+html:not(.dark) .input-field,
+html:not(.dark) .input,
+html:not(.dark) input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+html:not(.dark) select,
+html:not(.dark) textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+html:not(.dark) input::placeholder,
+html:not(.dark) textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) .pill-tabs {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+html:not(.dark) .pill-tab {
+  color: #64748b !important;
+}
+
+html:not(.dark) .pill-tab:hover {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .pill-tab.active {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Light mode utility mappings */
+html:not(.dark) .bg-\[\#0a0a0a\] {
+  background-color: #f8f9fa !important;
+}
+
+html:not(.dark) .bg-\[\#111111\] {
+  background-color: #ffffff !important;
+}
+
+html:not(.dark) .bg-\[\#141414\],
+html:not(.dark) .bg-\[\#161616\],
+html:not(.dark) .bg-\[\#181818\],
+html:not(.dark) .bg-\[\#1a1a1a\] {
+  background-color: #f1f5f9 !important;
+}
+
+html:not(.dark) .text-\[\#f5f5f5\] {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .text-\[\#8a8a8a\] {
+  color: #64748b !important;
+}
+
+html:not(.dark) .text-\[\#555555\] {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) .border-\[rgba\(255\,255\,255\,0\.06\)\],
+html:not(.dark) .border-\[rgba\(255\,255\,255\,0\.08\)\] {
+  border-color: rgba(0, 0, 0, 0.07) !important;
+}
+
+html:not(.dark) .table-row:hover {
+  background-color: rgba(0, 0, 0, 0.02) !important;
+}
+

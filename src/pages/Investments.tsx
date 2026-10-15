@@ -335,82 +335,79 @@ const Investments = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-start">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-            My Investments
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#f5f5f5]">
+            Portefeuille
           </h1>
-          <p className="text-gray-600 dark:text-gray-300 mt-2">
-            Total Value:{" "}
-            <span className="font-semibold text-gray-900 dark:text-gray-100">
-              ${totalValue.toLocaleString()}
+          <p className="text-[#8a8a8a] text-sm mt-1">
+            Valeur totale :{" "}
+            <span className="font-semibold text-[#f5f5f5]">
+              {totalValue.toLocaleString("fr-FR")} €
             </span>{" "}
-            | Total Gain/Loss:{" "}
+            • Plus/Moins-value :{" "}
             <span
               className={`font-semibold ${
                 totalGainLoss >= 0
-                  ? "text-success-600 dark:text-success-400"
-                  : "text-danger-600 dark:text-danger-400"
+                  ? "text-[#22c55e]"
+                  : "text-[#ef4444]"
               }`}
             >
-              ${totalGainLoss.toLocaleString()}
+              {totalGainLoss >= 0 ? "+" : ""}
+              {totalGainLoss.toLocaleString("fr-FR")} €
             </span>
           </p>
         </div>
-        <div className="flex flex-col space-y-3">
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={handleCleanupStorage}
-              className="btn-secondary flex items-center space-x-2"
-              title="Nettoyer les symboles invalides"
-            >
-              <RefreshCw size={20} />
-              <span>Nettoyer</span>
-            </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={handleCleanupStorage}
+            className="btn-secondary flex items-center gap-2 text-xs"
+            title="Nettoyer les symboles invalides"
+          >
+            <RefreshCw size={15} />
+            <span>Nettoyer</span>
+          </button>
 
-            <button
-              onClick={() => {
-                setEditingWallet(null);
-                setIsWalletFormOpen(true);
-              }}
-              className="btn-primary flex items-center space-x-2 bg-purple-600 hover:bg-purple-700"
-            >
-              <Wallet size={20} />
-              <span>Add Wallet</span>
-            </button>
-            <button
-              onClick={() => {
-                setEditingInvestment(null);
-                setIsFormOpen(true);
-              }}
-              className="btn-primary flex items-center space-x-2"
-            >
-              <Plus size={20} />
-              <span>Add Investment</span>
-            </button>
-          </div>
-          <div className="flex justify-end">
-            <PriceRefreshButton
-              variant="primary"
-              size="sm"
-              showCountdown={true}
-            />
-          </div>
+          <button
+            onClick={() => {
+              setEditingWallet(null);
+              setIsWalletFormOpen(true);
+            }}
+            className="btn-secondary flex items-center gap-2 text-xs"
+          >
+            <Wallet size={15} />
+            <span>Ajouter un wallet</span>
+          </button>
+          <button
+            onClick={() => {
+              setEditingInvestment(null);
+              setIsFormOpen(true);
+            }}
+            className="btn-primary flex items-center gap-2 text-xs"
+          >
+            <Plus size={15} />
+            <span>Ajouter un actif</span>
+          </button>
+          <PriceRefreshButton
+            variant="primary"
+            size="sm"
+            showCountdown={true}
+          />
         </div>
       </div>
 
       {/* Search */}
-      <div className="relative mb-6">
+      <div className="relative">
         <Search
-          className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-          size={20}
+          className="absolute left-3.5 top-1/2 transform -translate-y-1/2 text-[#555555]"
+          size={18}
         />
         <input
           type="text"
-          placeholder="Search investments..."
+          placeholder="Rechercher un investissement, action, crypto..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10 w-full rounded-lg py-2 bg-white dark:bg-[#111111] text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none"
+          className="pl-10 pr-4 py-2.5 w-full rounded-xl bg-[#141414] border border-[rgba(255,255,255,0.06)] text-sm text-[#f5f5f5] placeholder-[#555555] focus:outline-none focus:border-[#c8a55e]/50 transition-colors"
         />
       </div>
 
@@ -419,14 +416,14 @@ const Investments = () => {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+              <h2 className="text-xl font-semibold text-[#f5f5f5]">
                 Wallets Blockchain
               </h2>
               <button
                 onClick={() =>
                   setIsWalletsSectionCollapsed(!isWalletsSectionCollapsed)
                 }
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                 title={
                   isWalletsSectionCollapsed
                     ? "Afficher les portefeuilles"
@@ -450,7 +447,7 @@ const Investments = () => {
                 </svg>
               </button>
             </div>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-[#555555]">
               {blockchainWallets.length} portefeuille
               {blockchainWallets.length > 1 ? "s" : ""} • $
               {blockchainWalletValue.toLocaleString()}
@@ -490,7 +487,7 @@ const Investments = () => {
         {(investments.length > 0 || binanceWallets.length > 0) && (
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+              <h2 className="text-xl font-semibold text-[#f5f5f5]">
                 Investissements sur DEX/CEX
               </h2>
               <button
@@ -499,7 +496,7 @@ const Investments = () => {
                     !isInvestmentsSectionCollapsed
                   )
                 }
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                 title={
                   isInvestmentsSectionCollapsed
                     ? "Afficher les investissements"
@@ -523,7 +520,7 @@ const Investments = () => {
                 </svg>
               </button>
             </div>
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-[#555555]">
               {investments.length + binanceWallets.length} élément
               {investments.length + binanceWallets.length > 1 ? "s" : ""} • $
               {(investmentValue + binanceWalletValue).toLocaleString()}
@@ -545,7 +542,7 @@ const Investments = () => {
                   </h3>
                   <button
                     onClick={() => setIsCryptoCollapsed((v) => !v)}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                     title={isCryptoCollapsed ? "Afficher" : "Masquer"}
                   >
                     <svg
@@ -609,7 +606,7 @@ const Investments = () => {
                   <h3 className="text-lg font-semibold text-blue-700">PEA</h3>
                   <button
                     onClick={() => setIsPEACollapsed((v) => !v)}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                     title={isPEACollapsed ? "Afficher" : "Masquer"}
                   >
                     <svg
@@ -657,7 +654,7 @@ const Investments = () => {
                   <h3 className="text-lg font-semibold text-green-700">CTO</h3>
                   <button
                     onClick={() => setIsCTOCollapsed((v) => !v)}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                     title={isCTOCollapsed ? "Afficher" : "Masquer"}
                   >
                     <svg
@@ -710,7 +707,7 @@ const Investments = () => {
                   </h3>
                   <button
                     onClick={() => setIsTradfiCollapsed((v) => !v)}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                     title={isTradfiCollapsed ? "Afficher" : "Masquer"}
                   >
                     <svg
@@ -757,12 +754,12 @@ const Investments = () => {
             ).length > 0 && (
               <div className="mb-2">
                 <div className="flex items-center space-x-2 mb-2">
-                  <h3 className="text-lg font-semibold text-gray-700">
+                  <h3 className="text-lg font-semibold text-[#8a8a8a]">
                     Autres
                   </h3>
                   <button
                     onClick={() => setIsOtherCollapsed((v) => !v)}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                     title={isOtherCollapsed ? "Afficher" : "Masquer"}
                   >
                     <svg
@@ -805,7 +802,7 @@ const Investments = () => {
               filteredWallets.length === 0 &&
               searchTerm && (
                 <div className="card text-center py-12">
-                  <div className="text-gray-500 mb-4">
+                  <div className="text-[#555555] mb-4">
                     Aucun investissement ou portefeuille trouvé.
                   </div>
                 </div>
@@ -816,7 +813,7 @@ const Investments = () => {
               investments.length === 0 &&
               wallets.length === 0 && (
                 <div className="card text-center py-12">
-                  <div className="text-gray-500 mb-4">
+                  <div className="text-[#555555] mb-4">
                     Aucun investissement ou portefeuille trouvé.
                   </div>
                   <div className="space-x-3">

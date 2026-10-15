@@ -170,10 +170,19 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
     return Array.from(assetsMap.values());
   };
 
-  // Detect dark mode
-  const isDark =
-    typeof window !== "undefined" &&
-    document.documentElement.classList.contains("dark");
+  // Detect dark mode dynamically
+  const [isDark, setIsDark] = React.useState(() => {
+    if (typeof window === "undefined") return true;
+    return document.documentElement.classList.contains("dark");
+  });
+
+  React.useEffect(() => {
+    const handler = () => {
+      setIsDark(document.documentElement.classList.contains("dark"));
+    };
+    window.addEventListener("themeChanged", handler);
+    return () => window.removeEventListener("themeChanged", handler);
+  }, []);
 
   const maskDigits = (text: string) =>
     isAnonymous ? text.replace(/[0-9]/g, "*") : text;
@@ -183,7 +192,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
         maximumFractionDigits: 0,
       }),
     );
-  const formatCurrency = (value: number) => `$${formatNumber(value)}`;
+  const formatCurrency = (value: number) => `${formatNumber(value)} €`;
   const formatPercent = (value: number, digits: number = 1) =>
     `${maskDigits(Number(value || 0).toFixed(digits))}%`;
 
@@ -191,7 +200,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
   const baseOptions: Highcharts.Options = {
     chart: {
       height,
-      backgroundColor: isDark ? "#111111" : "transparent",
+      backgroundColor: "transparent",
       style: {
         fontFamily: "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
       },
@@ -199,16 +208,16 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
     title: {
       text: title,
       style: {
-        fontSize: "18px",
+        fontSize: "16px",
         fontWeight: "600",
-        color: isDark ? "#fff" : "#111827",
+        color: isDark ? "#f5f5f5" : "#0f172a",
       },
     },
     subtitle: {
       text: subtitle,
       style: {
-        fontSize: "14px",
-        color: isDark ? "#fff" : "#6b7280",
+        fontSize: "13px",
+        color: isDark ? "#8a8a8a" : "#64748b",
       },
     },
     credits: {
@@ -217,33 +226,42 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
     legend: {
       itemStyle: {
         fontSize: "12px",
-        color: isDark ? "#fff" : "#374151",
+        color: isDark ? "#8a8a8a" : "#64748b",
+      },
+      itemHoverStyle: {
+        color: isDark ? "#f5f5f5" : "#0f172a",
       },
     },
     tooltip: {
-      backgroundColor: isDark ? "#222" : "rgba(255, 255, 255, 0.95)",
-      borderColor: isDark ? "#444" : "#e5e7eb",
-      borderRadius: 8,
+      backgroundColor: isDark ? "#161616" : "#ffffff",
+      borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+      borderRadius: 10,
       shadow: true,
       style: {
         fontSize: "12px",
-        color: isDark ? "#fff" : undefined,
+        color: isDark ? "#f5f5f5" : "#0f172a",
       },
     },
     xAxis: {
+      lineColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.08)",
+      tickColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.08)",
+      gridLineColor: isDark ? "rgba(255, 255, 255, 0.03)" : "rgba(0, 0, 0, 0.04)",
       labels: {
         style: {
           fontSize: "11px",
-          color: isDark ? "#fff" : undefined,
+          color: isDark ? "#8a8a8a" : "#64748b",
         },
       },
     },
     yAxis: {
+      lineColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.08)",
+      tickColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.08)",
+      gridLineColor: isDark ? "rgba(255, 255, 255, 0.03)" : "rgba(0, 0, 0, 0.04)",
       title: {
-        text: "Valeur ($)",
+        text: "Valeur (€)",
         style: {
           fontSize: "11px",
-          color: isDark ? "#fff" : undefined,
+          color: isDark ? "#8a8a8a" : "#64748b",
         },
       },
       labels: {
@@ -252,7 +270,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
         },
         style: {
           fontSize: "11px",
-          color: isDark ? "#fff" : undefined,
+          color: isDark ? "#8a8a8a" : "#64748b",
         },
       },
     },
@@ -274,7 +292,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
     }
   };
 
-  // Graphique en secteurs - Répartition du portfolio
+  // Graphique en secteurs - Répartition du portfolio (Finary Donut)
   const generatePieChartOptions = (): Highcharts.Options => {
     const allAssets = getAllAssets();
 
@@ -302,6 +320,9 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
       },
       plotOptions: {
         pie: {
+          innerSize: "72%",
+          borderWidth: 2,
+          borderColor: isDark ? "#111111" : "#ffffff",
           allowPointSelect: true,
           cursor: "pointer",
           dataLabels: {
@@ -314,6 +335,8 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
             },
             style: {
               fontSize: "11px",
+              color: isDark ? "#f5f5f5" : "#0f172a",
+              textOutline: "none",
             },
           },
           showInLegend: true,
@@ -388,28 +411,22 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
       },
       xAxis: {
         type: "datetime",
-        title: {
-          text: "Date",
-          style: {
-            color: isDark ? "#fff" : undefined,
-          },
-        },
         labels: {
           style: {
             fontSize: "11px",
-            color: isDark ? "#fff" : undefined,
+            color: "#8a8a8a",
           },
         },
-        lineColor: isDark ? "#fff" : undefined,
-        tickColor: isDark ? "#fff" : undefined,
-        gridLineColor: isDark ? "#fff" : undefined,
+        lineColor: "rgba(255, 255, 255, 0.06)",
+        tickColor: "rgba(255, 255, 255, 0.06)",
+        gridLineColor: "rgba(255, 255, 255, 0.03)",
       },
       yAxis: {
         title: {
-          text: "Valeur ($)",
+          text: "Valeur (€)",
           style: {
             fontSize: "11px",
-            color: isDark ? "#fff" : undefined,
+            color: "#8a8a8a",
           },
         },
         labels: {
@@ -418,22 +435,37 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
           },
           style: {
             fontSize: "11px",
-            color: isDark ? "#fff" : undefined,
+            color: "#8a8a8a",
           },
         },
-        lineColor: isDark ? "#fff" : undefined,
-        tickColor: isDark ? "#fff" : undefined,
-        gridLineColor: isDark ? "#fff" : undefined,
+        lineColor: "rgba(255, 255, 255, 0.06)",
+        tickColor: "rgba(255, 255, 255, 0.06)",
+        gridLineColor: "rgba(255, 255, 255, 0.03)",
       },
       series: [
         {
           name: "Valeur du Portfolio",
-          type: "line",
+          type: "area",
           data: timeSeriesData,
-          color: "#3b82f6",
-          lineWidth: 2,
+          color: "#c8a55e",
+          lineColor: "#c8a55e",
+          lineWidth: 2.5,
+          fillColor: {
+            linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+            stops: [
+              [0, "rgba(200, 165, 94, 0.22)"],
+              [1, "rgba(200, 165, 94, 0.0)"],
+            ],
+          },
           marker: {
-            radius: 3,
+            enabled: false,
+            states: {
+              hover: {
+                enabled: true,
+                radius: 4,
+                fillColor: "#c8a55e",
+              },
+            },
           },
         },
       ],
@@ -707,7 +739,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({
   if (getAllAssets().length === 0) {
     return (
       <div className="card flex items-center justify-center" style={{ height }}>
-        <div className="text-center text-gray-500">
+        <div className="text-center text-[#555555]">
           <p className="text-lg font-medium">Aucune donnée à afficher</p>
           <p className="text-sm mt-1">
             Ajoutez des investissements ou des wallets pour voir les graphiques

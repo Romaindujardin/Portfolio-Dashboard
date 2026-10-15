@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { deleteUserData } from "../utils/storage";
+import { applyUserTheme, getUserAccentColor } from "../utils/theme";
 
 interface UserContextType {
   currentUser: string;
@@ -34,17 +35,20 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Charger les utilisateurs depuis le localStorage ou utiliser la liste par défaut
+  // Charger les utilisateurs depuis le localStorage ou utiliser la liste par défaut (limité à 2 utilisateurs max)
   const getInitialUsers = (): string[] => {
     const stored = localStorage.getItem("portfolio_users");
     if (stored) {
       try {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.slice(0, 2);
+        }
       } catch (error) {
         console.error("Erreur lors du chargement des utilisateurs:", error);
       }
     }
-    return ["Romain", "Alice", "Bob", "Charlie"];
+    return ["Romain", "Sophie"];
   };
 
   const [currentUser, setCurrentUser] = useState<string>(() => {
@@ -55,14 +59,36 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const [availableUsers, setAvailableUsers] =
     useState<string[]>(getInitialUsers);
 
-  // Sauvegarder les utilisateurs dans le localStorage quand ils changent
+  // Sauvegarder les utilisateurs dans le localStorage quand ils changent (toujours borné à 2)
   useEffect(() => {
-    localStorage.setItem("portfolio_users", JSON.stringify(availableUsers));
+    localStorage.setItem("portfolio_users", JSON.stringify(availableUsers.slice(0, 2)));
   }, [availableUsers]);
 
   // Sauvegarder l'utilisateur actuel dans le localStorage quand il change
   useEffect(() => {
     localStorage.setItem("portfolio_current_user", currentUser);
+  }, [currentUser]);
+
+  // Appliquer dynamiquement la couleur d'accent de l'utilisateur actif
+  useEffect(() => {
+    const applyTheme = () => {
+      const color = getUserAccentColor(currentUser);
+      applyUserTheme(color);
+    };
+
+    applyTheme();
+
+    const handleSettingsUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (!customEvent.detail || customEvent.detail.username === currentUser) {
+        applyTheme();
+      }
+    };
+
+    window.addEventListener("userSettingsUpdated", handleSettingsUpdated);
+    return () => {
+      window.removeEventListener("userSettingsUpdated", handleSettingsUpdated);
+    };
   }, [currentUser]);
 
   // Rediriger automatiquement si on est sur une page Settings d'un autre utilisateur
@@ -78,8 +104,10 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   }, [currentUser, location.pathname, navigate]);
 
   const addUser = (userName: string) => {
-    if (userName.trim() && !availableUsers.includes(userName.trim())) {
-      setAvailableUsers((prev) => [...prev, userName.trim()]);
+    if (availableUsers.length >= 2) return;
+    const trimmed = userName.trim();
+    if (trimmed && !availableUsers.includes(trimmed)) {
+      setAvailableUsers((prev) => [...prev, trimmed].slice(0, 2));
     }
   };
 

@@ -303,7 +303,7 @@ export default function CashflowSpaghetti({
         style={{ height }}
         className="flex items-center justify-center"
       >
-        <div className="text-sm text-gray-500 dark:text-gray-300">
+        <div className="text-sm text-[#8a8a8a]">
           Pas assez de données pour afficher le spaghetti.
         </div>
       </div>
@@ -362,7 +362,7 @@ export default function CashflowSpaghetti({
         containerRef.current = el;
       }}
       style={{ height }}
-      className="w-full text-gray-900 dark:text-white relative"
+      className="w-full text-[#f5f5f5] relative"
     >
       <svg width={w} height={innerHeight} role="img">
         <defs>
@@ -463,7 +463,7 @@ export default function CashflowSpaghetti({
 
       {tooltip.open && (
         <div
-          className="pointer-events-none absolute z-20 rounded-md border border-gray-200/60 dark:border-gray-700/60 bg-white/95 dark:bg-gray-900/95 shadow-lg px-3 py-2"
+          className="pointer-events-none absolute z-20 rounded-md border border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/60 bg-white/95 bg-[#0a0a0a]/95  px-3 py-2"
           style={{
             left: Math.max(8, Math.min((width || 0) - 8, tooltip.x + 12)),
             top: Math.max(8, Math.min(innerHeight - 8, tooltip.y + 12)),
@@ -471,10 +471,10 @@ export default function CashflowSpaghetti({
             maxWidth: 260,
           }}
         >
-          <div className="text-xs font-medium text-gray-900 dark:text-white truncate">
+          <div className="text-xs font-medium text-[#f5f5f5] truncate">
             {tooltip.title}
           </div>
-          <div className="text-sm font-semibold text-gray-900 dark:text-white">
+          <div className="text-sm font-semibold text-[#f5f5f5]">
             {formatEur(tooltip.amount, isAnonymous)}
           </div>
         </div>

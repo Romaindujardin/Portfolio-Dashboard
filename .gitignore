@@ -22,6 +22,9 @@ portfolio.db-wal
 portfolio.db-shm
 backups/
 
+# Runtime data (miroirs JSON disque — contient des données personnelles)
+data/
+
 # IDE and editor files
 .vscode/
 .idea/

@@ -36,13 +36,13 @@ const BinanceConnectModal: React.FC<BinanceConnectModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-[#111111] rounded-lg p-6 w-full max-w-md mx-4 shadow-xl">
-        <h2 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">
+      <div className="bg-[#111111] rounded-lg p-6 w-full max-w-md mx-4 shadow-xl">
+        <h2 className="text-xl font-bold mb-4 text-[#f5f5f5]">
           Connecter un compte Binance
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-white mb-1">
+            <label className="block text-sm font-medium text-[#f5f5f5] mb-1">
               Clé API Binance
             </label>
             <input
@@ -56,7 +56,7 @@ const BinanceConnectModal: React.FC<BinanceConnectModalProps> = ({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-white mb-1">
+            <label className="block text-sm font-medium text-[#f5f5f5] mb-1">
               Secret API Binance
             </label>
             <input
@@ -88,7 +88,7 @@ const BinanceConnectModal: React.FC<BinanceConnectModalProps> = ({
             </button>
           </div>
         </form>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-4">
+        <p className="text-xs text-[#555555] mt-4">
           <strong>Note :</strong> Seules les permissions de lecture (Read Only)
           sont nécessaires. Ne partagez jamais une clé API avec droits de
           retrait ou de trading.

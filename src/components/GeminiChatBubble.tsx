@@ -87,7 +87,7 @@ const GeminiChatBubble: React.FC = () => {
     <>
       {/* Bulle flottante */}
       <button
-        className="fixed bottom-6 right-6 z-50 bg-[#111111] text-white rounded-full shadow-lg w-14 h-14 flex items-center justify-center hover:scale-110 transition-transform border border-gray-600 dark:border-gray-600"
+        className="fixed bottom-6 right-6 z-50 bg-[#111111] text-white rounded-full  w-14 h-14 flex items-center justify-center hover:scale-110 transition-transform border border-[rgba(255,255,255,0.06)]"
         onClick={() => setOpen(true)}
         style={{ display: open ? "none" : "flex" }}
         aria-label="Ouvrir le chatbot Gemini"
@@ -97,24 +97,27 @@ const GeminiChatBubble: React.FC = () => {
 
       {/* Popup du chat */}
       {open && (
-        <div className="fixed bottom-6 right-6 z-50 w-80 max-w-[95vw] bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden animate-fade-in dark:bg-[#111111] dark:border-gray-600">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-600 bg-[#111111] text-white">
-            <span className="font-semibold">Gemini Chatbot</span>
+        <div className="fixed bottom-6 right-6 z-50 w-84 max-w-[95vw] rounded-2xl shadow-2xl border border-[rgba(255,255,255,0.08)] flex flex-col overflow-hidden animate-fade-in bg-[#141414]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[rgba(255,255,255,0.06)] bg-[#181818] text-[#f5f5f5]">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-[#c8a55e]"></div>
+              <span className="font-semibold text-sm">Assistant Gemini</span>
+            </div>
             <button
               onClick={() => setOpen(false)}
-              className="hover:text-gray-300 transition-colors"
+              className="text-[#8a8a8a] hover:text-[#f5f5f5] transition-colors"
             >
-              <X size={22} />
+              <X size={18} />
             </button>
           </div>
-          <div className="flex-1 flex flex-col px-4 py-3 space-y-2 overflow-y-auto max-h-80 min-h-[180px] bg-gray-50 dark:bg-[#111111]">
+          <div className="flex-1 flex flex-col px-4 py-3 space-y-2.5 overflow-y-auto max-h-80 min-h-[180px] bg-[#0f0f0f]">
             {messages.map((msg, i) => (
               <div
                 key={i}
-                className={`rounded-lg px-3 py-2 max-w-[90%] whitespace-pre-line text-sm ${
+                className={`rounded-xl px-3.5 py-2.5 max-w-[90%] whitespace-pre-line text-sm ${
                   msg.role === "user"
-                    ? "bg-[#111111] text-white self-end text-right border border-gray-600 dark:border-gray-600"
-                    : "bg-white border border-gray-200 self-start text-left dark:bg-[#2f2f2f] dark:border-gray-600 dark:text-gray-100"
+                    ? "bg-[#c8a55e] text-[#0a0a0a] font-medium self-end text-right"
+                    : "bg-[#181818] border border-[rgba(255,255,255,0.06)] self-start text-left text-[#f5f5f5]"
                 }`}
               >
                 {msg.text}
@@ -123,7 +126,7 @@ const GeminiChatBubble: React.FC = () => {
             <div ref={messagesEndRef} />
           </div>
           <form
-            className="flex items-center border-t border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-[#111111]"
+            className="flex items-center border-t border-[rgba(255,255,255,0.06)] px-3 py-2.5 bg-[#141414]"
             onSubmit={(e) => {
               e.preventDefault();
               if (!loading) sendMessage();
@@ -131,7 +134,7 @@ const GeminiChatBubble: React.FC = () => {
           >
             <input
               type="text"
-              className="flex-1 px-3 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:bg-[#2f2f2f] dark:text-gray-100"
+              className="flex-1 px-3 py-2 rounded-lg border border-[rgba(255,255,255,0.08)] focus:outline-none focus:ring-1 focus:ring-[#c8a55e] text-sm bg-[#1a1a1a] text-[#f5f5f5] placeholder-[#555555]"
               placeholder="Posez votre question..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -146,7 +149,7 @@ const GeminiChatBubble: React.FC = () => {
             />
             <button
               type="submit"
-              className="ml-2 p-2 rounded-full bg-[#111111] hover:bg-[#1a1a1a] text-white disabled:opacity-50 border border-gray-600 dark:border-gray-600 transition-colors"
+              className="ml-2 p-2 rounded-full bg-[#111111] hover:bg-[#1a1a1a] text-white disabled:opacity-50 border border-[rgba(255,255,255,0.06)] transition-colors"
               disabled={loading || !input.trim()}
               aria-label="Envoyer"
             >

@@ -32,6 +32,7 @@ export async function syncBoursoAccounts(params: {
   pages?: number;
   userId?: string;
   dryRun?: boolean;
+  duplicateRefsToRemove?: string[];
 }): Promise<BoursoSyncResult> {
   const response = await fetch(`${apiBase}/bourso/sync`, {
     method: "POST",

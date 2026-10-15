@@ -108,14 +108,14 @@ const MarketClock: React.FC = () => {
 
   return (
     <div
-      className="card w-56 h-32 flex flex-col justify-center overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
+      className="card w-56 h-32 flex flex-col justify-center overflow-hidden cursor-pointer hover: transition-shadow"
       onClick={handleClick}
       title="Cliquer pour changer de bourse"
     >
       <div className="text-center">
         <div className="mb-2">
           <h4
-            className={`text-lg font-bold text-gray-900 dark:text-white transition-all duration-300 ${
+            className={`text-lg font-bold text-[#f5f5f5] transition-all duration-300 ${
               isAnimating
                 ? "transform -translate-y-4 opacity-0"
                 : "transform translate-y-0 opacity-100"
@@ -124,7 +124,7 @@ const MarketClock: React.FC = () => {
             {currentMarket.name}
           </h4>
           <p
-            className={`text-xs text-gray-600 dark:text-gray-300 transition-all duration-300 ${
+            className={`text-xs text-[#8a8a8a] transition-all duration-300 ${
               isAnimating
                 ? "transform -translate-y-4 opacity-0"
                 : "transform translate-y-0 opacity-100"
@@ -135,7 +135,7 @@ const MarketClock: React.FC = () => {
         </div>
 
         <div
-          className={`text-2xl font-mono font-bold text-primary-600 mb-2 transition-all duration-300 ${
+          className={`text-2xl font-mono font-bold text-[#c8a55e] mb-2 transition-all duration-300 ${
             isAnimating
               ? "transform -translate-y-4 opacity-0"
               : "transform translate-y-0 opacity-100"

@@ -6,6 +6,7 @@ import {
   Columns,
   Search,
   Plus,
+  Check,
   X,
   Landmark,
   TrendingUp,
@@ -13,8 +14,32 @@ import {
   Pencil,
   Loader2,
   RefreshCcw,
+  Receipt,
+  CheckCircle2,
+  ArrowRight,
+  Split,
+  Scale,
+  User,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useUser } from "../contexts/UserContext";
+import { getSavingsStrategy } from "../utils/savingsStorage";
+import { getPersonTheme, getUserAccentColor } from "../utils/theme";
+import {
+  addOrUpdateExpense,
+  addOrUpdateIncome,
+  deleteExpense,
+  deleteIncome,
+  getStoredExpenses,
+  getStoredIncomes,
+  rebindBankRowIdsAfterCsvRowDelete,
+  TricountExpense,
+  TricountIncome,
+  TricountBeneficiary,
+  TricountSplitMethod,
+  TricountPayer,
+  isPlacementPocket,
+} from "../utils/tricountStorage";
 import { getUserSettings } from "../utils/userSettings";
 import { syncBoursoAccounts } from "../utils/boursoService";
 import {
@@ -92,8 +117,77 @@ function parseMaybeDate(raw: string): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
+function parseBankRowInfo(row: any) {
+  const rawAmount = row.amount || row.montant;
+  let numericAmount = 0;
+  if (rawAmount != null) {
+    if (typeof rawAmount === "number") numericAmount = rawAmount;
+    else {
+      const parsed = parseFloat(String(rawAmount).replace(/\s/g, "").replace(",", "."));
+      numericAmount = isNaN(parsed) ? 0 : parsed;
+    }
+  }
+  const cleanAmount = Math.round(Math.abs(numericAmount) * 100) / 100;
+  const isIncome = numericAmount > 0;
+
+  const rawDate = row.dateOp || row.date || row.dateVal || row.lastMovementDate || "";
+  let cleanDate = "";
+  if (rawDate) {
+    const parts = String(rawDate).trim().split("/");
+    if (parts.length === 3 && parts[2].length === 4) {
+      cleanDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+    } else if (/^\d{4}-\d{2}-\d{2}/.test(String(rawDate))) {
+      cleanDate = String(rawDate).slice(0, 10);
+    }
+  }
+  if (!cleanDate) {
+    cleanDate = new Date().toISOString().slice(0, 10);
+  }
+
+  const cleanLabel = (
+    row.label ||
+    row.supplierFound ||
+    row.comment ||
+    (isIncome ? "Revenu bancaire" : "Dépense bancaire")
+  ).toString().trim();
+
+  const rowReference = (row.reference || "").toString().trim();
+  const rowKey = getStableBankRowId(row);
+  const legacyRowKey = getLegacyIndexBankRowId(row);
+
+  return {
+    rawAmount,
+    numericAmount,
+    cleanAmount,
+    isIncome,
+    cleanDate,
+    cleanLabel,
+    rowReference,
+    rowKey,
+    legacyRowKey,
+  };
+}
+
+function getStableBankRowId(row: Record<string, string> | any): string {
+  const uploadId = (row?.__uploadId || "").toString();
+  const ref = (row?.reference || "").toString().trim();
+  if (ref) return `${uploadId}:ref:${ref}`;
+  const dateOp = (row?.dateOp || row?.date || "").toString().trim();
+  const dateVal = (row?.dateVal || "").toString().trim();
+  const label = (row?.label || "").toString().trim();
+  const amount = (row?.amount || row?.montant || "").toString().trim();
+  const balance = (row?.accountbalance || "").toString().trim();
+  return `${uploadId}:fp:${dateOp}|${dateVal}|${label}|${amount}|${balance}`;
+}
+
+function getLegacyIndexBankRowId(row: Record<string, string> | any): string {
+  const uploadId = (row?.__uploadId || "").toString();
+  if (row?.__rowIndex === undefined || row?.__rowIndex === "") return "";
+  return `${uploadId}:${row.__rowIndex}`;
+}
+
 const Banking: React.FC = () => {
-  const { currentUser } = useUser();
+  const { currentUser, availableUsers } = useUser();
 
   const [userSettings, setUserSettings] = useState(() =>
     getUserSettings(currentUser),
@@ -140,6 +234,9 @@ const Banking: React.FC = () => {
   const [boursoSyncResult, setBoursoSyncResult] =
     useState<BoursoSyncResult | null>(null);
   const [boursoSyncPreview, setBoursoSyncPreview] = useState(false);
+  const [boursoDuplicateSelection, setBoursoDuplicateSelection] = useState<
+    Set<string>
+  >(new Set());
 
   // ===== IA catégorisation =====
   const schemaStorageKey = useMemo(
@@ -160,6 +257,377 @@ const Banking: React.FC = () => {
   const [newSubByCategory, setNewSubByCategory] = useState<
     Record<string, string>
   >({});
+
+  // ===== Tricount Integration =====
+  const [showTricountModal, setShowTricountModal] = useState(false);
+  const [tricountModalType, setTricountModalType] = useState<"expense" | "placement" | "income">("expense");
+  const [tricountDate, setTricountDate] = useState("");
+  const [tricountLabel, setTricountLabel] = useState("");
+  const [tricountAmount, setTricountAmount] = useState<number | "">("");
+  const [tricountPayer, setTricountPayer] = useState<TricountPayer>("person1");
+  const [tricountBeneficiary, setTricountBeneficiary] = useState<TricountBeneficiary>("person1");
+  const [tricountPocketId, setTricountPocketId] = useState<string>("unallocated");
+  const [tricountSubPocketId, setTricountSubPocketId] = useState<string>("");
+  const [tricountSubPocketName, setTricountSubPocketName] = useState<string>("");
+  const [tricountSplitMethod, setTricountSplitMethod] = useState<TricountSplitMethod>("50_50");
+  const [showSplitOverride, setShowSplitOverride] = useState<boolean>(false);
+  const [tricountToast, setTricountToast] = useState<string | null>(null);
+
+  // Synchronisation dynamique avec le Budget & Tricount (tous les mois)
+  const [tricountExpenses, setTricountExpenses] = useState<TricountExpense[]>(() => getStoredExpenses());
+  const [tricountIncomes, setTricountIncomes] = useState<TricountIncome[]>(() => getStoredIncomes());
+  const [selectedRowForTricount, setSelectedRowForTricount] = useState<any>(null);
+  const [matchedTricountItem, setMatchedTricountItem] = useState<TricountExpense | TricountIncome | null>(null);
+
+  useEffect(() => {
+    const handleTricountUpdate = () => {
+      setTricountExpenses(getStoredExpenses());
+      setTricountIncomes(getStoredIncomes());
+    };
+    window.addEventListener("tricount_data_updated", handleTricountUpdate);
+    window.addEventListener("storage", handleTricountUpdate);
+    return () => {
+      window.removeEventListener("tricount_data_updated", handleTricountUpdate);
+      window.removeEventListener("storage", handleTricountUpdate);
+    };
+  }, []);
+
+  const savingsStrategy = useMemo(() => {
+    try {
+      return getSavingsStrategy();
+    } catch {
+      return null;
+    }
+  }, [showTricountModal]);
+
+  const isSoloMode = availableUsers.length < 2 || savingsStrategy?.household?.enabled === false;
+  const p1Name = savingsStrategy?.household?.person1?.name || currentUser || "Romain";
+  const p2Name =
+    savingsStrategy?.household?.person2?.name ||
+    availableUsers.find((u) => u.toLowerCase() !== p1Name.toLowerCase()) ||
+    "Sophie";
+
+  const p1Color = getUserAccentColor(p1Name);
+  const p2Color = getUserAccentColor(p2Name);
+  const p1Theme = useMemo(() => getPersonTheme(p1Color, p1Name), [p1Color, p1Name]);
+  const p2Theme = useMemo(() => getPersonTheme(p2Color, p2Name), [p2Color, p2Name]);
+
+  const formatEur = (val: number | null | undefined): string => {
+    if (val == null || isNaN(val)) return "0,00 €";
+    return new Intl.NumberFormat("fr-FR", {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(val);
+  };
+
+  const computeAutoSplit = (
+    pocketId: string,
+    subPocketId?: string
+  ): {
+    splitMethod: TricountSplitMethod;
+    payer: TricountPayer;
+    label: string;
+    explanation: string;
+  } => {
+    if (isSoloMode) {
+      return {
+        splitMethod: "100_person1",
+        payer: "person1",
+        label: `100% ${p1Name}`,
+        explanation: `Mode Solo (100% ${p1Name})`,
+      };
+    }
+
+    const pocket = savingsStrategy?.pockets.find((p) => p.id === pocketId);
+    const subItem = pocket?.subItems?.find((s) => s.id === subPocketId);
+
+    // 1. Sous-poche avec affectation personnelle explicite
+    if (subItem?.personId === "person1") {
+      return {
+        splitMethod: "100_person1",
+        payer: "person1",
+        label: `100% ${p1Name}`,
+        explanation: `Sous-poche individuelle (${subItem.name})`,
+      };
+    }
+    if (subItem?.personId === "person2") {
+      return {
+        splitMethod: "100_person2",
+        payer: "person2",
+        label: `100% ${p2Name}`,
+        explanation: `Sous-poche individuelle (${subItem.name})`,
+      };
+    }
+
+    // 2. Poche avec ownership individuelle
+    if (pocket?.ownership === "person1") {
+      return {
+        splitMethod: "100_person1",
+        payer: "person1",
+        label: `100% ${p1Name}`,
+        explanation: `Poche individuelle (${p1Name})`,
+      };
+    }
+    if (pocket?.ownership === "person2") {
+      return {
+        splitMethod: "100_person2",
+        payer: "person2",
+        label: `100% ${p2Name}`,
+        explanation: `Poche individuelle (${p2Name})`,
+      };
+    }
+
+    const defaultPayer: TricountPayer =
+      currentUser.toLowerCase() === p2Name.toLowerCase() ? "person2" : "person1";
+
+    // 3. Poche commune avec split défini
+    if (pocket) {
+      if (pocket.splitMethod === "proportional") {
+        return {
+          splitMethod: "proportional",
+          payer: defaultPayer,
+          label: "Prorata",
+          explanation: "Poche commune au prorata des revenus",
+        };
+      }
+      return {
+        splitMethod: "50_50",
+        payer: defaultPayer,
+        label: "50 / 50",
+        explanation: "Poche commune 50/50",
+      };
+    }
+
+    // Non alloué
+    return {
+      splitMethod: "50_50",
+      payer: defaultPayer,
+      label: "50 / 50",
+      explanation: "Répartition standard 50/50",
+    };
+  };
+
+  const handleOpenTricountModal = (row: any) => {
+    const info = parseBankRowInfo(row);
+    setSelectedRowForTricount(row);
+
+    const matched = tricountMatchMap.get(info.rowKey) || null;
+    setMatchedTricountItem(matched);
+
+    if (matched) {
+      if ("payerPersonId" in matched) {
+        setTricountModalType(matched.nature === "placement" ? "placement" : "expense");
+        setTricountDate(matched.date || info.cleanDate);
+        setTricountLabel(matched.label || info.cleanLabel);
+        setTricountAmount(matched.amount || info.cleanAmount);
+        setTricountPayer(matched.payerPersonId || "person1");
+        setTricountPocketId(matched.pocketId || "unallocated");
+        setTricountSubPocketId(matched.subPocketId || "");
+        setTricountSubPocketName(matched.subPocketName || "");
+        setTricountSplitMethod(matched.splitMethod || "50_50");
+      } else {
+        setTricountModalType("income");
+        setTricountDate(matched.date || info.cleanDate);
+        setTricountLabel(matched.label || info.cleanLabel);
+        setTricountAmount(matched.amount || info.cleanAmount);
+        setTricountBeneficiary(matched.beneficiaryPersonId || "person1");
+      }
+      setShowSplitOverride(false);
+      setShowTricountModal(true);
+      return;
+    }
+
+    const cleanAmount = info.cleanAmount;
+    const isIncome = info.isIncome;
+    const cleanDate = info.cleanDate;
+    const cleanLabel = info.cleanLabel;
+
+    let detectedPocketId = "unallocated";
+    let detectedSubPocketId = "";
+    let detectedSubPocketName = "";
+
+    if (savingsStrategy) {
+      const cleanLabelLower = cleanLabel.toLowerCase();
+      const aiCat = (row.aiCategory || row.category || "").toString().toLowerCase();
+      const aiSub = (row.aiSubCategory || row.subCategory || "").toString().toLowerCase();
+      const supplier = (row.supplierFound || "").toString().toLowerCase();
+      const comment = (row.comment || "").toString().toLowerCase();
+
+      const searchTerms = [cleanLabelLower, aiCat, aiSub, supplier, comment].filter(Boolean);
+
+      // Priorité 1 : Recherche dans les sous-poches
+      outerSubLoop: for (const p of savingsStrategy.pockets) {
+        if (p.subItems && p.subItems.length > 0) {
+          for (const sub of p.subItems) {
+            const subName = sub.name.toLowerCase();
+            if (subName.length >= 3) {
+              for (const term of searchTerms) {
+                if (term.includes(subName) || subName.includes(term)) {
+                  detectedPocketId = p.id;
+                  detectedSubPocketId = sub.id;
+                  detectedSubPocketName = sub.name;
+                  break outerSubLoop;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Priorité 2 : Si aucune sous-poche n'a matché, recherche dans les poches
+      if (detectedPocketId === "unallocated") {
+        for (const p of savingsStrategy.pockets) {
+          const pName = p.name.toLowerCase();
+          if (pName.length >= 3) {
+            for (const term of searchTerms) {
+              if (term.includes(pName) || pName.includes(term)) {
+                detectedPocketId = p.id;
+                break;
+              }
+            }
+          }
+          if (detectedPocketId !== "unallocated") break;
+        }
+      }
+    }
+
+    const auto = computeAutoSplit(detectedPocketId, detectedSubPocketId);
+    let detectedSplit: TricountSplitMethod = auto.splitMethod;
+    let detectedPayer: TricountPayer = auto.payer;
+    let detectedBeneficiary: TricountBeneficiary =
+      currentUser.toLowerCase() === p2Name.toLowerCase() && !isSoloMode ? "person2" : "person1";
+
+    const foundPocket = savingsStrategy?.pockets.find((p) => p.id === detectedPocketId);
+    const isPlacement = isPlacementPocket(foundPocket);
+    const initialModalType: "expense" | "placement" | "income" = isIncome
+      ? "income"
+      : isPlacement
+      ? "placement"
+      : "expense";
+
+    setTricountModalType(initialModalType);
+    setTricountDate(cleanDate);
+    setTricountLabel(cleanLabel);
+    setTricountAmount(cleanAmount || "");
+    setTricountPayer(detectedPayer);
+    setTricountBeneficiary(detectedBeneficiary);
+    setTricountPocketId(detectedPocketId);
+    setTricountSubPocketId(detectedSubPocketId);
+    setTricountSubPocketName(detectedSubPocketName);
+    setTricountSplitMethod(detectedSplit);
+    setShowSplitOverride(false);
+    setShowTricountModal(true);
+  };
+
+  const handleConfirmTricount = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tricountLabel.trim() || tricountAmount === "" || Number(tricountAmount) <= 0) return;
+
+    const m = tricountDate.slice(0, 7) || new Date().toISOString().slice(0, 7);
+    const numAmt = Math.round(Number(tricountAmount) * 100) / 100;
+    const info = selectedRowForTricount ? parseBankRowInfo(selectedRowForTricount) : null;
+
+    if (tricountModalType === "income") {
+      const incomeId =
+        matchedTricountItem && !("payerPersonId" in matchedTricountItem)
+          ? matchedTricountItem.id
+          : `inc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      if (matchedTricountItem && "payerPersonId" in matchedTricountItem) {
+        deleteExpense(matchedTricountItem.id);
+      }
+
+      const income: TricountIncome = {
+        id: incomeId,
+        month: m,
+        date: tricountDate,
+        label: tricountLabel.trim(),
+        amount: numAmt,
+        beneficiaryPersonId: isSoloMode ? "person1" : tricountBeneficiary,
+        source: "bank_import",
+        bankAccount:
+          selectedRowForTricount?.accountLabel ||
+          selectedRowForTricount?.sourceFile ||
+          undefined,
+        bankReference: info?.rowReference || undefined,
+        bankRowId: info?.rowKey || undefined,
+        createdAt: matchedTricountItem?.createdAt || Date.now(),
+      };
+
+      addOrUpdateIncome(income);
+      setShowTricountModal(false);
+      setTricountToast(
+        matchedTricountItem
+          ? `Revenu mis à jour dans le Budget (${m}) !`
+          : `Revenu de ${formatEur(income.amount)} ajouté au Budget (${m}) !`
+      );
+      setTimeout(() => setTricountToast(null), 4000);
+      return;
+    }
+
+    const pocket = savingsStrategy?.pockets.find((p) => p.id === tricountPocketId);
+    const subItem = pocket?.subItems?.find((s) => s.id === tricountSubPocketId);
+    const subPocketName = subItem ? subItem.name : tricountSubPocketName || undefined;
+
+    const expenseId =
+      matchedTricountItem && "payerPersonId" in matchedTricountItem
+        ? matchedTricountItem.id
+        : `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    if (matchedTricountItem && !("payerPersonId" in matchedTricountItem)) {
+      deleteIncome(matchedTricountItem.id);
+    }
+
+    const expense: TricountExpense = {
+      id: expenseId,
+      month: m,
+      date: tricountDate,
+      label: tricountLabel.trim(),
+      amount: numAmt,
+      payerPersonId: tricountPayer,
+      pocketId: tricountPocketId,
+      pocketName: pocket ? pocket.name : "Autre / Non classé",
+      subPocketId: tricountSubPocketId || undefined,
+      subPocketName,
+      splitMethod: tricountSplitMethod,
+      nature: tricountModalType === "placement" ? "placement" : "expense",
+      source: "bank_import",
+      bankAccount:
+        selectedRowForTricount?.accountLabel ||
+        selectedRowForTricount?.sourceFile ||
+        undefined,
+      bankReference: info?.rowReference || undefined,
+      bankRowId: info?.rowKey || undefined,
+      createdAt: matchedTricountItem?.createdAt || Date.now(),
+    };
+
+    addOrUpdateExpense(expense);
+    setShowTricountModal(false);
+    const typeLabel = tricountModalType === "placement" ? "Placement" : "Dépense";
+    setTricountToast(
+      matchedTricountItem
+        ? `${typeLabel} mis(e) à jour dans le Budget (${m}) !`
+        : `${typeLabel} de ${formatEur(expense.amount)} ajouté(e) au Budget (${m}) !`
+    );
+    setTimeout(() => setTricountToast(null), 4000);
+  };
+
+  const handleDeleteMatchedTricountItem = () => {
+    if (!matchedTricountItem) return;
+    const label = matchedTricountItem.label || "cette opération";
+    if (window.confirm(`Retirer "${label}" du Budget ?`)) {
+      if ("payerPersonId" in matchedTricountItem) {
+        deleteExpense(matchedTricountItem.id);
+      } else {
+        deleteIncome(matchedTricountItem.id);
+      }
+      setShowTricountModal(false);
+      setTricountToast(`Opération "${label}" retirée du Budget !`);
+      setTimeout(() => setTricountToast(null), 4000);
+    }
+  };
   const [isAiSectionCollapsed, setIsAiSectionCollapsed] = useState(true);
 
   // ===== ajout manuel de ligne (CSV dédié) =====
@@ -283,6 +751,7 @@ const Banking: React.FC = () => {
     setBoursoPassword("");
     setBoursoSyncResult(null);
     setBoursoSyncPreview(false);
+    setBoursoDuplicateSelection(new Set());
     setShowBoursoSyncModal(true);
   };
 
@@ -326,6 +795,15 @@ const Banking: React.FC = () => {
       });
       setBoursoSyncResult(result);
       setBoursoSyncPreview(true);
+      // Auto-select all detected authorization duplicates for removal
+      const allDupRefs = new Set<string>();
+      for (const item of result.items || []) {
+        for (const dup of item.duplicateRows || []) {
+          const ref = dup.existingRow?.reference;
+          if (ref) allDupRefs.add(ref);
+        }
+      }
+      setBoursoDuplicateSelection(allDupRefs);
     } catch (e: any) {
       setBoursoSyncError(e?.message || "Erreur lors de la synchronisation");
     } finally {
@@ -351,6 +829,7 @@ const Banking: React.FC = () => {
         pages: boursoPages,
         userId: currentUser,
         dryRun: false,
+        duplicateRefsToRemove: Array.from(boursoDuplicateSelection),
       });
       setBoursoSyncResult(result);
       setBoursoSyncPreview(false);
@@ -1264,6 +1743,192 @@ const Banking: React.FC = () => {
     return { headers, rows, delimiter };
   }, [selectedUploadIds, csvCache, uploads]);
 
+  const tricountMatchMap = useMemo(() => {
+    const matches = new Map<string, TricountExpense | TricountIncome>();
+    const allItems: Array<TricountExpense | TricountIncome> = [
+      ...tricountExpenses,
+      ...tricountIncomes,
+    ];
+    if (allItems.length === 0 || merged.rows.length === 0) {
+      return matches;
+    }
+
+    const itemByBankRowId = new Map<string, TricountExpense | TricountIncome>();
+    const itemByBankReference = new Map<string, TricountExpense | TricountIncome>();
+    const legacyItems: Array<TricountExpense | TricountIncome> = [];
+
+    for (const item of allItems) {
+      if (item.bankRowId) {
+        itemByBankRowId.set(item.bankRowId, item);
+      }
+      if (item.bankReference) {
+        itemByBankReference.set(item.bankReference, item);
+      }
+      if (!item.bankRowId && !item.bankReference) {
+        legacyItems.push(item);
+      }
+    }
+
+    const matchedRowKeys = new Set<string>();
+    const usedItemIds = new Set<string>();
+
+    const assignMatch = (
+      rowKey: string,
+      item: TricountExpense | TricountIncome | undefined,
+    ) => {
+      if (!item || usedItemIds.has(item.id) || matchedRowKeys.has(rowKey)) return false;
+      matches.set(rowKey, item);
+      matchedRowKeys.add(rowKey);
+      usedItemIds.add(item.id);
+      return true;
+    };
+
+    // Étape 1 : référence bancaire stable (ne décale pas après une suppression de ligne)
+    for (const row of merged.rows) {
+      const info = parseBankRowInfo(row);
+      if (info.rowReference) {
+        assignMatch(info.rowKey, itemByBankReference.get(info.rowReference));
+      }
+    }
+
+    // Étape 1b : identifiant de ligne stable (ref:/fp:), puis ancien index CSV
+    for (const row of merged.rows) {
+      const info = parseBankRowInfo(row);
+      if (matchedRowKeys.has(info.rowKey)) continue;
+      if (assignMatch(info.rowKey, itemByBankRowId.get(info.rowKey))) continue;
+
+      const legacyItem = info.legacyRowKey
+        ? itemByBankRowId.get(info.legacyRowKey)
+        : undefined;
+      if (
+        legacyItem &&
+        (!legacyItem.bankReference ||
+          legacyItem.bankReference === info.rowReference) &&
+        Math.abs((legacyItem.amount || 0) - info.cleanAmount) < 0.02
+      ) {
+        assignMatch(info.rowKey, legacyItem);
+      }
+    }
+
+    // Étape 2 : Correspondances par signature pour opérations antérieures
+    if (legacyItems.length > 0) {
+      const normalizeText = (s: string) =>
+        (s || "")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]/g, "");
+
+      const legacyByCents = new Map<
+        number,
+        Array<{ item: TricountExpense | TricountIncome; used: boolean }>
+      >();
+      for (const item of legacyItems) {
+        const cents = Math.round((item.amount || 0) * 100);
+        if (!legacyByCents.has(cents)) {
+          legacyByCents.set(cents, []);
+        }
+        legacyByCents.get(cents)!.push({ item, used: false });
+      }
+
+      for (const row of merged.rows) {
+        const info = parseBankRowInfo(row);
+        if (matchedRowKeys.has(info.rowKey)) continue;
+
+        const rowCents = Math.round(info.cleanAmount * 100);
+        const candidates = legacyByCents.get(rowCents);
+        if (!candidates || candidates.length === 0) continue;
+
+        const normRow = normalizeText(info.cleanLabel);
+        const rowTime = new Date(info.cleanDate).getTime();
+
+        let bestCandidate: {
+          item: TricountExpense | TricountIncome;
+          used: boolean;
+        } | null = null;
+        let minDiffDays = Infinity;
+
+        for (const candidate of candidates) {
+          if (candidate.used || usedItemIds.has(candidate.item.id)) continue;
+
+          const normItem = normalizeText(candidate.item.label);
+          const labelMatch =
+            normItem === normRow ||
+            (normItem.length >= 3 &&
+              normRow.length >= 3 &&
+              (normItem.includes(normRow) || normRow.includes(normItem)));
+          if (!labelMatch) continue;
+
+          let diffDays = 0;
+          if (candidate.item.date && !isNaN(rowTime)) {
+            const itemTime = new Date(candidate.item.date).getTime();
+            if (!isNaN(itemTime)) {
+              diffDays = Math.abs(itemTime - rowTime) / (1000 * 60 * 60 * 24);
+            }
+          }
+
+          if (diffDays <= 45 && diffDays < minDiffDays) {
+            minDiffDays = diffDays;
+            bestCandidate = candidate;
+          }
+        }
+
+        if (bestCandidate) {
+          bestCandidate.used = true;
+          assignMatch(info.rowKey, bestCandidate.item);
+        }
+      }
+
+      // Étape 3 : Opérations renommées (ex: "Ba 1" renommé en "Baguette")
+      // Correspondance sur le même montant en centimes + date identique ou très proche
+      for (const row of merged.rows) {
+        const info = parseBankRowInfo(row);
+        if (matchedRowKeys.has(info.rowKey)) continue;
+
+        const rowCents = Math.round(info.cleanAmount * 100);
+        const candidates = legacyByCents.get(rowCents);
+        if (!candidates || candidates.length === 0) continue;
+
+        const rowTime = new Date(info.cleanDate).getTime();
+        let bestCandidate: {
+          item: TricountExpense | TricountIncome;
+          used: boolean;
+        } | null = null;
+        let minDiffDays = Infinity;
+
+        for (const candidate of candidates) {
+          if (candidate.used || usedItemIds.has(candidate.item.id)) continue;
+
+          let diffDays = Infinity;
+          if (candidate.item.date && !isNaN(rowTime)) {
+            const itemTime = new Date(candidate.item.date).getTime();
+            if (!isNaN(itemTime)) {
+              diffDays = Math.abs(itemTime - rowTime) / (1000 * 60 * 60 * 24);
+            }
+          }
+
+          // Pour une opération importée de la banque (source === "bank_import"),
+          // autoriser jusqu'à 7 jours d'écart (décalage dateOp / dateVal / week-end).
+          // Sinon, exiger la date exacte (0 jour d'écart).
+          const isBankImport = candidate.item.source === "bank_import";
+          const maxAllowedDays = isBankImport ? 7 : 0;
+
+          if (diffDays <= maxAllowedDays && diffDays < minDiffDays) {
+            minDiffDays = diffDays;
+            bestCandidate = candidate;
+          }
+        }
+
+        if (bestCandidate) {
+          bestCandidate.used = true;
+          assignMatch(info.rowKey, bestCandidate.item);
+        }
+      }
+    }
+
+    return matches;
+  }, [merged.rows, tricountExpenses, tricountIncomes]);
+
   const getCategoryOptions = useMemo(() => {
     return schema.map((c) => c.category);
   }, [schema]);
@@ -1373,6 +2038,14 @@ const Banking: React.FC = () => {
         currentUser,
       );
       if (!saved) throw new Error("Échec suppression ligne");
+
+      rebindBankRowIdsAfterCsvRowDelete(
+        uploadId,
+        rowIndex,
+        (row.reference || "").toString().trim() || undefined,
+      );
+      setTricountExpenses(getStoredExpenses());
+      setTricountIncomes(getStoredIncomes());
 
       setCsvCache((prev) => ({ ...prev, [uploadId]: updatedText }));
     } catch (e: any) {
@@ -1580,7 +2253,7 @@ const Banking: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Onglets (style Suivi Marché) */}
-      <div className="border-b border-gray-200 dark:border-gray-700">
+      <div className="border-b border-[rgba(255,255,255,0.06)]">
         <nav className="-mb-px flex flex-wrap justify-center gap-6">
           {accountSections.map((section) => {
             const isActive = currentSection === section.id;
@@ -1593,8 +2266,8 @@ const Banking: React.FC = () => {
                 onClick={() => setCurrentSection(section.id)}
                 className={`py-4 px-1 border-b-2 font-medium text-sm ${
                   isActive
-                    ? "border-primary-500 text-primary-600 dark:text-primary-400"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-300 dark:hover:text-white dark:hover:border-gray-600"
+                    ? "border-[#c8a55e] text-[#c8a55e] text-[#c8a55e]"
+                    : "border-transparent text-[#555555] hover:text-[#8a8a8a] hover:border-[rgba(255,255,255,0.08)] text-[#8a8a8a] hover:text-[#f5f5f5] dark:hover:border-[rgba(255,255,255,0.06)]"
                 }`}
               >
                 <div className="flex items-center space-x-2">
@@ -1611,10 +2284,10 @@ const Banking: React.FC = () => {
 
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+          <h1 className="text-3xl font-bold text-[#f5f5f5]">
             {currentSectionLabel}
           </h1>
-          <p className="text-gray-600 dark:text-gray-300 mt-2">
+          <p className="text-[#8a8a8a] mt-2">
             Importez vos transactions via CSV puis triez/filtrez dans un tableau
             dynamique.
           </p>
@@ -1662,7 +2335,7 @@ const Banking: React.FC = () => {
 
       {error && (
         <div className="card border border-danger-500">
-          <p className="text-danger-600 dark:text-danger-400">{error}</p>
+          <p className="text-[#ef4444]">{error}</p>
         </div>
       )}
 
@@ -1674,14 +2347,14 @@ const Banking: React.FC = () => {
           />
           <div className="relative card w-full max-w-5xl mx-4">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              <h2 className="text-lg font-semibold text-[#f5f5f5]">
                 {isInvestmentSection
                   ? `Saisie manuelle (tableur) - ${currentSectionLabel}`
                   : `Ajouter une ligne manuelle (${currentSectionLabel})`}
               </h2>
               <button
                 type="button"
-                className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                className="text-[#555555] hover:text-[#8a8a8a] hover:text-[#f5f5f5]"
                 onClick={closeManualModal}
                 title="Fermer"
               >
@@ -1709,15 +2382,15 @@ const Banking: React.FC = () => {
               return (
                 <div className="space-y-4">
                   {usingBase ? (
-                    <div className="text-xs text-gray-500 dark:text-gray-300">
+                    <div className="text-xs text-[#8a8a8a]">
                       Champs basés sur tes CSV existants (mêmes colonnes).
                     </div>
                   ) : (
-                    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-3">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    <div className="rounded-lg border border-[rgba(255,255,255,0.06)] p-3 space-y-3">
+                      <div className="text-sm font-medium text-[#f5f5f5]">
                         Colonnes (personnalisables)
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-300">
+                      <div className="text-xs text-[#8a8a8a]">
                         Conseil: garde au minimum{" "}
                         <span className="font-mono">dateVal</span> et{" "}
                         <span className="font-mono">amount</span> pour que les
@@ -1728,12 +2401,12 @@ const Banking: React.FC = () => {
                         {manualCustomHeaders.map((h) => (
                           <span
                             key={h}
-                            className="inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+                            className="inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs border border-[rgba(255,255,255,0.06)] text-[#f5f5f5]"
                           >
                             {h}
                             <button
                               type="button"
-                              className="text-gray-400 hover:text-danger-500 transition-colors"
+                              className="text-[#555555] hover:text-danger-500 transition-colors"
                               title="Supprimer"
                               onClick={() => {
                                 const next = manualCustomHeaders.filter(
@@ -1822,23 +2495,23 @@ const Banking: React.FC = () => {
                         >
                           Copier la structure
                         </button>
-                        <div className="text-xs text-gray-500 dark:text-gray-300">
+                        <div className="text-xs text-[#8a8a8a]">
                           Applique exactement les mêmes colonnes qu'un autre
                           compte investissement.
                         </div>
                       </div>
 
-                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 overflow-auto max-h-[55vh]">
+                      <div className="rounded-lg border border-[rgba(255,255,255,0.06)] overflow-auto max-h-[55vh]">
                         <table className="min-w-full text-sm">
-                          <thead className="sticky top-0 bg-white dark:bg-gray-900 z-10">
-                            <tr className="border-b border-gray-200 dark:border-gray-700">
-                              <th className="px-2 py-2 text-left text-xs text-gray-500 w-[56px]">
+                          <thead className="sticky top-0 bg-[#111111] bg-[#0a0a0a] z-10">
+                            <tr className="border-b border-[rgba(255,255,255,0.06)]">
+                              <th className="px-2 py-2 text-left text-xs text-[#555555] w-[56px]">
                                 #
                               </th>
                               {effectiveHeaders.map((h) => (
                                 <th
                                   key={h}
-                                  className="px-2 py-2 text-left text-xs text-gray-500 whitespace-nowrap"
+                                  className="px-2 py-2 text-left text-xs text-[#555555] whitespace-nowrap"
                                 >
                                   {manualFieldLabel(h)}
                                   {required.has(h) ? " *" : ""}
@@ -1851,9 +2524,9 @@ const Banking: React.FC = () => {
                             {(manualRowsDraft || []).map((row, rowIdx) => (
                               <tr
                                 key={rowIdx}
-                                className="border-b border-gray-100 dark:border-gray-800"
+                                className="border-b border-[rgba(255,255,255,0.06)]"
                               >
-                                <td className="px-2 py-2 text-xs text-gray-500">
+                                <td className="px-2 py-2 text-xs text-[#555555]">
                                   {rowIdx + 1}
                                 </td>
                                 {effectiveHeaders.map((h) => (
@@ -1879,7 +2552,7 @@ const Banking: React.FC = () => {
                                 <td className="px-2 py-1">
                                   <button
                                     type="button"
-                                    className="text-gray-400 hover:text-danger-500"
+                                    className="text-[#555555] hover:text-danger-500"
                                     title="Supprimer la ligne"
                                     onClick={() =>
                                       setManualRowsDraft((prev) =>
@@ -1909,7 +2582,7 @@ const Banking: React.FC = () => {
                               span2 ? "sm:col-span-2" : ""
                             }`}
                           >
-                            <label className="text-xs text-gray-500">
+                            <label className="text-xs text-[#555555]">
                               {manualFieldLabel(h)}
                               {required.has(h) ? " *" : ""}
                             </label>
@@ -1926,7 +2599,7 @@ const Banking: React.FC = () => {
                               placeholder={manualFieldPlaceholder(h)}
                             />
                             {h === "amount" && (
-                              <div className="text-[11px] text-gray-500">
+                              <div className="text-[11px] text-[#555555]">
                                 Astuce: mets un “-” pour une dépense, “+” pour
                                 un revenu.
                               </div>
@@ -1968,15 +2641,15 @@ const Banking: React.FC = () => {
             className="absolute inset-0 bg-black/40"
             onClick={closeBoursoSyncModal}
           />
-          <div className="relative w-full max-w-4xl mx-4 bg-white dark:bg-[#111111] rounded-lg p-6 shadow-xl max-h-[85vh] overflow-y-auto">
+          <div className="relative w-full max-w-4xl mx-4 bg-[#111111] rounded-lg p-6 shadow-xl max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              <h2 className="text-lg font-semibold text-[#f5f5f5]">
                 Mise à jour BoursoBank
               </h2>
               <button
                 type="button"
                 onClick={closeBoursoSyncModal}
-                className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                className="text-[#555555] hover:text-[#8a8a8a] hover:text-[#f5f5f5]"
                 title="Fermer"
               >
                 ✕
@@ -1998,7 +2671,7 @@ const Banking: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
                     Mot de passe BoursoBank
                   </label>
                   <input
@@ -2006,11 +2679,11 @@ const Banking: React.FC = () => {
                     value={boursoPassword}
                     onChange={(e) => setBoursoPassword(e.target.value)}
                     placeholder="Mot de passe (non stocké)"
-                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                    className="input-field"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
                     Pages à récupérer
                   </label>
                   <input
@@ -2019,7 +2692,7 @@ const Banking: React.FC = () => {
                     max={50}
                     value={boursoPages}
                     onChange={(e) => setBoursoPages(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                    className="input-field"
                   />
                 </div>
               </div>
@@ -2029,7 +2702,7 @@ const Banking: React.FC = () => {
                   type="button"
                   onClick={handleBoursoSync}
                   disabled={boursoSyncLoading}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-60"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] disabled:opacity-60"
                 >
                   {boursoSyncLoading ? (
                     <>
@@ -2060,21 +2733,21 @@ const Banking: React.FC = () => {
                     return (
                       <div
                         key={`${item.section}-${item.accountId}`}
-                        className="border border-gray-200 dark:border-gray-700 rounded-md p-4"
+                        className="border border-[rgba(255,255,255,0.06)] rounded-md p-4"
                       >
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
                           <div>
-                            <p className="font-medium text-gray-900 dark:text-gray-100">
+                            <p className="font-medium text-[#f5f5f5]">
                               {item.accountName}
                             </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <p className="text-xs text-[#555555]">
                               {item.section === "bank"
                                 ? "Compte bancaire"
                                 : "Investissement"}{" "}
                               • {item.filename}
                             </p>
                           </div>
-                          <div className="text-sm text-gray-600 dark:text-gray-300">
+                          <div className="text-sm text-[#8a8a8a]">
                             {item.addedCount} nouvelle(s) • total{" "}
                             {item.totalCount}
                           </div>
@@ -2083,12 +2756,12 @@ const Banking: React.FC = () => {
                         {item.newRows?.length ? (
                           <div className="overflow-x-auto">
                             <table className="min-w-full text-sm">
-                              <thead className="bg-gray-50 dark:bg-gray-800">
+                              <thead className="bg-[#0a0a0a] bg-[#161616]">
                                 <tr>
                                   {headers.map((h) => (
                                     <th
                                       key={h}
-                                      className="px-2 py-1 text-left text-gray-600 dark:text-gray-300"
+                                      className="px-2 py-1 text-left text-[#8a8a8a]"
                                     >
                                       {h}
                                     </th>
@@ -2099,12 +2772,12 @@ const Banking: React.FC = () => {
                                 {item.newRows.map((row, idx) => (
                                   <tr
                                     key={idx}
-                                    className="border-t border-gray-200 dark:border-gray-700"
+                                    className="border-t border-[rgba(255,255,255,0.06)]"
                                   >
                                     {headers.map((h) => (
                                       <td
                                         key={h}
-                                        className="px-2 py-1 text-gray-900 dark:text-gray-100 whitespace-nowrap"
+                                        className="px-2 py-1 text-[#f5f5f5] whitespace-nowrap"
                                       >
                                         {(row?.[h] ?? "").toString()}
                                       </td>
@@ -2115,9 +2788,135 @@ const Banking: React.FC = () => {
                             </table>
                           </div>
                         ) : (
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                          <p className="text-sm text-[#555555]">
                             Aucune nouvelle donnée détectée.
                           </p>
+                        )}
+
+                        {/* Doublons d'autorisation détectés */}
+                        {item.duplicateRows?.length > 0 && (
+                          <div className="mt-4 border border-amber-300 dark:border-amber-600 rounded-md p-3 bg-amber-50 dark:bg-amber-900/20">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Trash2
+                                size={16}
+                                className="text-amber-600 dark:text-amber-400"
+                              />
+                              <p className="font-medium text-amber-800 dark:text-amber-300 text-sm">
+                                {item.duplicateRows.length} ligne(s)
+                                indésirable(s) détectée(s)
+                              </p>
+                              <span className="text-xs text-amber-600 dark:text-amber-400">
+                                (autorisations en cours remplacées par le
+                                paiement définitif)
+                              </span>
+                            </div>
+                            <div className="space-y-3">
+                              {item.duplicateRows.map((dup, dupIdx) => {
+                                const dupRef = dup.existingRow?.reference || "";
+                                const isSelected =
+                                  boursoDuplicateSelection.has(dupRef);
+                                const dupHeaders = Object.keys(
+                                  dup.existingRow || {},
+                                ).filter(
+                                  (h) =>
+                                    ![
+                                      "aiCategory",
+                                      "aiSubCategory",
+                                      "supplierFound",
+                                      "comment",
+                                      "currency",
+                                      "accountLabel",
+                                    ].includes(h),
+                                );
+                                return (
+                                  <div
+                                    key={dupIdx}
+                                    className={`rounded-md border p-2 transition-colors ${
+                                      isSelected
+                                        ? "border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/20"
+                                        : "border-[rgba(255,255,255,0.08)] bg-[#111111]"
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-2 mb-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => {
+                                          setBoursoDuplicateSelection(
+                                            (prev) => {
+                                              const next = new Set(prev);
+                                              if (next.has(dupRef)) {
+                                                next.delete(dupRef);
+                                              } else {
+                                                next.add(dupRef);
+                                              }
+                                              return next;
+                                            },
+                                          );
+                                        }}
+                                        className="mt-0.5"
+                                        title="Supprimer cette ligne d'autorisation"
+                                      />
+                                      <div className="flex-1">
+                                        <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                                          {dup.reason}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                      <table className="min-w-full text-xs">
+                                        <thead>
+                                          <tr>
+                                            <th className="px-2 py-0.5 text-left text-[#555555]"></th>
+                                            {dupHeaders.map((h) => (
+                                              <th
+                                                key={h}
+                                                className="px-2 py-0.5 text-left text-[#555555]"
+                                              >
+                                                {h}
+                                              </th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          <tr className="bg-red-50 dark:bg-red-900/30">
+                                            <td className="px-2 py-0.5 text-red-600 dark:text-red-400 font-medium whitespace-nowrap">
+                                              ❌ Autorisation
+                                            </td>
+                                            {dupHeaders.map((h) => (
+                                              <td
+                                                key={h}
+                                                className="px-2 py-0.5 text-[#8a8a8a] whitespace-nowrap"
+                                              >
+                                                {(
+                                                  dup.existingRow?.[h] ?? ""
+                                                ).toString()}
+                                              </td>
+                                            ))}
+                                          </tr>
+                                          <tr className="bg-green-50 dark:bg-green-900/30">
+                                            <td className="px-2 py-0.5 text-green-600 dark:text-green-400 font-medium whitespace-nowrap">
+                                              ✅ Définitif
+                                            </td>
+                                            {dupHeaders.map((h) => (
+                                              <td
+                                                key={h}
+                                                className="px-2 py-0.5 text-[#8a8a8a] whitespace-nowrap"
+                                              >
+                                                {(
+                                                  dup.newRow?.[h] ?? ""
+                                                ).toString()}
+                                              </td>
+                                            ))}
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
                         )}
                       </div>
                     );
@@ -2128,7 +2927,7 @@ const Banking: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleBoursoReject}
-                        className="px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+                        className="px-4 py-2 rounded-md border border-[rgba(255,255,255,0.08)] text-[#f5f5f5]"
                       >
                         Refuser
                       </button>
@@ -2136,7 +2935,7 @@ const Banking: React.FC = () => {
                         type="button"
                         onClick={handleBoursoConfirm}
                         disabled={boursoSyncLoading}
-                        className="px-4 py-2 rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-60"
+                        className="px-4 py-2 rounded-md bg-[#c8a55e] text-white hover:bg-[#d4b06a] disabled:opacity-60"
                       >
                         Valider
                       </button>
@@ -2155,12 +2954,12 @@ const Banking: React.FC = () => {
           <div className="card">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <TableIcon className="text-gray-500" size={18} />
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                <TableIcon className="text-[#555555]" size={18} />
+                <h2 className="text-lg font-semibold text-[#f5f5f5]">
                   Fichiers
                 </h2>
               </div>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-[#555555]">
                 {uploads.length} fichier{uploads.length > 1 ? "s" : ""}
               </span>
             </div>
@@ -2186,7 +2985,7 @@ const Banking: React.FC = () => {
 
             <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
               {uploads.length === 0 && (
-                <div className="text-sm text-gray-500 dark:text-gray-400">
+                <div className="text-sm text-[#555555]">
                   Aucun CSV pour le moment. Uploade ton premier fichier.
                 </div>
               )}
@@ -2198,8 +2997,8 @@ const Banking: React.FC = () => {
                     key={u.id}
                     className={`rounded-lg border p-3 transition-colors ${
                       active
-                        ? "border-primary-500 bg-primary-100 hover:bg-primary-200 dark:bg-primary-900/35 dark:hover:bg-primary-900/45"
-                        : "border-gray-200 dark:border-gray-700 hover:border-primary-300 hover:bg-primary-600 dark:hover:border-primary-600 dark:hover:bg-primary-900/20"
+                        ? "border-[#c8a55e] bg-[rgba(200,165,94,0.12)] hover:bg-primary-200 dark:bg-primary-900/35 dark:hover:bg-primary-900/45"
+                        : "border-[rgba(255,255,255,0.06)] hover:border-primary-300 hover:bg-[#c8a55e] dark:hover:border-primary-600 dark:hover:bg-primary-900/20"
                     }`}
                   >
                     <div className="flex items-start gap-2">
@@ -2220,18 +3019,18 @@ const Banking: React.FC = () => {
                         className="mt-1"
                         title="Inclure dans le tableau"
                       />
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                      <div className="text-sm font-medium text-[#f5f5f5] truncate">
                         {u.filename}
                       </div>
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">
+                    <div className="text-xs text-[#555555] mt-1">
                       {(u.sizeBytes / 1024).toFixed(1)} KB •{" "}
                       {new Date(u.uploadedAt).toLocaleString("fr-FR")}
                     </div>
 
                     <div className="flex justify-end items-center gap-3 mt-2">
                       <button
-                        className="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                        className="text-[#555555] hover:text-[#c8a55e] dark:hover:text-primary-400 transition-colors"
                         title="Télécharger"
                         onClick={() => handleDownloadUpload(u.id)}
                         disabled={loading}
@@ -2239,7 +3038,7 @@ const Banking: React.FC = () => {
                         <Download size={16} />
                       </button>
                       <button
-                        className="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+                        className="text-[#555555] hover:text-[#c8a55e] dark:hover:text-primary-400 transition-colors"
                         title="Renommer"
                         onClick={() => handleRenameUpload(u.id)}
                         disabled={loading}
@@ -2247,7 +3046,7 @@ const Banking: React.FC = () => {
                         <Pencil size={16} />
                       </button>
                       <button
-                        className="text-gray-400 hover:text-danger-500 transition-colors"
+                        className="text-[#555555] hover:text-danger-500 transition-colors"
                         title="Supprimer"
                         onClick={() => handleDeleteSelected(u.id)}
                         disabled={loading}
@@ -2268,7 +3067,7 @@ const Banking: React.FC = () => {
             <div className="card mb-6">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  <h2 className="text-lg font-semibold text-[#f5f5f5]">
                     Catégorisation IA
                   </h2>
                   <div className="flex gap-2">
@@ -2323,20 +3122,20 @@ const Banking: React.FC = () => {
                   </div>
                 </div>
 
-                <p className="text-sm text-gray-600 dark:text-gray-300">
+                <p className="text-sm text-[#8a8a8a]">
                   L’IA écrit le résultat dans{" "}
                   <span className="font-mono">aiCategory</span> et{" "}
                   <span className="font-mono">aiSubCategory</span>.
                 </p>
 
                 {schemaError && (
-                  <div className="text-sm text-danger-600 dark:text-danger-400">
+                  <div className="text-sm text-[#ef4444]">
                     {schemaError}
                   </div>
                 )}
 
                 {!isAiSectionCollapsed && (
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+                  <div className="rounded-lg border border-[rgba(255,255,255,0.06)] p-4 space-y-4">
                     <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
                       <div className="flex gap-2 items-center">
                         <input
@@ -2375,7 +3174,7 @@ const Banking: React.FC = () => {
                         >
                           Sauvegarder
                         </button>
-                        <label className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                        <label className="text-sm text-[#8a8a8a] flex items-center gap-2">
                           <input
                             type="checkbox"
                             checked={showAdvancedSchema}
@@ -2398,7 +3197,7 @@ const Banking: React.FC = () => {
                       {schema.map((cat) => (
                         <div
                           key={cat.category}
-                          className="rounded-lg border border-gray-200 dark:border-gray-700 p-3"
+                          className="rounded-lg border border-[rgba(255,255,255,0.06)] p-3"
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                             <div className="flex items-center gap-2">
@@ -2418,7 +3217,7 @@ const Banking: React.FC = () => {
                               />
                               <button
                                 type="button"
-                                className="text-gray-400 hover:text-danger-500 transition-colors"
+                                className="text-[#555555] hover:text-danger-500 transition-colors"
                                 title="Supprimer la catégorie"
                                 onClick={() => {
                                   if (
@@ -2487,12 +3286,12 @@ const Banking: React.FC = () => {
                             {cat.subcategories.map((sub) => (
                               <span
                                 key={sub}
-                                className="inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+                                className="inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs border border-[rgba(255,255,255,0.06)] text-[#f5f5f5]"
                               >
                                 {sub}
                                 <button
                                   type="button"
-                                  className="text-gray-400 hover:text-danger-500 transition-colors"
+                                  className="text-[#555555] hover:text-danger-500 transition-colors"
                                   title="Supprimer sous-catégorie"
                                   onClick={() => {
                                     setSchema((prev) =>
@@ -2524,7 +3323,7 @@ const Banking: React.FC = () => {
 
                     {showAdvancedSchema && (
                       <div className="space-y-2">
-                        <div className="text-sm text-gray-600 dark:text-gray-300">
+                        <div className="text-sm text-[#8a8a8a]">
                           Mode avancé: tu peux éditer le JSON directement. Si tu
                           as une erreur du type{" "}
                           <span className="font-mono">Expected '{"}"}'</span>,
@@ -2567,7 +3366,7 @@ const Banking: React.FC = () => {
             <div className="flex flex-col gap-3">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  <h2 className="text-lg font-semibold text-[#f5f5f5]">
                     {selectedUploadIds.length === 0
                       ? "Tableau"
                       : selectedUploadIds.length === 1
@@ -2575,7 +3374,7 @@ const Banking: React.FC = () => {
                             ?.filename || "Tableau"
                         : `${selectedUploadIds.length} fichiers sélectionnés`}
                   </h2>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-[#555555]">
                     {merged.rows.length} lignes • {merged.headers.length}{" "}
                     colonnes • séparateur “
                     {merged.delimiter === "\t"
@@ -2590,7 +3389,7 @@ const Banking: React.FC = () => {
                 <div className="flex flex-col sm:flex-row gap-3">
                   <div className="relative">
                     <Search
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-[#555555]"
                       size={18}
                     />
                     <input
@@ -2601,7 +3400,7 @@ const Banking: React.FC = () => {
                         setPage(1);
                       }}
                       placeholder="Rechercher…"
-                      className="pl-10 w-full rounded-lg py-2 bg-white dark:bg-[#111111] text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none"
+                      className="pl-10 w-full rounded-lg py-2 bg-[#111111] text-[#f5f5f5] placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none"
                     />
                   </div>
 
@@ -2625,9 +3424,9 @@ const Banking: React.FC = () => {
               </div>
 
               {showColumnsPanel && merged.headers.length > 0 && (
-                <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <div className="rounded-lg border border-[rgba(255,255,255,0.06)] p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    <div className="text-sm font-medium text-[#f5f5f5]">
                       Colonnes visibles
                     </div>
                     <div className="flex gap-2">
@@ -2660,7 +3459,7 @@ const Banking: React.FC = () => {
                     {merged.headers.map((h) => (
                       <label
                         key={h}
-                        className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+                        className="flex items-center gap-2 text-sm text-[#8a8a8a]"
                       >
                         <input
                           type="checkbox"
@@ -2684,7 +3483,7 @@ const Banking: React.FC = () => {
 
             <div className="mt-4">
               {merged.headers.length === 0 ? (
-                <div className="text-sm text-gray-500 dark:text-gray-400">
+                <div className="text-sm text-[#555555]">
                   Coche un ou plusieurs CSV à gauche pour afficher les
                   transactions (ex: tous les mois).
                 </div>
@@ -2694,19 +3493,22 @@ const Banking: React.FC = () => {
                     <table className="min-w-full text-sm">
                       <thead className="bg-transparent">
                         <tr>
+                          <th className="w-10 px-2 py-2 text-center text-xs font-semibold text-[#555555] uppercase tracking-wider" title="Statut Budget Réel & Tricount">
+                            Budget
+                          </th>
                           {displayHeaders.map((h) => {
                             const isActive = sortKey === h;
                             return (
                               <th
                                 key={h}
-                                className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-white cursor-pointer select-none"
+                                className="px-3 py-2 text-left text-xs font-medium text-[#555555] uppercase tracking-wider text-[#f5f5f5] cursor-pointer select-none"
                                 onClick={() => toggleSort(h)}
                                 title="Cliquer pour trier"
                               >
                                 <span className="inline-flex items-center gap-2">
                                   {h}
                                   {isActive && (
-                                    <span className="text-gray-400">
+                                    <span className="text-[#555555]">
                                       {sortDir === "asc" ? "▲" : "▼"}
                                     </span>
                                   )}
@@ -2715,22 +3517,51 @@ const Banking: React.FC = () => {
                             );
                           })}
                           {editRowsMode && (
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-white">
+                            <th className="px-3 py-2 text-right text-xs font-medium text-[#555555] uppercase tracking-wider text-[#f5f5f5]">
                               Actions
                             </th>
                           )}
                         </tr>
                       </thead>
-                      <tbody className="bg-white dark:bg-[#111111]">
-                        {pagedRows.map((row, idx) => (
-                          <tr
-                            key={idx}
-                            className="even:bg-gray-50 dark:even:bg-gray-800"
-                          >
+                      <tbody className="bg-[#111111]">
+                        {pagedRows.map((row) => {
+                          const rowKey = getStableBankRowId(row);
+                          const matchedItem = tricountMatchMap.get(rowKey);
+                          const isInTricount = !!matchedItem;
+
+                          return (
+                            <tr
+                              key={rowKey || getLegacyIndexBankRowId(row)}
+                              className={`even:bg-primary-50/40 dark:even:bg-primary-950/25 hover:bg-primary-50/70 dark:hover:bg-primary-900/30 transition-colors ${
+                                isInTricount ? "bg-emerald-50/30 dark:bg-emerald-950/15" : ""
+                              }`}
+                            >
+                              <td className="w-10 px-2 py-2 border-t border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-center whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenTricountModal(row)}
+                                  className={`w-7 h-7 inline-flex items-center justify-center rounded-lg transition shadow-xs group ${
+                                    isInTricount
+                                      ? "bg-emerald-500 text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 border border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/20"
+                                      : "bg-primary-50 text-[#c8a55e] hover:bg-[#c8a55e] hover:text-white dark:bg-primary-950/60 text-[#c8a55e] dark:hover:bg-[#c8a55e] hover:text-[#f5f5f5] border border-primary-200 dark:border-primary-800"
+                                  }`}
+                                  title={
+                                    isInTricount
+                                      ? `Présent dans le Budget (${matchedItem?.month || ""}${matchedItem?.label ? ` • "${matchedItem.label}"` : ""}) - Cliquer pour modifier ou retirer`
+                                      : "Ajouter au Budget Réel & Tricount"
+                                  }
+                                >
+                                  {isInTricount ? (
+                                    <Check size={15} className="stroke-[2.5] transition-transform group-hover:scale-110" />
+                                  ) : (
+                                    <Plus size={15} className="transition-transform group-hover:scale-110" />
+                                  )}
+                                </button>
+                              </td>
                             {displayHeaders.map((h) => (
                               <td
                                 key={h}
-                                className="px-3 py-2 border-t border-gray-100 dark:border-gray-700 text-gray-900 dark:text-gray-100 whitespace-nowrap"
+                                className="px-3 py-2 border-t border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#f5f5f5] whitespace-nowrap"
                               >
                                 {h === "aiCategory" || h === "aiSubCategory"
                                   ? (() => {
@@ -2807,7 +3638,7 @@ const Banking: React.FC = () => {
                                           title="Cliquer pour modifier"
                                         >
                                           {value || (
-                                            <span className="text-gray-400">
+                                            <span className="text-[#555555]">
                                               —
                                             </span>
                                           )}
@@ -2818,10 +3649,10 @@ const Banking: React.FC = () => {
                               </td>
                             ))}
                             {editRowsMode && (
-                              <td className="px-3 py-2 border-t border-gray-100 dark:border-gray-700 text-right">
+                              <td className="px-3 py-2 border-t border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-right whitespace-nowrap">
                                 <button
                                   type="button"
-                                  className="text-gray-400 hover:text-danger-500 disabled:opacity-50"
+                                  className="text-[#555555] hover:text-danger-500 disabled:opacity-50 p-1"
                                   title="Supprimer la ligne"
                                   onClick={() =>
                                     deleteRowFromCsv(
@@ -2835,20 +3666,21 @@ const Banking: React.FC = () => {
                               </td>
                             )}
                           </tr>
-                        ))}
+                        );
+                      })}
                       </tbody>
                     </table>
                   </div>
 
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4">
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-[#555555]">
                       {sortedRows.length} résultat
                       {sortedRows.length > 1 ? "s" : ""} • page {page} /{" "}
                       {pageCount}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
-                      <label className="text-sm text-gray-500 flex items-center gap-2">
+                      <label className="text-sm text-[#555555] flex items-center gap-2">
                         Lignes:
                         <select
                           value={pageSize}
@@ -2910,6 +3742,544 @@ const Banking: React.FC = () => {
           </div>
         </div>
       </div>
+      {/* Toast Feedback Tricount */}
+      {tricountToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#0a0a0a] text-white dark:bg-[#111111] dark:text-[#f5f5f5] px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-3 text-sm font-medium animate-fade-in">
+          <CheckCircle2 size={16} className="text-emerald-400 dark:text-emerald-600 flex-shrink-0" />
+          <span>{tricountToast}</span>
+          <Link
+            to="/budget-tracking"
+            className="text-xs font-bold text-primary-400 dark:text-[#c8a55e] hover:underline flex items-center gap-0.5 ml-2"
+          >
+            <span>Voir</span>
+            <ArrowRight size={12} />
+          </Link>
+        </div>
+      )}
+
+      {/* Modale d'intégration Budget */}
+      {showTricountModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111111] dark:bg-[#1a1a1a] rounded-2xl max-w-md w-full p-6 shadow-2xl border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] space-y-4 animate-scale-up text-xs">
+            <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] pb-3">
+              <h3 className="text-base font-bold text-[#f5f5f5]">
+                {matchedTricountItem ? "Modifier dans le Budget" : "Intégrer dans le Budget"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowTricountModal(false)}
+                className="text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {matchedTricountItem && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
+                <div className="flex items-center gap-2 min-w-0">
+                  <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="font-semibold text-xs truncate">
+                    Présent dans le Budget ({matchedTricountItem.month})
+                    {matchedTricountItem.label ? ` : "${matchedTricountItem.label}"` : ""}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDeleteMatchedTricountItem}
+                  className="text-xs font-bold text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline flex items-center gap-1 shrink-0 ml-2"
+                  title="Supprimer cette opération du Budget"
+                >
+                  <Trash2 size={13} />
+                  Retirer
+                </button>
+              </div>
+            )}
+
+            {/* Toggle Dépense (-) vs Placement (-) vs Revenu (+) */}
+            <div className="grid grid-cols-3 p-1 rounded-xl bg-[#1a1a1a] bg-[#161616]">
+              <button
+                type="button"
+                onClick={() => setTricountModalType("expense")}
+                className={`py-1.5 rounded-lg font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+                  tricountModalType === "expense"
+                    ? "bg-[#111111] text-rose-600 dark:text-rose-400 shadow-xs"
+                    : "text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5]"
+                }`}
+              >
+                <span>Dépense (-)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTricountModalType("placement")}
+                className={`py-1.5 rounded-lg font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+                  tricountModalType === "placement"
+                    ? "bg-[#111111] text-indigo-600 dark:text-indigo-400 shadow-xs"
+                    : "text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5]"
+                }`}
+              >
+                <span>Placement (-)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTricountModalType("income")}
+                className={`py-1.5 rounded-lg font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+                  tricountModalType === "income"
+                    ? "bg-[#111111] text-emerald-600 dark:text-emerald-400 shadow-xs"
+                    : "text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5]"
+                }`}
+              >
+                <span>Revenu (+)</span>
+              </button>
+            </div>
+
+            {tricountModalType === "income" ? (
+              /* FORMULAIRE REVENU */
+              <form onSubmit={handleConfirmTricount} className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-[#8a8a8a] mb-1">
+                      Date de l'opération *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={tricountDate}
+                      onChange={(e) => setTricountDate(e.target.value)}
+                      className="input-field w-full py-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-[#8a8a8a] mb-1">
+                      Montant reçu (€) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={tricountAmount}
+                      onChange={(e) =>
+                        setTricountAmount(e.target.value === "" ? "" : Number(e.target.value))
+                      }
+                      className="input-field w-full py-1.5 font-bold text-emerald-600 dark:text-emerald-400"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#8a8a8a] mb-1">
+                    Libellé du revenu *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Salaire, Remboursement, Prime..."
+                    value={tricountLabel}
+                    onChange={(e) => setTricountLabel(e.target.value)}
+                    className="input-field w-full py-1.5"
+                  />
+                </div>
+
+                {!isSoloMode ? (
+                  <div>
+                    <label className="block font-bold text-[#8a8a8a] mb-1">
+                      Bénéficiaire du revenu *
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTricountBeneficiary("person1")}
+                        className={`p-2 rounded-xl border text-center font-bold transition ${
+                          tricountBeneficiary === "person1"
+                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        {p1Name}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTricountBeneficiary("person2")}
+                        className={`p-2 rounded-xl border text-center font-bold transition ${
+                          tricountBeneficiary === "person2"
+                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        {p2Name}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTricountBeneficiary("shared")}
+                        className={`p-2 rounded-xl border text-center font-bold transition ${
+                          tricountBeneficiary === "shared"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-300"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        Commun (50/50)
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-[#0a0a0a] dark:bg-[#222222] border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-xs text-[#8a8a8a] font-medium">
+                    Mode Solo : revenu 100% alloué à {p1Name}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)]">
+                  <button
+                    type="button"
+                    onClick={() => setShowTricountModal(false)}
+                    className="btn-secondary py-1.5"
+                  >
+                    Annuler
+                  </button>
+                  <button type="submit" className="btn-primary py-1.5 px-4 font-bold bg-emerald-600 hover:bg-emerald-700 text-white">
+                    {matchedTricountItem ? "Mettre à jour le revenu" : "Confirmer l'ajout du revenu"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* FORMULAIRE DÉPENSE */
+              <form onSubmit={handleConfirmTricount} className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-[#8a8a8a] mb-1">
+                      Date de l'opération *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={tricountDate}
+                      onChange={(e) => setTricountDate(e.target.value)}
+                      className="input-field w-full py-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-[#8a8a8a] mb-1">
+                      Montant (€) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={tricountAmount}
+                      onChange={(e) =>
+                        setTricountAmount(e.target.value === "" ? "" : Number(e.target.value))
+                      }
+                      className="input-field w-full py-1.5 font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#8a8a8a] mb-1">
+                    Libellé de la dépense *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={tricountLabel}
+                    onChange={(e) => setTricountLabel(e.target.value)}
+                    className="input-field w-full py-1.5"
+                  />
+                </div>
+
+                {!isSoloMode && (
+                  <div>
+                    <label className="block font-bold text-[#8a8a8a] mb-1">
+                      Payé par *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTricountPayer("person1")}
+                        className={`p-2 rounded-xl border text-center font-bold transition ${
+                          tricountPayer === "person1"
+                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        {p1Name}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTricountPayer("person2")}
+                        className={`p-2 rounded-xl border text-center font-bold transition ${
+                          tricountPayer === "person2"
+                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        {p2Name}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Poche de la Stratégie */}
+                <div>
+                  <label className="block font-bold text-[#8a8a8a] mb-1">
+                    Poche de la Stratégie *
+                  </label>
+                  <select
+                    value={tricountPocketId}
+                    onChange={(e) => {
+                      const pid = e.target.value;
+                      setTricountPocketId(pid);
+                      setTricountSubPocketId("");
+                      setTricountSubPocketName("");
+                      const chosenPocket = savingsStrategy?.pockets.find((p) => p.id === pid);
+                      if (chosenPocket) {
+                        if (isPlacementPocket(chosenPocket)) {
+                          setTricountModalType("placement");
+                        } else {
+                          setTricountModalType("expense");
+                        }
+                      }
+                      const auto = computeAutoSplit(pid, "");
+                      setTricountSplitMethod(auto.splitMethod);
+                      if (auto.splitMethod === "100_person1") {
+                        setTricountPayer("person1");
+                      } else if (auto.splitMethod === "100_person2") {
+                        setTricountPayer("person2");
+                      }
+                    }}
+                    className="input-field w-full py-1.5"
+                  >
+                    <option value="unallocated">Autres / Dépense non classée</option>
+                    {savingsStrategy?.pockets && savingsStrategy.pockets.filter((p) => !isPlacementPocket(p)).length > 0 && (
+                      <optgroup label="Dépenses de vie courante & charges">
+                        {savingsStrategy.pockets
+                          .filter((p) => !isPlacementPocket(p))
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.allocationValue} {p.allocationType === "percent" ? "%" : "€"})
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                    {savingsStrategy?.pockets && savingsStrategy.pockets.filter((p) => isPlacementPocket(p)).length > 0 && (
+                      <optgroup label="Épargne & Placements / Investissements">
+                        {savingsStrategy.pockets
+                          .filter((p) => isPlacementPocket(p))
+                          .map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.allocationValue} {p.allocationType === "percent" ? "%" : "€"})
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+
+                {/* Sous-poche associée (si la poche en possède) */}
+                {(() => {
+                  const currentPocket = savingsStrategy?.pockets.find(
+                    (p) => p.id === tricountPocketId
+                  );
+                  if (
+                    !currentPocket ||
+                    !currentPocket.subItems ||
+                    currentPocket.subItems.length === 0
+                  ) {
+                    return null;
+                  }
+                  return (
+                    <div>
+                      <label className="block font-bold text-[#8a8a8a] mb-1">
+                        Sous-poche de "{currentPocket.name}" (Optionnel)
+                      </label>
+                      <select
+                        value={tricountSubPocketId}
+                        onChange={(e) => {
+                          const subId = e.target.value;
+                          setTricountSubPocketId(subId);
+                          const subItem = currentPocket.subItems?.find((s) => s.id === subId);
+                          setTricountSubPocketName(subItem ? subItem.name : "");
+                          const auto = computeAutoSplit(tricountPocketId, subId);
+                          setTricountSplitMethod(auto.splitMethod);
+                          if (auto.splitMethod === "100_person1") {
+                            setTricountPayer("person1");
+                          } else if (auto.splitMethod === "100_person2") {
+                            setTricountPayer("person2");
+                          }
+                        }}
+                        className="input-field w-full py-1.5"
+                      >
+                        <option value="">-- Aucune sous-poche (Dépense globale) --</option>
+                        {currentPocket.subItems.map((sub) => (
+                          <option key={sub.id} value={sub.id}>
+                            {sub.name} {sub.amount > 0 ? `(${formatEur(sub.amount)}/m)` : ""}
+                            {sub.personId === "person1"
+                              ? ` · ${p1Name}`
+                              : sub.personId === "person2"
+                              ? ` · ${p2Name}`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
+
+                {/* Répartition Tricount Automatique basée sur le setup de la poche */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-[#8a8a8a]">
+                      Répartition Tricount
+                    </label>
+                    {!isSoloMode && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSplitOverride((prev) => !prev)}
+                        className="text-[10px] text-[#555555] hover:text-[#c8a55e] dark:hover:text-primary-400 underline font-medium"
+                      >
+                        {showSplitOverride ? "Masquer ajustements" : "Ajuster manuellement"}
+                      </button>
+                    )}
+                  </div>
+
+                  {(() => {
+                    const auto = computeAutoSplit(tricountPocketId, tricountSubPocketId);
+                    return (
+                      <div className="p-2.5 rounded-xl bg-[#0a0a0a] dark:bg-[#222222] border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span
+                            style={
+                              tricountSplitMethod === "100_person1"
+                                ? p1Theme.badgeStyle
+                                : tricountSplitMethod === "100_person2"
+                                ? p2Theme.badgeStyle
+                                : p1Theme.badgeStyle
+                            }
+                            className="px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5"
+                          >
+                            {tricountSplitMethod === "50_50" ? (
+                              <>
+                                <Split size={12} /> 50 / 50
+                              </>
+                            ) : tricountSplitMethod === "proportional" ? (
+                              <>
+                                <Scale size={12} /> Prorata
+                              </>
+                            ) : tricountSplitMethod === "100_person1" ? (
+                              <>
+                                <User size={12} /> 100% {p1Name}
+                              </>
+                            ) : (
+                              <>
+                                <User size={12} /> 100% {p2Name}
+                              </>
+                            )}
+                          </span>
+                          <span className="text-[11px] text-[#8a8a8a]">
+                            {auto.explanation}
+                          </span>
+                        </div>
+                        <span className="text-[10px] uppercase font-bold tracking-wide text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded">
+                          Auto
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {!isSoloMode && showSplitOverride && (
+                    <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5 animate-fade-in">
+                      <button
+                        type="button"
+                        onClick={() => setTricountSplitMethod("50_50")}
+                        className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
+                          tricountSplitMethod === "50_50"
+                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        50 / 50
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTricountSplitMethod("proportional")}
+                        className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
+                          tricountSplitMethod === "proportional"
+                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        Prorata
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTricountSplitMethod("100_person1");
+                          setTricountPayer("person1");
+                        }}
+                        className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
+                          tricountSplitMethod === "100_person1"
+                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        100% {p1Name}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTricountSplitMethod("100_person2");
+                          setTricountPayer("person2");
+                        }}
+                        className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
+                          tricountSplitMethod === "100_person2"
+                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        100% {p2Name}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)]">
+                  <button
+                    type="button"
+                    onClick={() => setShowTricountModal(false)}
+                    className="btn-secondary py-1.5"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    className={`btn-primary py-1.5 px-4 font-bold ${
+                      tricountModalType === "placement"
+                        ? "bg-indigo-600 hover:bg-indigo-700 text-white"
+                        : ""
+                    }`}
+                  >
+                    {matchedTricountItem
+                      ? (tricountModalType === "placement"
+                          ? "Mettre à jour le placement"
+                          : "Mettre à jour la dépense")
+                      : (tricountModalType === "placement"
+                          ? "Confirmer l'ajout du placement"
+                          : "Confirmer l'ajout de la dépense")}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

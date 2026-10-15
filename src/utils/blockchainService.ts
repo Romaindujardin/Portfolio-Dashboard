@@ -359,7 +359,7 @@ const getNativeBalance = async (
     // Construire l'URL avec le chainid pour Etherscan v2
     const url = `${config.apiUrl}?module=account&action=balance&address=${address}&chainid=${config.chainId}&apikey=${config.apiKey}`;
 
-    console.log(`🔍 [API] Récupération du solde natif ${blockchain}:`, url);
+    console.log(`🔍 [API] Récupération du solde natif ${blockchain}`);
 
     const response = await apiCallWithRetry(url);
     console.log(
@@ -425,7 +425,7 @@ const getTokenBalances = async (
     // Construire l'URL avec le chainid pour Etherscan v2
     const url = `${config.apiUrl}?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=asc&chainid=${config.chainId}&apikey=${config.apiKey}`;
 
-    console.log(`🔍 [API] Récupération des tokens ${blockchain}:`, url);
+    console.log(`🔍 [API] Récupération des tokens ${blockchain}`);
 
     const response = await apiCallWithRetry(url);
     const transactions = response.result;

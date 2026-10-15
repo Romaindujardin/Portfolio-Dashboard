@@ -7,7 +7,7 @@ Application complète de suivi de portefeuille d'investissements avec données t
 - **Dashboard** : Vue d'ensemble du portefeuille avec graphiques et statistiques
 - **Gestion d'investissements** : Ajout, modification, suppression avec prix temps réel
 - **Suivi de marché** : Watchlist pour actions et cryptomonnaies
-- **Actualités financières** : Flux d'actualités avec filtres
+- **Stratégie d'épargne & Prévisions** : Allocation budgétaire par poches (loyer, projets, investissements) et simulation temporelle avec intérêts composés
 - **Analyse IA** : Analyse de portefeuille avec recommandations Gemini AI
 - **Données temps réel** : Prix Yahoo Finance sans limitations
 - **🗄️ Base de données SQLite** : Stockage fiable et performant

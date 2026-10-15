@@ -79,7 +79,7 @@ const AIAnalysis: React.FC = () => {
       case "Très Élevé":
         return "text-red-600 bg-red-100";
       default:
-        return "text-gray-600 bg-gray-100";
+        return "text-[#8a8a8a] bg-[#1a1a1a]";
     }
   };
 
@@ -106,11 +106,11 @@ const AIAnalysis: React.FC = () => {
 
       {/* Statistiques du portefeuille */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+        <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Assets Totaux</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-[#8a8a8a]">Assets Totaux</p>
+              <p className="text-2xl font-bold text-[#f5f5f5]">
                 {investments.length +
                   wallets.reduce(
                     (sum, wallet) =>
@@ -124,11 +124,11 @@ const AIAnalysis: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+        <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Valeur Totale</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-[#8a8a8a]">Valeur Totale</p>
+              <p className="text-2xl font-bold text-[#f5f5f5]">
                 $
                 {(
                   investments.reduce(
@@ -157,11 +157,11 @@ const AIAnalysis: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+        <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Wallets</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-[#8a8a8a]">Wallets</p>
+              <p className="text-2xl font-bold text-[#f5f5f5]">
                 {wallets.length}
               </p>
             </div>
@@ -208,8 +208,8 @@ const AIAnalysis: React.FC = () => {
         <div className="space-y-6">
           {/* Scores et métriques */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
+              <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4">
                 Niveau de Risque
               </h3>
               <div
@@ -221,8 +221,8 @@ const AIAnalysis: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
+              <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4">
                 Score de Diversification
               </h3>
               <div className="flex items-center space-x-2">
@@ -233,26 +233,26 @@ const AIAnalysis: React.FC = () => {
                 >
                   {analysis.diversificationScore}
                 </span>
-                <span className="text-gray-500">/ 10</span>
+                <span className="text-[#555555]">/ 10</span>
               </div>
             </div>
           </div>
 
           {/* Évaluation globale */}
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+          <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
+            <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4 flex items-center">
               <BarChart3 className="mr-2" />
               Évaluation Globale
             </h3>
-            <p className="text-gray-700 leading-relaxed">
+            <p className="text-[#8a8a8a] leading-relaxed">
               {analysis.overallAssessment}
             </p>
           </div>
 
           {/* Forces et Faiblesses */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center text-green-600">
+            <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
+              <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4 flex items-center text-green-600">
                 <TrendingUp className="mr-2" />
                 Forces du Portefeuille
               </h3>
@@ -260,14 +260,14 @@ const AIAnalysis: React.FC = () => {
                 {analysis.strengths.map((strength, index) => (
                   <li key={index} className="flex items-start">
                     <span className="text-green-500 mr-2">✓</span>
-                    <span className="text-gray-700">{strength}</span>
+                    <span className="text-[#8a8a8a]">{strength}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center text-orange-600">
+            <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
+              <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4 flex items-center text-orange-600">
                 <AlertTriangle className="mr-2" />
                 Points d'Amélioration
               </h3>
@@ -275,7 +275,7 @@ const AIAnalysis: React.FC = () => {
                 {analysis.weaknesses.map((weakness, index) => (
                   <li key={index} className="flex items-start">
                     <span className="text-orange-500 mr-2">⚠</span>
-                    <span className="text-gray-700">{weakness}</span>
+                    <span className="text-[#8a8a8a]">{weakness}</span>
                   </li>
                 ))}
               </ul>
@@ -283,8 +283,8 @@ const AIAnalysis: React.FC = () => {
           </div>
 
           {/* Recommandations */}
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center text-blue-600">
+          <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
+            <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4 flex items-center text-blue-600">
               <Lightbulb className="mr-2" />
               Recommandations
             </h3>
@@ -294,26 +294,26 @@ const AIAnalysis: React.FC = () => {
                   <span className="bg-blue-100 text-blue-600 rounded-full w-6 h-6 flex items-center justify-center text-sm font-medium mr-3 mt-0.5">
                     {index + 1}
                   </span>
-                  <span className="text-gray-700">{recommendation}</span>
+                  <span className="text-[#8a8a8a]">{recommendation}</span>
                 </li>
               ))}
             </ul>
           </div>
 
           {/* Sentiment de marché */}
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+          <div className="bg-[#111111] rounded-lg p-6 shadow-sm border border-[rgba(255,255,255,0.06)]">
+            <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4 flex items-center">
               <Target className="mr-2" />
               Sentiment de Marché
             </h3>
-            <p className="text-gray-700 leading-relaxed">
+            <p className="text-[#8a8a8a] leading-relaxed">
               {analysis.marketSentiment}
             </p>
           </div>
 
           {/* Prochaines étapes */}
           <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-6 border border-purple-200">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center text-purple-600">
+            <h3 className="text-lg font-semibold text-[#f5f5f5] mb-4 flex items-center text-purple-600">
               <Target className="mr-2" />
               Prochaines Étapes Prioritaires
             </h3>
@@ -323,7 +323,7 @@ const AIAnalysis: React.FC = () => {
                   <span className="bg-purple-100 text-purple-600 rounded-full w-6 h-6 flex items-center justify-center text-sm font-medium mr-3 mt-0.5">
                     {index + 1}
                   </span>
-                  <span className="text-gray-700">{step}</span>
+                  <span className="text-[#8a8a8a]">{step}</span>
                 </li>
               ))}
             </ul>

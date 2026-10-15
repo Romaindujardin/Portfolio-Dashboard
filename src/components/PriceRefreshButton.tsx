@@ -114,9 +114,9 @@ const PriceRefreshButton: React.FC<PriceRefreshButtonProps> = ({
   const getVariantClasses = () => {
     switch (variant) {
       case "primary":
-        return "bg-blue-600 hover:bg-blue-700 text-white";
+        return "bg-[#c8a55e] hover:bg-[#d4b06a] text-white";
       default:
-        return "bg-gray-100 hover:bg-gray-200 text-gray-700";
+        return "bg-[#1a1a1a] hover:bg-[#1a1a1a] text-[#8a8a8a]";
     }
   };
 
@@ -145,7 +145,7 @@ const PriceRefreshButton: React.FC<PriceRefreshButtonProps> = ({
       </button>
 
       {showCountdown && (
-        <div className="flex items-center space-x-1 text-sm text-gray-500">
+        <div className="flex items-center space-x-1 text-sm text-[#555555]">
           <Clock size={14} />
           <span>{stats.nextUpdateText}</span>
         </div>

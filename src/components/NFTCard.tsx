@@ -32,7 +32,7 @@ const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
       optimism: "bg-red-500",
       avalanche: "bg-red-600",
     };
-    return colors[blockchain.toLowerCase()] || "bg-gray-500";
+    return colors[blockchain.toLowerCase()] || "bg-[#0a0a0a]0";
   };
 
   const getBlockchainName = (blockchain: string) => {
@@ -54,7 +54,7 @@ const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
         <img
           src={nft.logo || "/placeholder-nft.png"}
           alt={nft.name}
-          className="w-16 h-16 object-contain rounded-md bg-gray-100 dark:bg-gray-700"
+          className="w-16 h-16 object-contain rounded-md bg-[#1a1a1a] bg-[#1a1a1a]"
           onError={(e) => {
             const target = e.target as HTMLImageElement;
             target.src = "/placeholder-nft.png";
@@ -66,11 +66,11 @@ const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
       <div className="flex-1 min-w-0">
         {/* Nom et collection */}
         <div className="mb-2">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+          <h3 className="text-sm font-semibold text-[#f5f5f5] truncate">
             {nft.name}
           </h3>
           {nft.nftData && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+            <p className="text-xs text-[#555555] truncate">
               {nft.nftData.collection}
             </p>
           )}
@@ -84,7 +84,7 @@ const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
                 nft.blockchain
               )}`}
             ></span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
+            <span className="text-xs text-[#555555]">
               {getBlockchainName(nft.blockchain)}
             </span>
           </div>
@@ -92,14 +92,14 @@ const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
             <p className="text-sm font-semibold text-green-600 dark:text-green-400">
               {formatValue(nft.value || 0)}
             </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
+            <p className="text-xs text-[#555555]">
               {formatBalance(nft.balance, nft.decimals)} NFT
             </p>
           </div>
         </div>
 
         {/* Actions minimales */}
-        <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-100 dark:border-gray-600">
+        <div className="flex justify-between items-center mt-2 pt-2 border-t border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)]">
           {nft.nftData?.permalink && (
             <a
               href={nft.nftData.permalink}
@@ -113,7 +113,7 @@ const NFTCard: React.FC<NFTCardProps> = ({ nft, onToggleVisibility }) => {
           {onToggleVisibility && (
             <button
               onClick={onToggleVisibility}
-              className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              className="text-xs text-[#555555] hover:text-[#8a8a8a] text-[#555555] hover:text-[#f5f5f5]"
             >
               {nft.isHidden ? "Afficher" : "Masquer"}
             </button>

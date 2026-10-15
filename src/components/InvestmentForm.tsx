@@ -242,16 +242,16 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div
-        className="bg-white dark:bg-[#111111] rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto"
+        className="bg-[#111111] rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto"
         onClick={() => setShowSuggestions(false)}
       >
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+          <h2 className="text-xl font-bold text-[#f5f5f5]">
             {investment ? "Edit Investment" : "Add Investment"}
           </h2>
           <button
             onClick={onCancel}
-            className="text-gray-400 hover:text-gray-600 dark:text-gray-300 dark:hover:text-gray-100"
+            className="text-[#555555] hover:text-[#8a8a8a] hover:text-[#f5f5f5]"
           >
             <X size={24} />
           </button>
@@ -259,7 +259,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-[#f5f5f5] mb-1">
               Nom de l'Investissement
             </label>
             <input
@@ -274,7 +274,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-[#f5f5f5] mb-1">
               Type
             </label>
             <select
@@ -293,7 +293,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
           </div>
 
           <div className="relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-[#f5f5f5] mb-1">
               Symbole
             </label>
             <div className="relative">
@@ -312,24 +312,24 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
               />
               {loadingSuggestions && (
                 <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                  <Loader2 size={16} className="animate-spin text-gray-400" />
+                  <Loader2 size={16} className="animate-spin text-[#555555]" />
                 </div>
               )}
             </div>
 
             {/* Suggestions dropdown */}
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute z-50 w-full mt-1 bg-white rounded-md shadow-lg max-h-60 overflow-y-auto">
+              <div className="absolute z-50 w-full mt-1 bg-[#111111] rounded-md  max-h-60 overflow-y-auto">
                 {suggestions.map((suggestion, index) => (
                   <div
                     key={`${suggestion.symbol}-${index}`}
                     onClick={() => selectSuggestion(suggestion)}
-                    className="px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                    className="px-4 py-3 hover:bg-[#0a0a0a] cursor-pointer border-b border-[rgba(255,255,255,0.06)] last:border-b-0"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
-                          <span className="font-medium text-gray-900">
+                          <span className="font-medium text-[#f5f5f5]">
                             {suggestion.symbol}
                           </span>
                           <span
@@ -342,12 +342,12 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
                             {suggestion.type === "stock" ? "Action" : "Crypto"}
                           </span>
                         </div>
-                        <p className="text-sm text-gray-600 truncate">
+                        <p className="text-sm text-[#8a8a8a] truncate">
                           {suggestion.name}
                         </p>
                       </div>
                       <div className="text-right ml-4">
-                        <p className="font-medium text-gray-900">
+                        <p className="font-medium text-[#f5f5f5]">
                           ${suggestion.price.toLocaleString()}
                         </p>
                       </div>
@@ -359,7 +359,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
 
             {(formData.type === "stock" || formData.type === "crypto") && (
               <div className="mt-1">
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-[#555555]">
                   Tapez pour voir les suggestions et sélectionner
                 </p>
                 {formData.type === "crypto" && (
@@ -385,7 +385,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
           {/* Account type for stock */}
           {formData.type === "stock" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-[#8a8a8a] mb-1">
                 Compte associé (optionnel)
               </label>
               <div className="flex space-x-4">
@@ -428,7 +428,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-[#f5f5f5] mb-1">
                 Quantité
               </label>
               <input
@@ -445,7 +445,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-[#f5f5f5] mb-1">
                 Prix d'Achat
               </label>
               <input
@@ -463,7 +463,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-[#f5f5f5] mb-2">
               Prix actuel
             </label>
             <div className="flex items-center space-x-2">
@@ -472,7 +472,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
                 step="0.01"
                 value={formData.currentPrice || ""}
                 readOnly
-                className="flex-1 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50 dark:bg-[#2f2f2f] dark:text-gray-100"
+                className="flex-1 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-[#0a0a0a] dark:bg-[#2f2f2f] text-[#f5f5f5]"
                 placeholder="Prix automatique"
               />
               <button
@@ -490,7 +490,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
               </button>
             </div>
             {formData.currentPrice && (
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-[#555555] mt-1">
                 💡 Prix temps réel - Cliquez sur 🔄 pour actualiser
               </p>
             )}
@@ -500,7 +500,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-[#8a8a8a] mb-1">
               Date d'Achat
             </label>
             <input
@@ -514,7 +514,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-[#8a8a8a] mb-1">
               Notes (Optionnel)
             </label>
             <textarea
@@ -545,11 +545,11 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({
 
         {/* Statistiques des bases de données */}
         {/*
-        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">
+        <div className="mt-6 p-4 bg-[#0a0a0a] rounded-lg">
+          <h4 className="text-sm font-semibold text-[#8a8a8a] mb-2">
             📊 Bases de données
           </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-600">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-[#8a8a8a]">
             <div>
               <p className="font-medium">🪙 Cryptomonnaies:</p>
               <p>{cryptoDbStats.totalCryptos} disponibles</p>

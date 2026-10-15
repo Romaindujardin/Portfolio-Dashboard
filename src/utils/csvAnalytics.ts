@@ -94,6 +94,47 @@ export function getTimeBucketKey(date: Date, g: TimeGranularity): string {
   return groupKey(date, g);
 }
 
+// Helper to normalize strings for robust column comparison
+function normalizeCol(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+// Helper to get case-insensitive column value with smart fuzzy candidates
+function findBestColumnValue(
+  row: Record<string, string>,
+  explicitKey?: string,
+  candidates: string[] = [],
+  excludes: string[] = [],
+): string | undefined {
+  if (explicitKey) {
+    const val = getColumnValue(row, explicitKey);
+    if (val !== undefined && val.trim() !== "") return val;
+  }
+  // 1. Exact match on normalized candidate
+  for (const cand of candidates) {
+    const normC = normalizeCol(cand);
+    for (const k in row) {
+      const normK = normalizeCol(k);
+      if (excludes.some((ex) => normK.includes(normalizeCol(ex)))) continue;
+      if (normK === normC && row[k]?.trim() !== "") return row[k];
+    }
+  }
+  // 2. Contains match on normalized candidate
+  for (const cand of candidates) {
+    const normC = normalizeCol(cand);
+    for (const k in row) {
+      const normK = normalizeCol(k);
+      if (excludes.some((ex) => normK.includes(normalizeCol(ex)))) continue;
+      if (normK.includes(normC) && row[k]?.trim() !== "") return row[k];
+    }
+  }
+  return undefined;
+}
+
 // Helper to get case-insensitive column value
 function getColumnValue(
   row: Record<string, string>,
@@ -146,13 +187,37 @@ export function parseBankCsvTransactions(
   const txs: ParsedTransaction[] = [];
   for (const r of rows) {
     // Use DATEOP as primary date column (case-insensitive)
-    const date =
+    let date =
       (mapping?.date ? parseAnyDate(getColumnValue(r, mapping.date)) : null) ||
       parseAnyDate(getColumnValue(r, "DATEOP")) ||
       parseAnyDate(getColumnValue(r, "dateOp")) ||
       parseAnyDate(getColumnValue(r, "dateVal")) ||
       parseAnyDate(getColumnValue(r, "date")) ||
       null;
+
+    const ref =
+      (mapping && "reference" in mapping
+        ? getColumnValue(r, (mapping as any).reference)
+        : undefined) ||
+      getColumnValue(r, "reference") ||
+      getColumnValue(r, "REFERENCE");
+
+    if (ref && /^[0-9a-f]{24}$/i.test(ref)) {
+      const ts = parseInt(ref.substring(0, 8), 16) * 1000;
+      if (!isNaN(ts)) {
+        if (!date) {
+          date = new Date(ts);
+        } else {
+          // If date is significantly ahead (> 15 days) of the Boursorama ObjectId timestamp,
+          // it indicates a fallback date (e.g. today) assigned when date parsing failed
+          const diffDays = (date.getTime() - ts) / (1000 * 3600 * 24);
+          if (diffDays > 15) {
+            date = new Date(ts);
+          }
+        }
+      }
+    }
+
     const amount = parseFrenchNumber(
       (mapping?.amount ? getColumnValue(r, mapping.amount) : undefined) ||
         getColumnValue(r, "amount") ||
@@ -207,8 +272,30 @@ export function parseBankCsvTransactions(
     });
   }
 
-  // Sort by date
-  txs.sort((a, b) => a.date.getTime() - b.date.getTime());
+  // Sort by date, and if identical date, maintain balance-consistent sequence
+  txs.sort((a, b) => {
+    const d = a.date.getTime() - b.date.getTime();
+    if (d !== 0) return d;
+    if (a.accountBalance != null && b.accountBalance != null) {
+      if (
+        Math.abs(
+          Math.round((a.accountBalance + b.amount) * 100) -
+            Math.round(b.accountBalance * 100),
+        ) <= 1
+      ) {
+        return -1;
+      }
+      if (
+        Math.abs(
+          Math.round((b.accountBalance + a.amount) * 100) -
+            Math.round(a.accountBalance * 100),
+        ) <= 1
+      ) {
+        return 1;
+      }
+    }
+    return 0;
+  });
   return txs;
 }
 
@@ -222,65 +309,160 @@ export function parsePeaCsvHoldings(
   const holdings: PeaHolding[] = [];
   for (const r of rows) {
     const name = (
-      (mapping?.name
-        ? getColumnValue(r, mapping.name)
-        : getColumnValue(r, "name")) || ""
+      findBestColumnValue(r, mapping?.name, [
+        "libellesupport",
+        "libelle",
+        "support",
+        "nom",
+        "valeur",
+        "titre",
+        "designation",
+        "name",
+        "description",
+        "instrument",
+      ]) || ""
     ).trim();
+
     const isin = (
-      (mapping?.isin
-        ? getColumnValue(r, mapping.isin)
-        : getColumnValue(r, "isin")) || ""
+      findBestColumnValue(r, mapping?.isin, [
+        "isin",
+        "codeisin",
+        "code",
+        "symbole",
+        "ticker",
+        "symbol",
+      ]) || ""
     ).trim();
-    const quantity =
+
+    let amount =
       parseFrenchNumber(
-        mapping?.quantity
-          ? getColumnValue(r, mapping.quantity)
-          : getColumnValue(r, "quantity"),
-      ) ?? 0;
-    const amount =
-      parseFrenchNumber(
-        mapping?.amount
-          ? getColumnValue(r, mapping.amount)
-          : getColumnValue(r, "amount"),
+        findBestColumnValue(r, mapping?.amount, [
+          "encours",
+          "valorisation",
+          "montant",
+          "solde",
+          "valeurtotale",
+          "amount",
+          "total",
+          "value",
+        ]),
       ) ?? 0;
 
+    let quantity =
+      parseFrenchNumber(
+        findBestColumnValue(r, mapping?.quantity, [
+          "nbdeparts",
+          "nombredeparts",
+          "nbparts",
+          "parts",
+          "quantite",
+          "quantity",
+          "qte",
+          "nombre",
+          "titres",
+          "qty",
+        ]),
+      ) ?? 0;
+
+    let lastPrice = parseFrenchNumber(
+      findBestColumnValue(
+        r,
+        mapping?.lastPrice,
+        [
+          "valactuelle",
+          "valeuractuelle",
+          "derniercours",
+          "coursactuel",
+          "lastprice",
+          "prixactuel",
+          "vl",
+          "valeurliquidative",
+        ],
+        ["encours", "pru", "revient", "achat"],
+      ),
+    );
+
+    let buyingPrice = parseFrenchNumber(
+      findBestColumnValue(r, mapping?.buyingPrice, [
+        "prixderevient",
+        "pru",
+        "coursdachat",
+        "prixdachat",
+        "prixmoyen",
+        "buyingprice",
+        "purchaseprice",
+      ]),
+    );
+
+    let variationPercent = parseFrenchNumber(
+      findBestColumnValue(r, mapping?.variation, [
+        "performance",
+        "rendement",
+        "variation",
+        "perf",
+        "plusvalue",
+      ]),
+    );
+
+    let amountVariation = parseFrenchNumber(
+      findBestColumnValue(r, mapping?.amountVariation, [
+        "plusmoinsvalue",
+        "plusvalue",
+        "pv",
+        "amountvariation",
+        "gain",
+      ]),
+    );
+
+    // Si la ligne n'a ni nom ni ISIN, ignorer
     if (!name && !isin) continue;
+
+    // Gestion intelligente des Fonds Euro / supports avec Encours seul (sans parts ni cours)
+    if (amount > 0 && quantity === 0) {
+      if (lastPrice != null && lastPrice > 0) {
+        quantity = amount / lastPrice;
+      } else {
+        quantity = 1;
+        lastPrice = amount;
+        if (buyingPrice == null) buyingPrice = amount;
+      }
+    } else if (quantity > 0 && amount === 0 && lastPrice != null) {
+      amount = quantity * lastPrice;
+    }
+
+    if (lastPrice == null && quantity > 0 && amount > 0) {
+      lastPrice = amount / quantity;
+    }
+
+    // Calcul de la plus-value si non fournie directement
+    if (amountVariation == null) {
+      if (buyingPrice != null && quantity > 0) {
+        amountVariation = amount - buyingPrice * quantity;
+      } else if (variationPercent != null && amount > 0) {
+        const initial = amount / (1 + variationPercent / 100);
+        amountVariation = amount - initial;
+      }
+    }
+
+    // Calcul du % de performance si non fourni directement
+    if (variationPercent == null && buyingPrice != null && lastPrice != null && buyingPrice > 0) {
+      variationPercent = ((lastPrice - buyingPrice) / buyingPrice) * 100;
+    }
 
     holdings.push({
       name: name || isin || "Position",
       isin,
       quantity,
-      buyingPrice:
-        parseFrenchNumber(
-          mapping?.buyingPrice
-            ? getColumnValue(r, mapping.buyingPrice)
-            : getColumnValue(r, "buyingPrice"),
-        ) ?? undefined,
-      lastPrice:
-        parseFrenchNumber(
-          mapping?.lastPrice
-            ? getColumnValue(r, mapping.lastPrice)
-            : getColumnValue(r, "lastPrice"),
-        ) ?? undefined,
+      buyingPrice,
+      lastPrice,
       amount,
-      amountVariation:
-        parseFrenchNumber(
-          mapping?.amountVariation
-            ? getColumnValue(r, mapping.amountVariation)
-            : getColumnValue(r, "amountVariation"),
-        ) ?? undefined,
-      variationPercent:
-        parseFrenchNumber(
-          mapping?.variation
-            ? getColumnValue(r, mapping.variation)
-            : getColumnValue(r, "variation"),
-        ) ?? undefined,
-      lastMovementDate:
-        parseAnyDate(
-          mapping?.lastMovementDate
-            ? getColumnValue(r, mapping.lastMovementDate)
-            : getColumnValue(r, "lastMovementDate"),
-        ) ?? undefined,
+      amountVariation,
+      variationPercent,
+      lastMovementDate: parseAnyDate(
+        mapping?.lastMovementDate
+          ? getColumnValue(r, mapping.lastMovementDate)
+          : getColumnValue(r, "lastMovementDate"),
+      ) ?? undefined,
     });
   }
 

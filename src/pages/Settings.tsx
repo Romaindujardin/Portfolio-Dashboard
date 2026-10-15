@@ -14,7 +14,9 @@ import {
   Check,
   Wallet,
   Loader2,
+  Palette,
 } from "lucide-react";
+import { ACCENT_COLORS, applyUserTheme, getAccentColorDef } from "../utils/theme";
 import {
   getUserSettings,
   saveUserSettings,
@@ -68,6 +70,7 @@ const Settings: React.FC = () => {
     theme: "auto",
     currency: "USD",
     language: "fr",
+    accentColor: "blue",
   });
 
   // États pour gérer la visibilité des clés
@@ -183,6 +186,9 @@ const Settings: React.FC = () => {
     setIsLoading(true);
     try {
       saveUserSettings(username, settings);
+      if (settings.accentColor) {
+        applyUserTheme(settings.accentColor);
+      }
       setMessage("Paramètres sauvegardés avec succès !");
       setTimeout(() => setMessage(""), 3000);
     } catch (error) {
@@ -314,7 +320,7 @@ const Settings: React.FC = () => {
 
     return (
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
           {label}
         </label>
         <div className="relative">
@@ -323,14 +329,14 @@ const Settings: React.FC = () => {
             value={value}
             onChange={(e) => handleInputChange(field, e.target.value)}
             placeholder={placeholder}
-            className="w-full px-3 py-2 pr-20 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+            className="input-field pr-20"
           />
           <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex space-x-1">
             {isPassword && (
               <button
                 type="button"
                 onClick={() => setShowState(!showState)}
-                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                className="p-1 text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
                 title={showState ? "Masquer" : "Afficher"}
               >
                 {showState ? (
@@ -343,7 +349,7 @@ const Settings: React.FC = () => {
             <button
               type="button"
               onClick={() => copyToClipboard(value, fieldName)}
-              className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+              className="p-1 text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
               title="Copier"
             >
               {copiedField === fieldName ? (
@@ -613,15 +619,15 @@ const Settings: React.FC = () => {
         <div className="flex items-center space-x-4">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors duration-200"
+            className="p-2 text-[#8a8a8a] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors duration-200"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            <h1 className="text-2xl font-bold text-[#f5f5f5]">
               Paramètres de {username}
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">
+            <p className="text-[#8a8a8a]">
               Configurez vos clés API et préférences
             </p>
           </div>
@@ -629,7 +635,7 @@ const Settings: React.FC = () => {
         <button
           onClick={saveSettings}
           disabled={isLoading}
-          className="flex items-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+          className="flex items-center space-x-2 px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
         >
           <Save className="h-4 w-4" />
           <span>{isLoading ? "Sauvegarde..." : "Sauvegarder"}</span>
@@ -652,9 +658,58 @@ const Settings: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Colonne de gauche */}
         <div className="space-y-6">
+          {/* Section Couleur du profil */}
+          <div className="bg-[#111111] rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-[#f5f5f5]">
+                Couleur du profil
+              </h2>
+              <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-[#1a1a1a] bg-[#161616] text-[#8a8a8a]">
+                {getAccentColorDef(settings.accentColor).name}
+              </span>
+            </div>
+
+            <p className="text-xs text-[#555555] mb-4">
+              Choisissez la couleur principale d'accentuation pour {username} :
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {ACCENT_COLORS.map((color) => {
+                const isSelected = (settings.accentColor || "blue") === color.id;
+                return (
+                  <button
+                    key={color.id}
+                    type="button"
+                    onClick={() => {
+                      setSettings((prev) => ({ ...prev, accentColor: color.id }));
+                      applyUserTheme(color.id);
+                      if (username) {
+                        saveUserSettings(username, {
+                          ...settings,
+                          accentColor: color.id,
+                        });
+                      }
+                    }}
+                    title={color.name}
+                    className={`w-9 h-9 rounded-full transition-all flex items-center justify-center ${
+                      isSelected
+                        ? "ring-2 ring-offset-2 ring-primary-500 dark:ring-offset-[#111111] scale-110 "
+                        : "hover:scale-105 opacity-80 hover:opacity-100"
+                    }`}
+                    style={{ backgroundColor: color.hex }}
+                  >
+                    {isSelected && (
+                      <Check size={16} className="text-white stroke-[3] drop-shadow-sm" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Section Compte CEX */}
-          <div className="bg-white dark:bg-[#111111] rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+          <div className="bg-[#111111] rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
               Compte CEX
             </h2>
 
@@ -687,7 +742,7 @@ const Settings: React.FC = () => {
                     !settings.binanceApiKey ||
                     !settings.binanceSecretKey
                   }
-                  className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-400 text-white rounded-md transition-colors duration-200 disabled:cursor-not-allowed"
+                  className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-[#c8a55e] hover:bg-[#d4b06a] disabled:bg-gray-400 text-white rounded-md transition-colors duration-200 disabled:cursor-not-allowed"
                 >
                   {isConnectingBinance ? (
                     <>
@@ -721,8 +776,8 @@ const Settings: React.FC = () => {
           </div>
 
           {/* Section IA et API Personnalisée */}
-          <div className="bg-white dark:bg-[#111111] rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+          <div className="bg-[#111111] rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
               IA et API Personnalisée
             </h2>
 
@@ -738,7 +793,7 @@ const Settings: React.FC = () => {
 
               {/* Custom API Endpoint */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
                   Endpoint API personnalisé
                 </label>
                 <div className="relative">
@@ -749,7 +804,7 @@ const Settings: React.FC = () => {
                       handleInputChange("customApiEndpoint", e.target.value)
                     }
                     placeholder="https://api.example.com"
-                    className="w-full px-3 py-2 pr-12 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                    className="input-field pr-12"
                   />
                   <button
                     type="button"
@@ -759,7 +814,7 @@ const Settings: React.FC = () => {
                         "customApiEndpoint",
                       )
                     }
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
                     title="Copier"
                   >
                     {copiedField === "customApiEndpoint" ? (
@@ -774,14 +829,14 @@ const Settings: React.FC = () => {
           </div>
 
           {/* Section BoursoBank */}
-          <div className="bg-white dark:bg-[#111111] rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+          <div className="bg-[#111111] rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
               BoursoBank
             </h2>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
                   Identifiant client
                 </label>
                 <input
@@ -791,11 +846,11 @@ const Settings: React.FC = () => {
                     handleInputChange("boursoClientId", e.target.value)
                   }
                   placeholder="Votre identifiant client BoursoBank"
-                  className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                  className="input-field"
                 />
               </div>
 
-              <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="text-sm text-[#8a8a8a]">
                 {settings.boursoAccountMappings.length ? (
                   <div>
                     <button
@@ -803,7 +858,7 @@ const Settings: React.FC = () => {
                       onClick={() =>
                         setShowBoursoAccountsDetails(!showBoursoAccountsDetails)
                       }
-                      className="flex items-center gap-1 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+                      className="flex items-center gap-1 hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
                     >
                       {showBoursoAccountsDetails ? (
                         <ChevronDown className="h-4 w-4" />
@@ -827,7 +882,7 @@ const Settings: React.FC = () => {
                           return (
                             <div
                               key={mapping.accountId}
-                              className="text-gray-500 dark:text-gray-400"
+                              className="text-[#555555]"
                             >
                               {mapping.accountName} → {sectionLabel}
                             </div>
@@ -849,11 +904,11 @@ const Settings: React.FC = () => {
                   setBoursoError("");
                   setShowBoursoModal(true);
                 }}
-                className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                className="w-full px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] transition-colors"
               >
                 Détecter et mapper les comptes
               </button>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-xs text-[#555555]">
                 Le mot de passe n'est jamais stocké. Pensez à sauvegarder vos
                 paramètres après la détection.
               </p>
@@ -863,8 +918,8 @@ const Settings: React.FC = () => {
 
         {/* Colonne de droite - Clé API Etherscan */}
         <div className="space-y-6">
-          <div className="bg-white dark:bg-[#111111] rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+          <div className="bg-[#111111] rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
               Clé API Etherscan
             </h2>
 
@@ -899,15 +954,15 @@ const Settings: React.FC = () => {
           </div>
 
           {/* Section Gestion */}
-          <div className="bg-white dark:bg-[#111111] rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+          <div className="bg-[#111111] rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
               Gestion
             </h2>
 
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
                     Nom du type
                   </label>
                   <input
@@ -915,11 +970,11 @@ const Settings: React.FC = () => {
                     value={sectionLabelDraft}
                     onChange={(e) => setSectionLabelDraft(e.target.value)}
                     placeholder="Ex: Livret A"
-                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                    className="input-field"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
                     Type
                   </label>
                   <select
@@ -927,7 +982,7 @@ const Settings: React.FC = () => {
                     onChange={(e) =>
                       setSectionKindDraft(e.target.value as AccountSectionKind)
                     }
-                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] text-[#f5f5f5]"
                   >
                     <option value="bank">Compte bancaire</option>
                     <option value="investment">Investissement</option>
@@ -944,7 +999,7 @@ const Settings: React.FC = () => {
               <button
                 type="button"
                 onClick={handleAddSection}
-                className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
+                className="w-full px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] transition-colors"
               >
                 Ajouter un type
               </button>
@@ -992,7 +1047,7 @@ const Settings: React.FC = () => {
                       InvestmentCsvColumnMapping),
                   ) => (
                     <div className="space-y-1">
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+                      <label className="block text-xs font-medium text-[#8a8a8a]">
                         {label}
                       </label>
                       <select
@@ -1003,7 +1058,7 @@ const Settings: React.FC = () => {
                           })
                         }
                         disabled={sectionColumns.length === 0}
-                        className="w-full px-2 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                        className="w-full px-2 py-1.5 text-sm rounded-md border border-[rgba(255,255,255,0.06)] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] text-[#f5f5f5]"
                       >
                         <option value="">
                           Auto{" "}
@@ -1023,14 +1078,14 @@ const Settings: React.FC = () => {
                   return (
                     <div
                       key={section.id}
-                      className="rounded-md border border-gray-200 dark:border-gray-700 p-3 space-y-3"
+                      className="rounded-md border border-[rgba(255,255,255,0.06)] p-3 space-y-3"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="font-medium text-gray-900 dark:text-gray-100">
+                          <div className="font-medium text-[#f5f5f5]">
                             {section.label}
                           </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                          <div className="text-xs text-[#555555]">
                             {section.kind === "investment"
                               ? "Investissement"
                               : "Compte bancaire"}
@@ -1046,7 +1101,7 @@ const Settings: React.FC = () => {
                                   [section.id]: !isCalcOpen,
                                 }))
                               }
-                              className="p-1 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                              className="p-1 rounded-md text-[#555555] hover:text-[#8a8a8a] text-[#555555] hover:text-[#f5f5f5]"
                               title={
                                 isCalcOpen
                                   ? "Masquer le calcul"
@@ -1063,7 +1118,7 @@ const Settings: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleRenameSection(section)}
-                            className="p-1 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                            className="p-1 rounded-md text-[#555555] hover:text-[#8a8a8a] text-[#555555] hover:text-[#f5f5f5]"
                             title="Renommer"
                           >
                             <Pencil className="h-4 w-4" />
@@ -1080,8 +1135,8 @@ const Settings: React.FC = () => {
                       </div>
 
                       {isBank || !isCalcOpen ? null : (
-                        <div className="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
-                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        <div className="border-t border-[rgba(255,255,255,0.06)] pt-3 space-y-2">
+                          <div className="text-sm font-medium text-[#f5f5f5]">
                             Calcul solde (valeur actuelle)
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1106,18 +1161,18 @@ const Settings: React.FC = () => {
                               "pnlColumn",
                             )}
                           </div>
-                          <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                          <div className="text-[11px] text-[#555555]">
                             Choisis une colonne et, si besoin, une colonne de
                             multiplication (ex: prix de revient × nombre de
                             parts).
                           </div>
-                          <div className="rounded-md border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-[#1a1a1a] p-2 text-xs text-gray-600 dark:text-gray-300">
-                            <div className="font-medium text-gray-700 dark:text-gray-200 mb-1">
+                          <div className="rounded-md border border-[rgba(255,255,255,0.06)] bg-[#0a0a0a] dark:bg-[#1a1a1a] p-2 text-xs text-[#8a8a8a]">
+                            <div className="font-medium text-[#f5f5f5] mb-1">
                               Aperçu calculé
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                               <div>
-                                <div className="text-[11px] text-gray-500">
+                                <div className="text-[11px] text-[#555555]">
                                   Valeur actuelle
                                 </div>
                                 <div>
@@ -1127,7 +1182,7 @@ const Settings: React.FC = () => {
                                 </div>
                               </div>
                               <div>
-                                <div className="text-[11px] text-gray-500">
+                                <div className="text-[11px] text-[#555555]">
                                   Investi initial
                                 </div>
                                 <div>
@@ -1137,7 +1192,7 @@ const Settings: React.FC = () => {
                                 </div>
                               </div>
                               <div>
-                                <div className="text-[11px] text-gray-500">
+                                <div className="text-[11px] text-[#555555]">
                                   P&L
                                 </div>
                                 <div>
@@ -1161,15 +1216,15 @@ const Settings: React.FC = () => {
 
       {showBoursoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl bg-white dark:bg-[#111111] rounded-lg shadow-lg">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          <div className="w-full max-w-2xl bg-[#111111] rounded-lg ">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[rgba(255,255,255,0.06)]">
+              <h3 className="text-lg font-semibold text-[#f5f5f5]">
                 Détection des comptes Bourso
               </h3>
               <button
                 type="button"
                 onClick={() => setShowBoursoModal(false)}
-                className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                className="text-sm text-[#555555] hover:text-[#8a8a8a] text-[#555555] hover:text-[#f5f5f5]"
               >
                 Fermer
               </button>
@@ -1177,7 +1232,7 @@ const Settings: React.FC = () => {
 
             <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
                   Mot de passe
                 </label>
                 <input
@@ -1185,9 +1240,9 @@ const Settings: React.FC = () => {
                   value={boursoPassword}
                   onChange={(e) => setBoursoPassword(e.target.value)}
                   placeholder="Votre mot de passe BoursoBank"
-                  className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                  className="input-field"
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                <p className="text-xs text-[#555555] mt-2">
                   Le mot de passe sert uniquement à la détection et n'est pas
                   conservé.
                 </p>
@@ -1197,7 +1252,7 @@ const Settings: React.FC = () => {
                 type="button"
                 onClick={handleDetectBoursoAccounts}
                 disabled={boursoLoading}
-                className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50"
+                className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] disabled:opacity-50"
               >
                 {boursoLoading ? (
                   <>
@@ -1217,7 +1272,7 @@ const Settings: React.FC = () => {
 
               <div className="space-y-3">
                 {detectedBoursoAccounts.length === 0 && (
-                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                  <div className="text-sm text-[#555555]">
                     Cliquez sur "Détecter les comptes" pour lancer la détection.
                   </div>
                 )}
@@ -1225,18 +1280,18 @@ const Settings: React.FC = () => {
                 {detectedBoursoAccounts.map((mapping) => (
                   <div
                     key={mapping.accountId}
-                    className="flex flex-col gap-2 rounded-md border border-gray-200 dark:border-gray-700 p-3"
+                    className="flex flex-col gap-2 rounded-md border border-[rgba(255,255,255,0.06)] p-3"
                   >
                     <div>
-                      <div className="font-medium text-gray-900 dark:text-gray-100">
+                      <div className="font-medium text-[#f5f5f5]">
                         {mapping.accountName}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <div className="text-xs text-[#555555]">
                         {mapping.kind}
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      <label className="block text-xs font-medium text-[#8a8a8a] mb-1">
                         Rubrique
                       </label>
                       <select
@@ -1247,7 +1302,7 @@ const Settings: React.FC = () => {
                             e.target.value as BoursoAccountSection,
                           )
                         }
-                        className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] dark:text-gray-100"
+                        className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] text-[#f5f5f5]"
                       >
                         {settings.accountSections.map((section) => (
                           <option key={section.id} value={section.id}>
@@ -1262,11 +1317,11 @@ const Settings: React.FC = () => {
               </div>
             </div>
 
-            <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+            <div className="px-4 py-3 border-t border-[rgba(255,255,255,0.06)] flex justify-end">
               <button
                 type="button"
                 onClick={() => setShowBoursoModal(false)}
-                className="px-4 py-2 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-[#1a1a1a] dark:text-gray-200 dark:hover:bg-[#222222]"
+                className="px-4 py-2 rounded-md bg-[#1a1a1a] text-[#8a8a8a] hover:bg-[#1a1a1a] dark:bg-[#1a1a1a]  dark:hover:bg-[#222222]"
               >
                 Terminer
               </button>

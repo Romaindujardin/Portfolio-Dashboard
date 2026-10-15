@@ -123,22 +123,22 @@ const WalletForm: React.FC<WalletFormProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-[#111111] rounded-xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+      <div className="bg-[#111111] rounded-xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-[rgba(255,255,255,0.06)]">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
-              <Wallet className="text-primary-600" size={24} />
+            <div className="w-10 h-10 bg-[rgba(200,165,94,0.12)] rounded-lg flex items-center justify-center">
+              <Wallet className="text-[#c8a55e]" size={24} />
             </div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+            <h2 className="text-xl font-bold text-[#f5f5f5]">
               {wallet ? "Modifier" : "Ajouter"} un Portefeuille
             </h2>
           </div>
           <button
             onClick={onCancel}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            className="p-2 hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)] rounded-lg transition-colors"
             disabled={loading}
           >
-            <X size={20} className="text-gray-400" />
+            <X size={20} className="text-[#555555]" />
           </button>
         </div>
 
@@ -153,7 +153,7 @@ const WalletForm: React.FC<WalletFormProps> = ({
           <div>
             <label
               htmlFor="name"
-              className="block text-sm font-medium text-gray-700 mb-2"
+              className="block text-sm font-medium text-[#f5f5f5] mb-2"
             >
               Nom du portefeuille *
             </label>
@@ -172,7 +172,7 @@ const WalletForm: React.FC<WalletFormProps> = ({
           <div>
             <label
               htmlFor="walletType"
-              className="block text-sm font-medium text-gray-700 mb-2"
+              className="block text-sm font-medium text-[#f5f5f5] mb-2"
             >
               Type de wallet
             </label>
@@ -199,7 +199,7 @@ const WalletForm: React.FC<WalletFormProps> = ({
             <div>
               <label
                 htmlFor="address"
-                className="block text-sm font-medium text-gray-700 mb-2"
+                className="block text-sm font-medium text-[#f5f5f5] mb-2"
               >
                 Adresse du portefeuille *
               </label>
@@ -213,7 +213,7 @@ const WalletForm: React.FC<WalletFormProps> = ({
                 className="input-field font-mono text-sm"
                 disabled={loading}
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-[#555555] mt-1">
                 L'adresse publique de votre portefeuille (ex:
                 0x742d35Cc6493C0532a588d0e51D7AC44e0E2b48F)
               </p>

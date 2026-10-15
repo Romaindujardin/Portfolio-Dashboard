@@ -12,13 +12,74 @@ import DatabaseManager from "./src/utils/database/database.js";
 const app = express();
 const PORT = 3001;
 
-// Middleware
-app.use(cors());
+// Middleware — CORS restreint aux origines locales (application locale uniquement).
+// Les requêtes sans Origin (curl, clients natifs) restent autorisées.
+const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || LOCAL_ORIGIN.test(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+  }),
+);
 app.use(express.json({ limit: "10mb" }));
 
 // Initialiser la base de données
 const dbManager = DatabaseManager.getInstance();
 dbManager.initializeTables();
+
+// ===== PERSISTANCE DE SECOURS SUR DISQUE (DOUBLE PROTECTION) =====
+const DATA_DIR = path.join(process.cwd(), "data");
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// Sécurité : n'accepte que des noms de fichiers simples, confinés dans DATA_DIR.
+// Empêche toute traversée de chemin via userId ou nom de fichier.
+const DATA_DIR_RESOLVED = path.resolve(DATA_DIR);
+const resolveBackupPath = (filename) => {
+  if (typeof filename !== "string" || !/^[A-Za-z0-9_.-]+\.json$/.test(filename)) {
+    return null;
+  }
+  const filepath = path.resolve(DATA_DIR_RESOLVED, filename);
+  if (!filepath.startsWith(DATA_DIR_RESOLVED + path.sep)) return null;
+  return filepath;
+};
+
+// Un userId ne peut contenir que lettres, chiffres, "_" et "-" (utilisé dans
+// les noms de fichiers de secours et comme identifiant en base).
+const sanitizeUserId = (value) => {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) return "Romain";
+  return /^[A-Za-z0-9_-]{1,64}$/.test(candidate) ? candidate : null;
+};
+
+const writeDiskBackup = (filename, data) => {
+  try {
+    const filepath = resolveBackupPath(filename);
+    if (!filepath) {
+      console.warn(`⚠️ Nom de backup disque refusé: ${filename}`);
+      return;
+    }
+    fs.writeFileSync(filepath, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    console.error(`⚠️ Erreur écriture backup disque ${filename}:`, err);
+  }
+};
+
+const readDiskBackup = (filename) => {
+  try {
+    const filepath = resolveBackupPath(filename);
+    if (filepath && fs.existsSync(filepath)) {
+      const content = fs.readFileSync(filepath, "utf-8");
+      return JSON.parse(content);
+    }
+  } catch (err) {
+    console.error(`⚠️ Erreur lecture backup disque ${filename}:`, err);
+  }
+  return null;
+};
 
 const resolveBoursoCliPath = () => {
   const candidates = [
@@ -45,52 +106,41 @@ const resolveBoursoCliPath = () => {
   );
 };
 
-const getBoursoSettingsPath = () =>
-  path.join(os.homedir(), ".bourso", "settings.json");
+// Le CLI Bourso lit ses identifiants dans ~/.bourso/settings.json (via $HOME).
+// Pour ne JAMAIS écrire le mot de passe en clair sur le disque de l'utilisateur,
+// on exécute le CLI dans un HOME temporaire jetable qui ne contient que les
+// identifiants, et on supprime ce répertoire après chaque appel.
+const createBoursoSandboxHome = (customerId, password) => {
+  const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "bourso-home-"));
+  const boursoDir = path.join(sandboxHome, ".bourso");
+  fs.mkdirSync(boursoDir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(
+    path.join(boursoDir, "settings.json"),
+    JSON.stringify({ clientId: customerId, password }, null, 2),
+    { mode: 0o600 },
+  );
+  return sandboxHome;
+};
 
-const withTemporaryPassword = async (password, action) => {
-  if (!password) {
-    return action();
-  }
-
-  const settingsPath = getBoursoSettingsPath();
-  const settingsDir = path.dirname(settingsPath);
-  let originalContent = null;
-  let settings = {};
-
+const removeBoursoSandboxHome = (sandboxHome) => {
   try {
-    if (fs.existsSync(settingsPath)) {
-      originalContent = fs.readFileSync(settingsPath, "utf-8");
-      settings = JSON.parse(originalContent || "{}") || {};
-    }
+    fs.rmSync(sandboxHome, { recursive: true, force: true });
   } catch (error) {
-    console.warn("⚠️ Impossible de lire settings.json, création d'un nouveau.");
-  }
-
-  settings.password = password;
-
-  fs.mkdirSync(settingsDir, { recursive: true });
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-
-  try {
-    return await action();
-  } finally {
-    if (originalContent != null) {
-      fs.writeFileSync(settingsPath, originalContent);
-    } else {
-      settings.password = null;
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-    }
+    console.warn("⚠️ Impossible de nettoyer le HOME temporaire bourso:", error);
   }
 };
 
-const runBoursoCli = ({ args, password }) => {
+const runBoursoCli = ({ args, customerId, password }) => {
   const cliPath = resolveBoursoCliPath();
+  const sandboxHome = password
+    ? createBoursoSandboxHome(customerId, password)
+    : null;
+
   const execCommand = () =>
     new Promise((resolve, reject) => {
       const child = spawn(cliPath, args, {
         cwd: process.cwd(),
-        env: process.env,
+        env: sandboxHome ? { ...process.env, HOME: sandboxHome } : process.env,
         stdio: "pipe",
       });
 
@@ -114,7 +164,16 @@ const runBoursoCli = ({ args, password }) => {
       });
     });
 
-  return withTemporaryPassword(password, execCommand);
+  return execCommand()
+    .catch((error) => {
+      // Ne jamais laisser fuiter le mot de passe dans un message d'erreur
+      let message = String(error?.message || error);
+      if (password) message = message.split(password).join("***");
+      throw new Error(message);
+    })
+    .finally(() => {
+      if (sandboxHome) removeBoursoSandboxHome(sandboxHome);
+    });
 };
 
 const parseAccountsFromOutput = (stdout) => {
@@ -424,6 +483,96 @@ app.get("/api/opensea/collection/:collection/floor", async (req, res) => {
 
 // ===== BOURSO / BOURSORAMA =====
 
+/**
+ * Detect authorization duplicate rows.
+ * An "authorization" row is an existing row whose category contains "Autorisation"
+ * that matches a newer row by: same amount, similar label, close date (≤7 days).
+ */
+const isAuthorizationRow = (r) => {
+  const cat = `${r?.category || ""} ${r?.aiCategory || ""}`.toLowerCase();
+  const label = (r?.label || "").toLowerCase();
+  return (
+    cat.includes("autorisation") ||
+    cat.includes("authorization") ||
+    label.includes("autorisation") ||
+    label.includes("authorization")
+  );
+};
+
+const detectAuthorizationDuplicates = (existingRows, allFetchedRows) => {
+  const duplicates = [];
+  // Only consider existing rows that look like pending authorizations
+  const authRows = existingRows.filter((r) => isAuthorizationRow(r));
+
+  if (authRows.length === 0) return duplicates;
+
+  // For each fetched row that is NOT an authorization, check if it supersedes an auth row
+  const finalRows = allFetchedRows.filter((r) => !isAuthorizationRow(r));
+
+  for (const authRow of authRows) {
+    const authAmount = parseFloat((authRow.amount || "0").replace(",", "."));
+    const authDate = Date.parse(authRow.dateOp || authRow.dateVal || "");
+    const authLabel = (authRow.label || "").toLowerCase().trim();
+    // Extract significant words (≥3 chars) from auth label
+    const authWords = authLabel
+      .split(/[\s\-_\/.,;:!?'"()]+/)
+      .filter((w) => w.length >= 3)
+      .filter(
+        (w) =>
+          ![
+            "les",
+            "des",
+            "une",
+            "par",
+            "pour",
+            "sur",
+            "dans",
+            "eur",
+            "avec",
+          ].includes(w),
+      );
+
+    for (const finalRow of finalRows) {
+      const finalAmount = parseFloat(
+        (finalRow.amount || "0").replace(",", "."),
+      );
+      const finalDate = Date.parse(finalRow.dateOp || finalRow.dateVal || "");
+      const finalLabel = (finalRow.label || "").toLowerCase().trim();
+      const compactAuth = authLabel.replace(/\s+/g, "");
+      const compactFinal = finalLabel.replace(/\s+/g, "");
+
+      // 1. Same amount
+      if (Math.abs(authAmount - finalAmount) > 0.01) continue;
+
+      // 2. Close dates (within 7 days)
+      if (isNaN(authDate) || isNaN(finalDate)) continue;
+      const daysDiff = Math.abs(finalDate - authDate) / (1000 * 60 * 60 * 24);
+      if (daysDiff > 7) continue;
+
+      // 3. Label similarity: at least one significant word from authLabel appears in finalLabel,
+      //    or finalLabel appears in authLabel (also without spaces: TOOGOODTOGO vs TOO GOOD TO GO)
+      const labelMatch =
+        finalLabel.includes(authLabel) ||
+        authLabel.includes(finalLabel) ||
+        compactFinal.includes(compactAuth) ||
+        compactAuth.includes(compactFinal) ||
+        authWords.some((w) => finalLabel.includes(w) || compactFinal.includes(w));
+      if (!labelMatch) continue;
+
+      // Found a match
+      const reason = `Même montant (${authAmount}), dates proches (${authRow.dateOp} → ${finalRow.dateOp}), libellé similaire`;
+      duplicates.push({
+        newRow: finalRow,
+        existingRow: authRow,
+        reason,
+      });
+      break; // one match per auth row is enough
+    }
+  }
+
+  return duplicates;
+};
+
 app.post("/api/bourso/accounts", async (req, res) => {
   try {
     const { customerId, password } = req.body || {};
@@ -431,8 +580,11 @@ app.post("/api/bourso/accounts", async (req, res) => {
       return res.status(400).json({ error: "customerId et password requis" });
     }
 
-    await runBoursoCli({ args: ["config", "--username", customerId] });
-    const { stdout } = await runBoursoCli({ args: ["accounts"], password });
+    const { stdout } = await runBoursoCli({
+      args: ["accounts"],
+      customerId,
+      password,
+    });
     const accounts = parseAccountsFromOutput(stdout);
 
     if (!accounts.length) {
@@ -455,9 +607,14 @@ app.post("/api/bourso/sync", async (req, res) => {
       password,
       mappings,
       pages = 10,
-      userId = "Romain",
+      userId: rawUserId = "Romain",
       dryRun = false,
+      duplicateRefsToRemove = [],
     } = req.body || {};
+
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
 
     if (!customerId || !password) {
       return res.status(400).json({ error: "customerId et password requis" });
@@ -465,8 +622,6 @@ app.post("/api/bourso/sync", async (req, res) => {
     if (!Array.isArray(mappings) || mappings.length === 0) {
       return res.status(400).json({ error: "Aucune configuration de comptes" });
     }
-
-    await runBoursoCli({ args: ["config", "--username", customerId] });
 
     const results = [];
 
@@ -484,26 +639,55 @@ app.post("/api/bourso/sync", async (req, res) => {
             "--format",
             "csv",
           ],
+          customerId,
           password,
         });
 
         const rawCsv = extractCsvFromOutput(stdout, "date,");
         const parsed = parseCsvText(rawCsv);
-        const rows = parsed.rows.map((row) => ({
-          dateOp: row.date || row.date_op || "",
-          dateVal: row.value_date || row.valueDate || "",
-          label: row.label || "",
-          amount: row.amount || "",
-          currency: row.currency || "EUR",
-          category: row.category || "",
-          reference: row.reference || "",
-          accountbalance: row.balance || "",
-          accountLabel: mapping.accountName || "",
-          supplierFound: "",
-          comment: "",
-          aiCategory: row.category || "Non catégorisé",
-          aiSubCategory: "Non catégorisé",
-        }));
+        const rows = parsed.rows.map((row) => {
+          let dateOp = row.date || row.date_op || "";
+          let dateVal = row.value_date || row.valueDate || "";
+          const ref = row.reference || "";
+
+          // Fallback: If date is missing or set to today's date when reference has a Boursorama MongoDB ObjectId (24 hex characters)
+          if (ref && /^[0-9a-f]{24}$/i.test(ref)) {
+            const ts = parseInt(ref.substring(0, 8), 16) * 1000;
+            const refDate = new Date(ts);
+            if (!isNaN(refDate.getTime())) {
+              const refIso = refDate.toISOString().split("T")[0];
+              if (!dateOp) {
+                dateOp = refIso;
+                if (!dateVal) dateVal = refIso;
+              } else {
+                const opTime = new Date(dateOp).getTime();
+                if (Math.abs(opTime - refDate.getTime()) > 2 * 24 * 3600 * 1000) {
+                  const todayIso = new Date().toISOString().split("T")[0];
+                  if (dateOp === todayIso) {
+                    dateOp = refIso;
+                    if (!dateVal) dateVal = refIso;
+                  }
+                }
+              }
+            }
+          }
+
+          return {
+            dateOp,
+            dateVal,
+            label: row.label || "",
+            amount: row.amount || "",
+            currency: row.currency || "EUR",
+            category: row.category || "",
+            reference: ref,
+            accountbalance: row.balance || "",
+            accountLabel: mapping.accountName || "",
+            supplierFound: "",
+            comment: "",
+            aiCategory: row.category || "Non catégorisé",
+            aiSubCategory: "Non catégorisé",
+          };
+        });
 
         const headers = [
           "dateOp",
@@ -555,11 +739,61 @@ app.post("/api/bourso/sync", async (req, res) => {
           return true;
         });
 
-        const combinedRows = [...existingRows, ...newRows];
+        // Detect authorization duplicates (pending → final payment),
+        // including same-batch auth + settlement on first sync.
+        const duplicateRows = [
+          ...detectAuthorizationDuplicates(existingRows, rows),
+          ...detectAuthorizationDuplicates(rows, rows),
+        ].filter((dup, idx, arr) => {
+          const key = `${dup.existingRow?.reference || ""}|${dup.newRow?.reference || ""}`;
+          return (
+            arr.findIndex(
+              (other) =>
+                `${other.existingRow?.reference || ""}|${other.newRow?.reference || ""}` ===
+                key,
+            ) === idx
+          );
+        });
+
+        // On confirm (not dryRun), remove accepted authorization duplicates
+        const refsToRemoveSet = new Set(
+          Array.isArray(duplicateRefsToRemove) ? duplicateRefsToRemove : [],
+        );
+        let filteredExistingRows = existingRows;
+        let filteredNewRows = newRows;
+        if (!dryRun && refsToRemoveSet.size > 0) {
+          filteredExistingRows = existingRows.filter(
+            (r) => !refsToRemoveSet.has(r.reference || ""),
+          );
+          filteredNewRows = newRows.filter(
+            (r) => !refsToRemoveSet.has(r.reference || ""),
+          );
+        }
+
+        const combinedRows = [...filteredExistingRows, ...filteredNewRows];
         combinedRows.sort((a, b) => {
           const da = Date.parse(a.dateOp || "") || 0;
           const db = Date.parse(b.dateOp || "") || 0;
-          return da - db;
+          if (da !== db) return da - db;
+
+          const bala = parseFloat(a.accountbalance);
+          const balb = parseFloat(b.accountbalance);
+          const amta = parseFloat(a.amount);
+          const amtb = parseFloat(b.amount);
+
+          if (!isNaN(bala) && !isNaN(balb) && !isNaN(amta) && !isNaN(amtb)) {
+            if (Math.abs(Math.round((bala + amtb) * 100) - Math.round(balb * 100)) <= 1) {
+              return -1;
+            }
+            if (Math.abs(Math.round((balb + amta) * 100) - Math.round(bala * 100)) <= 1) {
+              return 1;
+            }
+          }
+
+          if (a.reference && b.reference && /^[0-9a-f]{24}$/i.test(a.reference) && /^[0-9a-f]{24}$/i.test(b.reference)) {
+            return a.reference.localeCompare(b.reference);
+          }
+          return 0;
         });
 
         const csvContent = stringifyCsvText({
@@ -595,6 +829,7 @@ app.post("/api/bourso/sync", async (req, res) => {
           addedCount: newRows.length,
           totalCount: combinedRows.length,
           newRows,
+          duplicateRows,
           filename,
         });
       }
@@ -608,6 +843,7 @@ app.post("/api/bourso/sync", async (req, res) => {
             "--format",
             "csv",
           ],
+          customerId,
           password,
         });
 
@@ -728,6 +964,7 @@ app.post("/api/bourso/sync", async (req, res) => {
           addedCount: newRows.length,
           totalCount: combinedRows.length,
           newRows,
+          duplicateRows: [],
           filename,
         });
       }
@@ -800,7 +1037,9 @@ app.post("/api/database/clear", (req, res) => {
 // GET /api/database/bank-csv - Lister les CSV uploadés
 app.get("/api/database/bank-csv", (req, res) => {
   try {
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const section = req.query.section || null;
     // Ne pas renvoyer le contenu complet dans la liste
     const uploads = dbManager.getAllBankCsvUploadsMeta(userId, section);
@@ -826,7 +1065,9 @@ app.post("/api/database/bank-csv", (req, res) => {
 app.get("/api/database/bank-csv/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const upload = dbManager.getBankCsvUploadById(id, userId);
     if (!upload) return res.status(404).json({ error: "Upload not found" });
     res.json(upload);
@@ -840,7 +1081,9 @@ app.get("/api/database/bank-csv/:id", (req, res) => {
 app.delete("/api/database/bank-csv/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const success = dbManager.deleteBankCsvUpload(id, userId);
     if (success) return res.json({ message: "Upload deleted successfully" });
     res.status(404).json({ error: "Upload not found" });
@@ -854,7 +1097,9 @@ app.delete("/api/database/bank-csv/:id", (req, res) => {
 app.put("/api/database/bank-csv/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.query.user_id || req.body.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id || req.body.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const { filename, content, size_bytes } = req.body || {};
 
     let success = dbManager.updateBankCsvUpload(id, userId, {
@@ -885,12 +1130,396 @@ app.put("/api/database/bank-csv/:id", (req, res) => {
   }
 });
 
+// ===== GESTION TRICOUNT / BUDGET =====
+
+// GET /api/database/tricount/data - Récupérer toutes les données Tricount (dépenses, revenus, configs)
+app.get("/api/database/tricount/data", (req, res) => {
+  try {
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    let rawExpenses = dbManager.getAllTricountExpenses(userId) || [];
+    let expenses = rawExpenses.filter((e) => e && e.id !== "exp-1" && e.id !== "exp-2");
+    // Si des dépenses de test étaient encore en base, les purger
+    if (rawExpenses.length !== expenses.length) {
+      try {
+        dbManager.db.prepare("DELETE FROM tricount_expenses WHERE id IN ('exp-1', 'exp-2')").run();
+      } catch (err) {}
+    }
+
+    let incomes = dbManager.getAllTricountIncomes(userId) || [];
+    let configs = dbManager.getAllTricountConfigs(userId) || {};
+
+    // Si SQLite est vide, vérifier si une sauvegarde fichier existe pour auto-restaurer
+    if (expenses.length === 0 && incomes.length === 0) {
+      const backup = readDiskBackup(`tricount_${userId}.json`);
+      if (backup) {
+        const cleanBackupExpenses = (backup.expenses || []).filter((e) => e && e.id !== "exp-1" && e.id !== "exp-2");
+        if (cleanBackupExpenses.length > 0) {
+          dbManager.saveTricountExpensesBatch(cleanBackupExpenses, userId);
+          expenses = cleanBackupExpenses;
+        }
+        if (Array.isArray(backup.incomes) && backup.incomes.length > 0) {
+          dbManager.saveTricountIncomesBatch(backup.incomes, userId);
+          incomes = backup.incomes;
+        }
+        if (backup.configs && typeof backup.configs === "object") {
+          for (const m of Object.keys(backup.configs)) {
+            if (m !== "2026-09" || expenses.some(e => e.month === "2026-09")) {
+              dbManager.saveTricountConfig(backup.configs[m], userId);
+            }
+          }
+          configs = dbManager.getAllTricountConfigs(userId);
+        }
+      }
+    }
+
+    // Supprimer la config 2026-09 si elle est vide
+    if (configs["2026-09"] && !expenses.some(e => e.month === "2026-09") && !incomes.some(i => i.month === "2026-09")) {
+      delete configs["2026-09"];
+      try {
+        dbManager.db.prepare("DELETE FROM tricount_configs WHERE month = '2026-09'").run();
+      } catch (err) {}
+    }
+
+    res.json({ expenses, incomes, configs });
+  } catch (error) {
+    console.error("Error fetching tricount data:", error);
+    res.status(500).json({ error: "Failed to fetch tricount data" });
+  }
+});
+
+// POST /api/database/tricount/sync - Synchroniser les dépenses, revenus et configs
+app.post("/api/database/tricount/sync", (req, res) => {
+  try {
+    const { expenses, incomes, configs, userId: rawUserId } = req.body;
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    let expCount = 0;
+    let incCount = 0;
+    let confCount = 0;
+
+    // Filtrer les dépenses de test résiduelles
+    const cleanExpenses = Array.isArray(expenses)
+      ? expenses.filter((e) => e && e.id !== "exp-1" && e.id !== "exp-2")
+      : [];
+
+    if (cleanExpenses.length > 0) {
+      expCount = dbManager.saveTricountExpensesBatch(cleanExpenses, userId);
+    }
+    if (Array.isArray(incomes) && incomes.length > 0) {
+      incCount = dbManager.saveTricountIncomesBatch(incomes, userId);
+    }
+    const cleanConfigs = { ...(configs || {}) };
+    if (cleanConfigs["2026-09"] && !cleanExpenses.some(e => e.month === "2026-09") && (!incomes || !incomes.some(i => i.month === "2026-09"))) {
+      delete cleanConfigs["2026-09"];
+      try {
+        dbManager.db.prepare("DELETE FROM tricount_configs WHERE month = '2026-09'").run();
+      } catch (err) {}
+    }
+
+    if (cleanConfigs && typeof cleanConfigs === "object") {
+      for (const month of Object.keys(cleanConfigs)) {
+        const cfg = cleanConfigs[month];
+        if (cfg) {
+          dbManager.saveTricountConfig(cfg, userId);
+          confCount++;
+        }
+      }
+    }
+
+    // Sauvegarde de sécurité miroir immédiate sur disque en JSON
+    writeDiskBackup(`tricount_${userId}.json`, {
+      expenses: cleanExpenses,
+      incomes: incomes || [],
+      configs: cleanConfigs,
+      updatedAt: new Date().toISOString(),
+    });
+
+    res.json({
+      success: true,
+      message: "Tricount data synced successfully",
+      saved: { expenses: expCount, incomes: incCount, configs: confCount },
+    });
+  } catch (error) {
+    console.error("Error syncing tricount data:", error);
+    res.status(500).json({ error: "Failed to sync tricount data" });
+  }
+});
+
+// POST /api/database/tricount/expenses - Sauvegarder une dépense
+app.post("/api/database/tricount/expenses", (req, res) => {
+  try {
+    const { expense, userId: rawUserId } = req.body || {};
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    if (!expense) return res.status(400).json({ error: "Expense data required" });
+    const id = dbManager.saveTricountExpense(expense, userId);
+    // Rafraîchir backup disque
+    const allExpenses = dbManager.getAllTricountExpenses(userId);
+    const allIncomes = dbManager.getAllTricountIncomes(userId);
+    const configs = dbManager.getAllTricountConfigs(userId);
+    writeDiskBackup(`tricount_${userId}.json`, {
+      expenses: allExpenses,
+      incomes: allIncomes,
+      configs,
+      updatedAt: new Date().toISOString(),
+    });
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error("Error saving tricount expense:", error);
+    res.status(500).json({ error: "Failed to save tricount expense" });
+  }
+});
+
+// DELETE /api/database/tricount/expenses/:id - Supprimer une dépense
+app.delete("/api/database/tricount/expenses/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    const success = dbManager.deleteTricountExpense(id, userId);
+    // Rafraîchir backup disque
+    const allExpenses = dbManager.getAllTricountExpenses(userId);
+    const allIncomes = dbManager.getAllTricountIncomes(userId);
+    const configs = dbManager.getAllTricountConfigs(userId);
+    writeDiskBackup(`tricount_${userId}.json`, {
+      expenses: allExpenses,
+      incomes: allIncomes,
+      configs,
+      updatedAt: new Date().toISOString(),
+    });
+    res.json({ success });
+  } catch (error) {
+    console.error("Error deleting tricount expense:", error);
+    res.status(500).json({ error: "Failed to delete tricount expense" });
+  }
+});
+
+// POST /api/database/tricount/incomes - Sauvegarder un revenu
+app.post("/api/database/tricount/incomes", (req, res) => {
+  try {
+    const { income, userId: rawUserId } = req.body || {};
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    if (!income) return res.status(400).json({ error: "Income data required" });
+    const id = dbManager.saveTricountIncome(income, userId);
+    // Rafraîchir backup disque
+    const allExpenses = dbManager.getAllTricountExpenses(userId);
+    const allIncomes = dbManager.getAllTricountIncomes(userId);
+    const configs = dbManager.getAllTricountConfigs(userId);
+    writeDiskBackup(`tricount_${userId}.json`, {
+      expenses: allExpenses,
+      incomes: allIncomes,
+      configs,
+      updatedAt: new Date().toISOString(),
+    });
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error("Error saving tricount income:", error);
+    res.status(500).json({ error: "Failed to save tricount income" });
+  }
+});
+
+// DELETE /api/database/tricount/incomes/:id - Supprimer un revenu
+app.delete("/api/database/tricount/incomes/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    const success = dbManager.deleteTricountIncome(id, userId);
+    // Rafraîchir backup disque
+    const allExpenses = dbManager.getAllTricountExpenses(userId);
+    const allIncomes = dbManager.getAllTricountIncomes(userId);
+    const configs = dbManager.getAllTricountConfigs(userId);
+    writeDiskBackup(`tricount_${userId}.json`, {
+      expenses: allExpenses,
+      incomes: allIncomes,
+      configs,
+      updatedAt: new Date().toISOString(),
+    });
+    res.json({ success });
+  } catch (error) {
+    console.error("Error deleting tricount income:", error);
+    res.status(500).json({ error: "Failed to delete tricount income" });
+  }
+});
+
+// POST /api/database/tricount/configs - Sauvegarder la config mensuelle
+app.post("/api/database/tricount/configs", (req, res) => {
+  try {
+    const { config, userId: rawUserId } = req.body || {};
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    if (!config) return res.status(400).json({ error: "Config data required" });
+    const id = dbManager.saveTricountConfig(config, userId);
+    // Rafraîchir backup disque
+    const allExpenses = dbManager.getAllTricountExpenses(userId);
+    const allIncomes = dbManager.getAllTricountIncomes(userId);
+    const configs = dbManager.getAllTricountConfigs(userId);
+    writeDiskBackup(`tricount_${userId}.json`, {
+      expenses: allExpenses,
+      incomes: allIncomes,
+      configs,
+      updatedAt: new Date().toISOString(),
+    });
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error("Error saving tricount config:", error);
+    res.status(500).json({ error: "Failed to save tricount config" });
+  }
+});
+
+// ===== GESTION PLAN D'ÉPARGNE & STRATÉGIE (SQLITE + DISQUE) =====
+
+// GET /api/database/savings/strategy - Récupérer la stratégie d'épargne
+app.get("/api/database/savings/strategy", (req, res) => {
+  try {
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    let strategy = dbManager.getSavingsStrategy(userId);
+    if (!strategy) {
+      strategy = readDiskBackup(`savings_strategy_${userId}.json`);
+      if (strategy) {
+        dbManager.saveSavingsStrategy(userId, strategy);
+      }
+    }
+    res.json({ strategy });
+  } catch (error) {
+    console.error("Error fetching savings strategy:", error);
+    res.status(500).json({ error: "Failed to fetch savings strategy" });
+  }
+});
+
+// POST /api/database/savings/strategy - Sauvegarder la stratégie d'épargne
+app.post("/api/database/savings/strategy", (req, res) => {
+  try {
+    const { strategy, userId: rawUserId } = req.body || {};
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    if (!strategy) return res.status(400).json({ error: "Strategy data required" });
+    dbManager.saveSavingsStrategy(userId, strategy);
+    writeDiskBackup(`savings_strategy_${userId}.json`, strategy);
+    res.json({ success: true, message: "Savings strategy saved successfully" });
+  } catch (error) {
+    console.error("Error saving savings strategy:", error);
+    res.status(500).json({ error: "Failed to save savings strategy" });
+  }
+});
+
+// GET /api/database/savings/monthly - Récupérer les stratégies mensuelles
+app.get("/api/database/savings/monthly", (req, res) => {
+  try {
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    let strategies = dbManager.getAllSavingsMonthlyStrategies(userId);
+    if (!strategies || Object.keys(strategies).length === 0) {
+      strategies = readDiskBackup(`savings_monthly_${userId}.json`) || {};
+      if (Object.keys(strategies).length > 0) {
+        dbManager.saveAllSavingsMonthlyStrategies(userId, strategies);
+      }
+    }
+    res.json({ strategies });
+  } catch (error) {
+    console.error("Error fetching monthly savings strategies:", error);
+    res.status(500).json({ error: "Failed to fetch monthly savings strategies" });
+  }
+});
+
+// POST /api/database/savings/monthly - Sauvegarder la stratégie d'un mois spécifique
+app.post("/api/database/savings/monthly", (req, res) => {
+  try {
+    const { month, strategy, userId: rawUserId } = req.body || {};
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    if (!month || !strategy) return res.status(400).json({ error: "Month and strategy required" });
+    dbManager.saveSavingsStrategyForMonth(userId, month, strategy);
+    const all = dbManager.getAllSavingsMonthlyStrategies(userId);
+    writeDiskBackup(`savings_monthly_${userId}.json`, all);
+    res.json({ success: true, message: `Monthly strategy for ${month} saved successfully` });
+  } catch (error) {
+    console.error("Error saving monthly strategy:", error);
+    res.status(500).json({ error: "Failed to save monthly strategy" });
+  }
+});
+
+// POST /api/database/savings/monthly/batch - Sauvegarder l'ensemble des stratégies mensuelles
+app.post("/api/database/savings/monthly/batch", (req, res) => {
+  try {
+    const { strategies, userId: rawUserId } = req.body || {};
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    if (!strategies || typeof strategies !== "object") {
+      return res.status(400).json({ error: "Strategies map required" });
+    }
+    dbManager.saveAllSavingsMonthlyStrategies(userId, strategies);
+    writeDiskBackup(`savings_monthly_${userId}.json`, strategies);
+    res.json({ success: true, message: "Batch monthly strategies saved successfully" });
+  } catch (error) {
+    console.error("Error saving batch monthly strategies:", error);
+    res.status(500).json({ error: "Failed to save batch monthly strategies" });
+  }
+});
+
+// ===== GESTION DES PARAMÈTRES UTILISATEUR (SQLITE + DISQUE) =====
+
+// GET /api/database/user-settings - Récupérer les paramètres utilisateur
+app.get("/api/database/user-settings", (req, res) => {
+  try {
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    let settings = dbManager.getUserSettings(userId);
+    if (!settings) {
+      settings = readDiskBackup(`user_settings_${userId}.json`);
+      if (settings) {
+        dbManager.saveUserSettings(userId, settings);
+      }
+    }
+    res.json({ settings });
+  } catch (error) {
+    console.error("Error fetching user settings:", error);
+    res.status(500).json({ error: "Failed to fetch user settings" });
+  }
+});
+
+// POST /api/database/user-settings - Sauvegarder les paramètres utilisateur
+app.post("/api/database/user-settings", (req, res) => {
+  try {
+    const { settings, userId: rawUserId } = req.body || {};
+    const userId = sanitizeUserId(rawUserId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    if (!settings) return res.status(400).json({ error: "Settings required" });
+    dbManager.saveUserSettings(userId, settings);
+    writeDiskBackup(`user_settings_${userId}.json`, settings);
+    res.json({ success: true, message: "User settings saved successfully" });
+  } catch (error) {
+    console.error("Error saving user settings:", error);
+    res.status(500).json({ error: "Failed to save user settings" });
+  }
+});
+
+
 // ===== GESTION DES INVESTISSEMENTS =====
 
 // GET /api/database/investments - Récupérer tous les investissements
 app.get("/api/database/investments", (req, res) => {
   try {
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const investments = dbManager.getAllInvestments(userId);
     res.json(investments);
   } catch (error) {
@@ -914,7 +1543,9 @@ app.post("/api/database/investments", (req, res) => {
 app.put("/api/database/investments", (req, res) => {
   try {
     const investments = req.body;
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
 
     // Supprimer tous les investissements existants pour cet utilisateur
     const existing = dbManager.getAllInvestments(userId);
@@ -994,7 +1625,9 @@ app.put("/api/database/investments/prices", (req, res) => {
 // GET /api/database/watchlist - Récupérer la watchlist
 app.get("/api/database/watchlist", (req, res) => {
   try {
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const watchlist = dbManager.getAllWatchlistItems(userId);
     res.json(watchlist);
   } catch (error) {
@@ -1018,7 +1651,9 @@ app.post("/api/database/watchlist", (req, res) => {
 app.put("/api/database/watchlist", (req, res) => {
   try {
     const watchlist = req.body;
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
 
     // Supprimer tous les éléments existants pour cet utilisateur
     const existing = dbManager.getAllWatchlistItems(userId);
@@ -1047,7 +1682,9 @@ app.put("/api/database/watchlist", (req, res) => {
 app.delete("/api/database/watchlist/:symbol", (req, res) => {
   try {
     const { symbol } = req.params;
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const success = dbManager.deleteWatchlistItem(
       decodeURIComponent(symbol),
       userId,
@@ -1069,7 +1706,9 @@ app.delete("/api/database/watchlist/:symbol", (req, res) => {
 // GET /api/database/wallets - Récupérer tous les wallets
 app.get("/api/database/wallets", (req, res) => {
   try {
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const wallets = dbManager.getAllWallets(userId);
 
     // Ajouter les assets et NFTs pour chaque wallet
@@ -1146,7 +1785,9 @@ app.post("/api/database/wallets", (req, res) => {
 app.put("/api/database/wallets", (req, res) => {
   try {
     const wallets = req.body;
-    const userId = req.query.user_id || "Romain";
+    const userId = sanitizeUserId(req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
 
     console.log("📝 Mise à jour des wallets:", wallets.length, "wallets");
 
@@ -1731,8 +2372,8 @@ app.post("/api/database/migrate", (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+app.listen(PORT, "127.0.0.1", () => {
+  console.log(`🚀 Server running on http://localhost:${PORT} (loopback uniquement)`);
   console.log(`📊 Database: SQLite initialized`);
-  console.log(`🌐 CORS enabled for all origins`);
+  console.log(`🔒 CORS restreint aux origines locales`);
 });
