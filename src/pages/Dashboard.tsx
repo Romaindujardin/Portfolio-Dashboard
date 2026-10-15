@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   PieChart,
   Pie,
@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   ArrowRight,
   Building2,
+  ChevronDown,
 } from "lucide-react";
 import {
   AccountSectionKind,
@@ -109,7 +110,32 @@ type AccountSectionSummary = {
 const Dashboard: React.FC = () => {
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("all");
+  const [showEnvelopeDetails, setShowEnvelopeDetails] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Ouvre la section « Détails par enveloppe », sélectionne l'enveloppe et y défile
+  const openEnvelopeDetails = (envelopeId: string) => {
+    setSelectedPortfolio(envelopeId);
+    setShowEnvelopeDetails(true);
+    window.setTimeout(() => {
+      const target =
+        document.getElementById(`envelope-${envelopeId}`) ||
+        document.getElementById("details-enveloppes");
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+  };
+
+  // Replie / déplie les onglets d'enveloppes (PEA, PEE, Banque, Crypto…)
+  const toggleEnvelopeDetails = () => {
+    const next = !showEnvelopeDetails;
+    if (
+      next &&
+      !portfolioEnvelopes.some((envelope) => envelope.id === selectedPortfolio)
+    ) {
+      setSelectedPortfolio(portfolioEnvelopes[0]?.id ?? "all");
+    }
+    setShowEnvelopeDetails(next);
+  };
   const [selectedAssetTypeFilter, setSelectedAssetTypeFilter] =
     useState<string>("all");
   const [sectionHoldings, setSectionHoldings] = useState<
@@ -1051,41 +1077,31 @@ const Dashboard: React.FC = () => {
     wallets,
   ]);
 
+  // Onglets des enveloppes (hors « Vue Globale », désormais toujours affichée)
   const navigationTabs = useMemo(() => {
-    return [
-      {
-        id: "all",
-        label: "Vue Globale",
-        kind: "all" as const,
-        description: "Patrimoine consolidé & répartition",
-        totalValue: totalWealthAll,
-        icon: Layers,
-        color: "#c8a55e",
-      },
-      ...portfolioEnvelopes.map((env) => {
-        let icon = Briefcase;
-        const upper = (env.label || "").toUpperCase();
-        if (upper.includes("PEA")) icon = TrendingUp;
-        else if (upper.includes("PEE")) icon = Building2;
-        else if (upper.includes("ASSURANCE") || upper.includes("VIE"))
-          icon = ShieldCheck;
-        else if (upper.includes("PER") || upper.includes("RETRAITE"))
-          icon = WalletIcon;
-        else if (env.kind === "bank" || env.id === "bank") icon = Landmark;
-        else if (env.kind === "crypto" || env.id === "crypto") icon = Coins;
+    return portfolioEnvelopes.map((env) => {
+      let icon = Briefcase;
+      const upper = (env.label || "").toUpperCase();
+      if (upper.includes("PEA")) icon = TrendingUp;
+      else if (upper.includes("PEE")) icon = Building2;
+      else if (upper.includes("ASSURANCE") || upper.includes("VIE"))
+        icon = ShieldCheck;
+      else if (upper.includes("PER") || upper.includes("RETRAITE"))
+        icon = WalletIcon;
+      else if (env.kind === "bank" || env.id === "bank") icon = Landmark;
+      else if (env.kind === "crypto" || env.id === "crypto") icon = Coins;
 
-        return {
-          id: env.id,
-          label: env.label,
-          kind: env.kind,
-          description: env.description,
-          totalValue: env.totalValue,
-          icon,
-          color: env.color,
-        };
-      }),
-    ];
-  }, [portfolioEnvelopes, totalWealthAll]);
+      return {
+        id: env.id,
+        label: env.label,
+        kind: env.kind,
+        description: env.description,
+        totalValue: env.totalValue,
+        icon,
+        color: env.color,
+      };
+    });
+  }, [portfolioEnvelopes]);
 
   const selectedEnvelope = useMemo(() => {
     if (selectedPortfolio === "all") return null;
@@ -1113,35 +1129,31 @@ const Dashboard: React.FC = () => {
       });
   }, [portfolioEnvelopes, totalWealthAll]);
 
-  const activeHoldings = useMemo(() => {
-    let list =
-      selectedPortfolio === "all"
-        ? unifiedHoldings
-        : selectedPortfolio === "bank"
-        ? []
-        : unifiedHoldings.filter((h) => h.envelopeId === selectedPortfolio);
+  // Filtres utilisateur (recherche + type d'actif), appliqués à la vue globale et aux enveloppes
+  const filterHoldings = useCallback(
+    (list: UnifiedHolding[]) => {
+      let out = list;
+      if (selectedAssetTypeFilter !== "all") {
+        out = out.filter((h) => h.type === selectedAssetTypeFilter);
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        out = out.filter(
+          (h) =>
+            (h.name || "").toLowerCase().includes(q) ||
+            (h.symbol || "").toLowerCase().includes(q) ||
+            (h.envelopeLabel || "").toLowerCase().includes(q),
+        );
+      }
+      return out;
+    },
+    [selectedAssetTypeFilter, searchQuery],
+  );
 
-    if (selectedAssetTypeFilter !== "all") {
-      list = list.filter((h) => h.type === selectedAssetTypeFilter);
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      list = list.filter(
-        (h) =>
-          (h.name || "").toLowerCase().includes(q) ||
-          (h.symbol || "").toLowerCase().includes(q) ||
-          (h.envelopeLabel || "").toLowerCase().includes(q),
-      );
-    }
-
-    return list;
-  }, [
-    selectedPortfolio,
-    unifiedHoldings,
-    selectedAssetTypeFilter,
-    searchQuery,
-  ]);
+  const globalFilteredHoldings = useMemo(
+    () => filterHoldings(unifiedHoldings),
+    [filterHoldings, unifiedHoldings],
+  );
 
   // Répartition par type (à partir des wallets crypto)
   const typeDistribution: Record<string, number> = {};
@@ -1504,9 +1516,9 @@ const Dashboard: React.FC = () => {
               {accountDistributionItems.map((item) => (
                 <div
                   key={item.id}
-                  onClick={() => setSelectedPortfolio(item.id)}
+                  onClick={() => openEnvelopeDetails(item.id)}
                   className="group p-1.5 -mx-1 rounded-lg hover:bg-[rgba(255,255,255,0.03)] cursor-pointer transition-all"
-                  title={`Accéder à ${item.name}`}
+                  title={`Voir le détail : ${item.name}`}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="flex items-center gap-1.5 text-[#8a8a8a] group-hover:text-[#f5f5f5] transition-colors font-medium">
@@ -1620,55 +1632,6 @@ const Dashboard: React.FC = () => {
       </div>
 
 
-      {/* ===== NAVIGATION PRINCIPALE PAR PORTEFEUILLE (VUE GLOBALE, PEA, PEE, BANQUE, CRYPTO) ===== */}
-      <div className="border-b border-[rgba(255,255,255,0.06)] pt-4">
-        <nav className="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto scrollbar-none">
-          {navigationTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = selectedPortfolio === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setSelectedPortfolio(tab.id)}
-                className={`group inline-flex items-center gap-3 py-3.5 border-b-2 font-medium text-sm transition-all whitespace-nowrap ${
-                  isActive
-                    ? "border-[#c8a55e] text-[#c8a55e]"
-                    : "border-transparent text-[#8a8a8a] hover:text-[#f5f5f5] hover:border-[rgba(255,255,255,0.1)]"
-                }`}
-              >
-                <div
-                  className={`p-1.5 rounded-lg transition-colors ${
-                    isActive
-                      ? "bg-[#c8a55e]/15 text-[#c8a55e]"
-                      : "bg-[rgba(255,255,255,0.03)] text-[#8a8a8a] group-hover:text-[#f5f5f5]"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                </div>
-                <div className="text-left">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-sm">{tab.label}</span>
-                    <span
-                      className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
-                        isActive
-                          ? "bg-[#c8a55e]/15 text-[#c8a55e]"
-                          : "bg-[rgba(255,255,255,0.06)] text-[#8a8a8a]"
-                      }`}
-                    >
-                      {formatCurrency(tab.totalValue)}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-[#555555] font-normal hidden sm:block">
-                    {tab.description}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </nav>
-      </div>
-
       {/* ===== CONTENU PRINCIPAL PAR PORTEFEUILLE (BENTO GRID) ===== */}
       {unifiedHoldings.length === 0 &&
       bankCash === 0 &&
@@ -1677,11 +1640,9 @@ const Dashboard: React.FC = () => {
       ) : (
         <div className="space-y-6">
           {/* ======================================================== */}
-          {/* 1. PANEL : VUE GLOBALE (PATRIMOINE CONSOLIDÉ) */}
+          {/* 1. VUE GLOBALE (PATRIMOINE CONSOLIDÉ) — toujours affichée */}
           {/* ======================================================== */}
-          {selectedPortfolio === "all" && (
-            <>
-              {/* Bento Row 1: KPI Cards */}
+          {/* Bento Row 1: KPI Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="card text-center">
                   <span className="text-xs text-[#8a8a8a] block mb-1">
@@ -1777,7 +1738,7 @@ const Dashboard: React.FC = () => {
                       <div
                         key={env.id}
                         className="card group hover:border-[#c8a55e]/40 transition-all cursor-pointer flex flex-col justify-between"
-                        onClick={() => setSelectedPortfolio(env.id)}
+                        onClick={() => openEnvelopeDetails(env.id)}
                       >
                         <div>
                           <div className="flex items-center justify-between gap-2 mb-2">
@@ -1957,7 +1918,7 @@ const Dashboard: React.FC = () => {
                         <div
                           key={e.id}
                           className="flex items-center justify-between text-xs cursor-pointer hover:opacity-80 transition-opacity"
-                          onClick={() => setSelectedPortfolio(e.id)}
+                          onClick={() => openEnvelopeDetails(e.id)}
                         >
                           <div className="flex items-center gap-1.5 truncate pr-1">
                             <span
@@ -2370,7 +2331,7 @@ const Dashboard: React.FC = () => {
                           <tr
                             key={env.id}
                             className="hover:bg-[rgba(255,255,255,0.02)] transition-colors cursor-pointer"
-                            onClick={() => setSelectedPortfolio(env.id)}
+                            onClick={() => openEnvelopeDetails(env.id)}
                           >
                             <td className="py-3 px-3 whitespace-nowrap">
                               <div className="flex items-center gap-2">
@@ -2510,7 +2471,7 @@ const Dashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[rgba(255,255,255,0.04)]">
-                      {activeHoldings.map((h) => {
+                      {globalFilteredHoldings.map((h) => {
                         const weight =
                           totalWealthAll > 0
                             ? (h.totalValue / totalWealthAll) * 100
@@ -2580,14 +2541,111 @@ const Dashboard: React.FC = () => {
                   </table>
                 </div>
               </div>
-            </>
-          )}
 
           {/* ======================================================== */}
-          {/* 2. PANEL : ENVELOPPE D'INVESTISSEMENT (PEA, PEE, etc.) */}
+          {/* 2. DÉTAILS PAR ENVELOPPE (repliable) — PEA, PEE, Banque, Crypto… */}
           {/* ======================================================== */}
-          {selectedEnvelope && selectedEnvelope.kind === "investment" && (
-            <>
+          <div id="details-enveloppes" className="scroll-mt-24">
+            <button
+              type="button"
+              onClick={toggleEnvelopeDetails}
+              aria-expanded={showEnvelopeDetails}
+              className="card w-full flex items-center justify-between gap-3 text-left hover:border-[#c8a55e]/40"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-[rgba(200,165,94,0.12)] flex items-center justify-center shrink-0">
+                  <Layers className="h-4 w-4 text-[#c8a55e]" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold text-[#f5f5f5]">
+                    Détails par enveloppe
+                  </h3>
+                  <p className="text-xs text-[#8a8a8a]">
+                    PEA, PEE, assurance vie, banque et crypto — positions ligne
+                    à ligne
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 text-xs text-[#8a8a8a]">
+                <span className="hidden sm:inline">
+                  {showEnvelopeDetails ? "Masquer" : "Afficher"}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform duration-200 ${
+                    showEnvelopeDetails ? "rotate-180" : ""
+                  }`}
+                />
+              </div>
+            </button>
+
+            {showEnvelopeDetails && (
+              <div className="mt-6">
+                {/* Onglets par enveloppe (PEA, PEE, Banque, Crypto…) */}
+                <div className="border-b border-[rgba(255,255,255,0.06)]">
+                  <nav className="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto scrollbar-none">
+                    {navigationTabs.map((tab) => {
+                      const Icon = tab.icon;
+                      const isActive = selectedPortfolio === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setSelectedPortfolio(tab.id)}
+                          className={`group inline-flex items-center gap-3 py-3.5 border-b-2 font-medium text-sm transition-all whitespace-nowrap ${
+                            isActive
+                              ? "border-[#c8a55e] text-[#c8a55e]"
+                              : "border-transparent text-[#8a8a8a] hover:text-[#f5f5f5] hover:border-[rgba(255,255,255,0.1)]"
+                          }`}
+                        >
+                          <div
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isActive
+                                ? "bg-[#c8a55e]/15 text-[#c8a55e]"
+                                : "bg-[rgba(255,255,255,0.03)] text-[#8a8a8a] group-hover:text-[#f5f5f5]"
+                            }`}
+                          >
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="text-left">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-sm">
+                                {tab.label}
+                              </span>
+                              <span
+                                className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                                  isActive
+                                    ? "bg-[#c8a55e]/15 text-[#c8a55e]"
+                                    : "bg-[rgba(255,255,255,0.06)] text-[#8a8a8a]"
+                                }`}
+                              >
+                                {formatCurrency(tab.totalValue)}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-[#555555] font-normal hidden sm:block">
+                              {tab.description}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </nav>
+                </div>
+
+                <div className="space-y-6 mt-6">
+                  {selectedEnvelope &&
+                    selectedEnvelope.kind === "investment" &&
+                    (() => {
+                      const envelope = selectedEnvelope;
+                      const holdings = filterHoldings(
+                        unifiedHoldings.filter(
+                          (h) => h.envelopeId === envelope.id,
+                        ),
+                      );
+                      return (
+                        <div
+                          id={`envelope-${envelope.id}`}
+                          className="space-y-6 scroll-mt-24"
+                        >
               {/* Hero Enveloppe */}
               <div className="card">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
@@ -2595,29 +2653,20 @@ const Dashboard: React.FC = () => {
                     <div className="flex items-center gap-2 mb-1">
                       <span
                         className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: selectedEnvelope.color }}
+                        style={{ backgroundColor: envelope.color }}
                       />
                       <h3 className="text-xl font-bold text-[#f5f5f5]">
-                        {selectedEnvelope.label}
+                        {envelope.label}
                       </h3>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-[rgba(255,255,255,0.06)] text-[#8a8a8a]">
-                        {selectedEnvelope.description}
+                        {envelope.description}
                       </span>
                     </div>
                     <p className="text-xs text-[#8a8a8a]">
                       Vue détaillée et positions de votre portefeuille{" "}
-                      {selectedEnvelope.label}
+                      {envelope.label}
                     </p>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPortfolio("all")}
-                    className="btn-secondary !py-1.5 !px-3 text-xs self-start sm:self-auto flex items-center gap-1.5"
-                  >
-                    <Layers className="h-3.5 w-3.5" />
-                    <span>Revenir à la vue globale</span>
-                  </button>
                 </div>
 
                 {/* 4 Bento KPIs */}
@@ -2627,7 +2676,7 @@ const Dashboard: React.FC = () => {
                       Valeur Actuelle
                     </span>
                     <span className="text-2xl font-bold text-[#f5f5f5]">
-                      {formatCurrency(selectedEnvelope.totalValue)}
+                      {formatCurrency(envelope.totalValue)}
                     </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
@@ -2635,7 +2684,7 @@ const Dashboard: React.FC = () => {
                       Montant Investi (PRU)
                     </span>
                     <span className="text-2xl font-bold text-[#f5f5f5]">
-                      {formatCurrency(selectedEnvelope.investedValue)}
+                      {formatCurrency(envelope.investedValue)}
                     </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
@@ -2644,13 +2693,13 @@ const Dashboard: React.FC = () => {
                     </span>
                     <span
                       className={`text-2xl font-bold ${
-                        selectedEnvelope.pnl >= 0
+                        envelope.pnl >= 0
                           ? "text-[#22c55e]"
                           : "text-[#ef4444]"
                       }`}
                     >
-                      {selectedEnvelope.pnl >= 0 ? "+" : ""}
-                      {formatCurrency(selectedEnvelope.pnl)}
+                      {envelope.pnl >= 0 ? "+" : ""}
+                      {formatCurrency(envelope.pnl)}
                     </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
@@ -2659,13 +2708,13 @@ const Dashboard: React.FC = () => {
                     </span>
                     <span
                       className={`text-2xl font-bold ${
-                        selectedEnvelope.pnlPercent >= 0
+                        envelope.pnlPercent >= 0
                           ? "text-[#22c55e]"
                           : "text-[#ef4444]"
                       }`}
                     >
-                      {selectedEnvelope.pnlPercent >= 0 ? "+" : ""}
-                      {formatPercent(selectedEnvelope.pnlPercent, 2)}
+                      {envelope.pnlPercent >= 0 ? "+" : ""}
+                      {formatPercent(envelope.pnlPercent, 2)}
                     </span>
                   </div>
                 </div>
@@ -2679,13 +2728,13 @@ const Dashboard: React.FC = () => {
                   </span>
                   <span className="text-xl font-bold text-[#f5f5f5]">
                     {(() => {
-                      const max = activeHoldings.reduce(
+                      const max = holdings.reduce(
                         (m, h) => (h.totalValue > m ? h.totalValue : m),
                         0,
                       );
-                      return selectedEnvelope.totalValue > 0
+                      return envelope.totalValue > 0
                         ? formatPercent(
-                            (max / selectedEnvelope.totalValue) * 100,
+                            (max / envelope.totalValue) * 100,
                             1,
                           )
                         : "0%";
@@ -2701,14 +2750,14 @@ const Dashboard: React.FC = () => {
                   </span>
                   <span className="text-xl font-bold text-[#f5f5f5]">
                     {(() => {
-                      const top3 = activeHoldings
+                      const top3 = holdings
                         .slice()
                         .sort((a, b) => b.totalValue - a.totalValue)
                         .slice(0, 3)
                         .reduce((s, h) => s + h.totalValue, 0);
-                      return selectedEnvelope.totalValue > 0
+                      return envelope.totalValue > 0
                         ? formatPercent(
-                            (top3 / selectedEnvelope.totalValue) * 100,
+                            (top3 / envelope.totalValue) * 100,
                             1,
                           )
                         : "0%";
@@ -2723,8 +2772,8 @@ const Dashboard: React.FC = () => {
                     Lignes en Plus-Value
                   </span>
                   <span className="text-xl font-bold text-[#22c55e]">
-                    {activeHoldings.filter((h) => h.pnl > 0).length} /{" "}
-                    {activeHoldings.length}
+                    {holdings.filter((h) => h.pnl > 0).length} /{" "}
+                    {holdings.length}
                   </span>
                   <span className="text-[11px] text-[#555555] block mt-0.5">
                     Positions gagnantes
@@ -2737,11 +2786,11 @@ const Dashboard: React.FC = () => {
                 {/* Donut des positions de cette enveloppe */}
                 <div className="card">
                   <h4 className="text-base font-semibold text-[#f5f5f5] mb-2">
-                    Allocation — {selectedEnvelope.label}
+                    Allocation — {envelope.label}
                   </h4>
                   <div className="relative h-64 flex items-center justify-center">
                     {(() => {
-                      const rawHoldingsData = activeHoldings
+                      const rawHoldingsData = holdings
                         .filter((h) => h.totalValue > 0)
                         .map((h, i) => ({
                           name: h.name || "Actif",
@@ -2803,10 +2852,10 @@ const Dashboard: React.FC = () => {
                           </ResponsiveContainer>
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                             <span className="text-base font-bold text-[#f5f5f5]">
-                              {formatCurrency(selectedEnvelope.totalValue)}
+                              {formatCurrency(envelope.totalValue)}
                             </span>
                             <span className="text-[11px] text-[#8a8a8a]">
-                              {activeHoldings.length} lignes
+                              {holdings.length} lignes
                             </span>
                           </div>
                         </>
@@ -2822,7 +2871,7 @@ const Dashboard: React.FC = () => {
                   </h4>
                   <div className="h-64">
                     {(() => {
-                      const holdingGainData = activeHoldings
+                      const holdingGainData = holdings
                         .filter((h) => h.pnl !== 0)
                         .map((h) => {
                           const rawName = h.name || "Actif";
@@ -2906,19 +2955,19 @@ const Dashboard: React.FC = () => {
                     Top 5 Plus Fortes Pondérations
                   </h4>
                   <div className="space-y-3">
-                    {activeHoldings.length === 0 ? (
+                    {holdings.length === 0 ? (
                       <div className="text-xs text-[#8a8a8a] text-center py-8">
                         Aucune ligne détenue dans ce portefeuille.
                       </div>
                     ) : (
-                      activeHoldings
+                      holdings
                         .slice()
                         .sort((a, b) => b.totalValue - a.totalValue)
                         .slice(0, 5)
                         .map((h, idx) => {
                           const pct =
-                            selectedEnvelope.totalValue > 0
-                              ? (h.totalValue / selectedEnvelope.totalValue) *
+                            envelope.totalValue > 0
+                              ? (h.totalValue / envelope.totalValue) *
                                 100
                               : 0;
                           return (
@@ -2953,14 +3002,14 @@ const Dashboard: React.FC = () => {
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h4 className="text-base font-semibold text-[#f5f5f5]">
-                      Lignes Détenues — {selectedEnvelope.label}
+                      Lignes Détenues — {envelope.label}
                     </h4>
                     <p className="text-xs text-[#8a8a8a]">
                       Détail complet des positions de ce compte
                     </p>
                   </div>
                   <span className="text-xs text-[#8a8a8a]">
-                    {activeHoldings.length} actifs
+                    {holdings.length} actifs
                   </span>
                 </div>
 
@@ -2991,7 +3040,7 @@ const Dashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[rgba(255,255,255,0.04)]">
-                      {activeHoldings.length === 0 ? (
+                      {holdings.length === 0 ? (
                         <tr>
                           <td
                             colSpan={8}
@@ -3010,10 +3059,10 @@ const Dashboard: React.FC = () => {
                           </td>
                         </tr>
                       ) : (
-                        activeHoldings.map((h) => {
+                        holdings.map((h) => {
                           const weight =
-                            selectedEnvelope.totalValue > 0
-                              ? (h.totalValue / selectedEnvelope.totalValue) *
+                            envelope.totalValue > 0
+                              ? (h.totalValue / envelope.totalValue) *
                                 100
                               : 0;
                           const isPositive = h.pnl >= 0;
@@ -3077,14 +3126,12 @@ const Dashboard: React.FC = () => {
                   </table>
                 </div>
               </div>
-            </>
-          )}
+                      </div>
+                    );
+                  })()}
 
-          {/* ======================================================== */}
-          {/* 3. PANEL : LIQUIDITÉS & BANQUE */}
-          {/* ======================================================== */}
-          {selectedPortfolio === "bank" && (
-            <>
+                {selectedPortfolio === "bank" && (
+                  <div id="envelope-bank" className="space-y-6 scroll-mt-24">
               {/* Header Hero Banque */}
               <div className="card">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
@@ -3103,14 +3150,6 @@ const Dashboard: React.FC = () => {
                       financiers
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPortfolio("all")}
-                    className="btn-secondary !py-1.5 !px-3 text-xs self-start sm:self-auto flex items-center gap-1.5"
-                  >
-                    <Layers className="h-3.5 w-3.5" />
-                    <span>Vue globale</span>
-                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -3368,14 +3407,11 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
               </div>
-            </>
-          )}
+                  </div>
+                )}
 
-          {/* ======================================================== */}
-          {/* 4. PANEL : CRYPTO & WEB3 */}
-          {/* ======================================================== */}
-          {selectedPortfolio === "crypto" && (
-            <>
+                {selectedPortfolio === "crypto" && (
+                  <div id="envelope-crypto" className="space-y-6 scroll-mt-24">
               {/* Header Hero Crypto */}
               <div className="card">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
@@ -3394,14 +3430,6 @@ const Dashboard: React.FC = () => {
                       Solana, Polygon, etc.)
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPortfolio("all")}
-                    className="btn-secondary !py-1.5 !px-3 text-xs self-start sm:self-auto flex items-center gap-1.5"
-                  >
-                    <Layers className="h-3.5 w-3.5" />
-                    <span>Vue globale</span>
-                  </button>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -3687,8 +3715,12 @@ const Dashboard: React.FC = () => {
                   </table>
                 </div>
               </div>
-            </>
-          )}
+                  </div>
+                )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
