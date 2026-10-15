@@ -1542,10 +1542,10 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Les 2 petites cartes : Gain/Perte et Rendement (50% de la largeur totale, divisées en 2 cartes) */}
+        {/* Colonne droite : 4 petites cartes (Gain/Perte, Rendement, Portefeuilles Actifs, Taux d'Investissement) */}
         <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
           {/* Petite carte : Gain/Perte */}
-          <div className="card text-center">
+          <div className="card flex flex-col justify-center text-center">
             <span className="text-xs text-[#8a8a8a] block mb-1">
               Gain / Perte
             </span>
@@ -1568,7 +1568,7 @@ const Dashboard: React.FC = () => {
           </div>
 
           {/* Petite carte : Rendement */}
-          <div className="card text-center">
+          <div className="card flex flex-col justify-center text-center">
             <span className="text-xs text-[#8a8a8a] block mb-1">Rendement</span>
             <span
               className={`text-2xl font-bold ${
@@ -1583,6 +1583,37 @@ const Dashboard: React.FC = () => {
             </span>
             <span className="text-[11px] text-[#555555] block mt-0.5">
               Investissements {formatCurrency(totalInvestmentsAll)}
+            </span>
+          </div>
+
+          {/* Petite carte : Portefeuilles Actifs */}
+          <div className="card flex flex-col justify-center text-center">
+            <span className="text-xs text-[#8a8a8a] block mb-1">
+              Portefeuilles Actifs
+            </span>
+            <span className="text-2xl font-bold text-[#c8a55e]">
+              {portfolioEnvelopes.length}
+            </span>
+            <span className="text-[11px] text-[#555555] block mt-0.5">
+              PEA, PEE, Banque, Crypto
+            </span>
+          </div>
+
+          {/* Petite carte : Taux d'Investissement */}
+          <div className="card flex flex-col justify-center text-center">
+            <span className="text-xs text-[#8a8a8a] block mb-1">
+              Taux d'Investissement
+            </span>
+            <span className="text-2xl font-bold text-[#f5f5f5]">
+              {totalWealthAll > 0
+                ? formatPercent(
+                    ((totalWealthAll - bankCash) / totalWealthAll) * 100,
+                    1,
+                  )
+                : "0%"}
+            </span>
+            <span className="text-[11px] text-[#555555] block mt-0.5">
+              hors liquidités bancaires
             </span>
           </div>
         </div>
