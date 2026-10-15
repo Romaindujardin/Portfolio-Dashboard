@@ -9,7 +9,6 @@ import Savings from "./pages/Savings";
 import AIAnalysis from "./pages/AIAnalysis";
 import Settings from "./pages/Settings";
 import Banking from "./pages/Banking";
-import GeminiChatBubble from "./components/GeminiChatBubble";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { UserProvider } from "./contexts/UserContext";
 import { initializeCryptoDatabase } from "./utils/cryptoDatabase";
@@ -77,7 +76,6 @@ function App() {
               </ErrorBoundary>
             </div>
           </main>
-          <GeminiChatBubble />
         </div>
       </UserProvider>
     </Router>

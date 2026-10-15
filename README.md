@@ -9,7 +9,7 @@ Application personnelle de suivi de patrimoine : banque (CSV), crypto (wallets +
 - **Budget & Tricount** : dépenses/revenus, répartition Romain/Sophie, poches budgétaires
 - **Épargne** : stratégie d'allocation par poches + simulation avec intérêts composés
 - **Banque** : import de relevés CSV, mapping de colonnes, synchronisation Bourso
-- **Analyse IA** : analyse du portefeuille crypto via Gemini AI
+- **Conseiller IA** : Gemini répond à vos questions en langage naturel (achat immobilier, rééquilibrage, fiscalité) avec vos comptes, lignes (PEA, PEE, assurance vie), wallets crypto et stratégie d'épargne joints
 - **🗄️ SQLite** : stockage local fiable (`portfolio.db`)
 
 ## 🔧 Technologies
@@ -28,7 +28,7 @@ Application personnelle de suivi de patrimoine : banque (CSV), crypto (wallets +
 | NFTs | OpenSea | Requise |
 | Prix crypto | CoinGecko | Optionnelle |
 | Comptes Binance | API Binance | Requise (lecture) |
-| Analyses IA | Gemini | Requise |
+| Conseiller IA | Gemini | Requise |
 | Comptes bancaires | CSV importés | — |
 
 ## 🗄️ Base de données SQLite
@@ -75,7 +75,7 @@ curl http://127.0.0.1:3001/api/database/stats
 
 Toutes les clés API se configurent via l'interface : **Paramètres > Clés API**.
 
-- **Gemini AI** : analyse de portefeuille
+- **Gemini AI** : conseiller patrimonial (contexte joints : comptes, lignes, crypto, stratégie)
 - **Etherscan** / **OpenSea** : wallets et NFTs
 - **Binance** : connexion du compte CEX
 - **CoinGecko** : optionnel (limites plus hautes)
@@ -92,7 +92,7 @@ Toutes les clés API se configurent via l'interface : **Paramètres > Clés API*
 │   │   ├── databaseService.ts # Client de l'API locale
 │   │   ├── database/          # Gestionnaire SQLite (Node)
 │   │   ├── blockchainService.ts / binanceService.ts / cryptoDatabase.ts
-│   │   ├── geminiAI.ts        # Analyse IA
+│   │   ├── geminiAI.ts        # Conseiller IA (Gemini) + aiContext.ts (collecte du contexte)
 │   │   └── tricountStorage.ts / savingsStorage.ts
 │   └── types/
 ├── server.js                  # API locale (Express)

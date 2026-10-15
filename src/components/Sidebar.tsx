@@ -97,7 +97,7 @@ const Sidebar: React.FC = () => {
       icon: PiggyBank,
     },
     {
-      name: "Analyse IA",
+      name: "Conseiller IA",
       path: "/ai-analysis",
       icon: Sparkles,
     },
