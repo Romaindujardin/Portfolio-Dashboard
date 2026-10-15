@@ -54,6 +54,13 @@ import {
   getTimeBucketKey,
   sumNumericColumn,
 } from "../utils/csvAnalytics";
+import {
+  WealthPeriod,
+  WealthSnapshot,
+  buildWealthChartSeries,
+  getWealthHistory,
+  recordWealthSnapshot,
+} from "../utils/wealthHistory";
 
 const PIE_COLORS = [
   "#3b82f6",
@@ -135,9 +142,10 @@ const Dashboard: React.FC = () => {
     if (typeof window === "undefined") return true;
     return document.documentElement.classList.contains("dark");
   });
-  const [finaryPeriod, setFinaryPeriod] = useState<
-    "1J" | "7J" | "1M" | "1A" | "YTD" | "ALL"
-  >("1M");
+  const [finaryPeriod, setFinaryPeriod] = useState<WealthPeriod>("1M");
+  const [wealthHistory, setWealthHistory] = useState<WealthSnapshot[]>(() =>
+    getWealthHistory(currentUser),
+  );
   const [accountSummaries, setAccountSummaries] = useState<
     AccountSectionSummary[]
   >([]);
@@ -194,9 +202,13 @@ const Dashboard: React.FC = () => {
   const formatNumber = (value: number, locale: string = "fr-FR") =>
     maskDigits(Number(value || 0).toLocaleString(locale));
   const formatCurrency = (value: number, locale: string = "fr-FR") =>
-    `${formatNumber(value, locale)}€`;
+    `${maskDigits(
+      Number(value || 0).toLocaleString(locale, {
+        maximumFractionDigits: 2,
+      }),
+    )}€`;
   const formatPercent = (value: number, digits: number = 2) =>
-    `${maskDigits(Number(value || 0).toFixed(digits))}%`;
+    `${maskDigits(Number(value || 0).toFixed(digits).replace(".", ","))}%`;
 
   const loadWallets = async () => {
     try {
@@ -531,40 +543,11 @@ const Dashboard: React.FC = () => {
     });
   }, [bankSeries]);
 
-  // Filtrer les transactions pour le graphique "évolution du solde" selon le bucket sélectionné et la période
-  // Affiche chaque transaction avec son solde (ACCOUNTBALANCE) pour le bucket sélectionné
-  const balanceChartData = React.useMemo(() => {
-    if (!bankTxs.length) return [];
-
-    // Si pas de bucket sélectionné, afficher toutes les transactions avec leur solde
-    if (!selectedBucketKey) {
-      return bankTxs
-        .filter((t) => t.accountBalance != null)
-        .map((t) => ({
-          date: t.date,
-          key: getTimeBucketKey(t.date, cashGranularity),
-          balance: t.accountBalance!,
-          dateLabel: new Date(t.date).toLocaleDateString("fr-FR"),
-        }))
-        .sort((a, b) => a.date.getTime() - b.date.getTime());
-    }
-
-    // Filtrer les transactions du bucket sélectionné uniquement
-    const filtered = bankTxs
-      .filter((t) => {
-        const bucketKey = getTimeBucketKey(t.date, cashGranularity);
-        return bucketKey === selectedBucketKey && t.accountBalance != null;
-      })
-      .map((t) => ({
-        date: t.date,
-        key: getTimeBucketKey(t.date, cashGranularity),
-        balance: t.accountBalance!,
-        dateLabel: new Date(t.date).toLocaleDateString("fr-FR"),
-      }))
-      .sort((a, b) => a.date.getTime() - b.date.getTime());
-
-    return filtered;
-  }, [bankTxs, selectedBucketKey, cashGranularity]);
+  // Courbe « Patrimoine net » : relevés historiques filtrés selon la période sélectionnée
+  const wealthChartData = React.useMemo(
+    () => buildWealthChartSeries(wealthHistory, finaryPeriod),
+    [wealthHistory, finaryPeriod],
+  );
 
   useEffect(() => {
     // Default bucket = latest (première dans la liste triée)
@@ -754,6 +737,18 @@ const Dashboard: React.FC = () => {
   const totalGainLoss = totalCurrentInvestments - totalInvestedInitial;
   const totalGainLossPercent =
     totalInvestedInitial > 0 ? (totalGainLoss / totalInvestedInitial) * 100 : 0;
+
+  // ===== Historique du patrimoine net (courbe « Patrimoine net ») =====
+  // Recharge les relevés quand l'utilisateur change.
+  useEffect(() => {
+    setWealthHistory(getWealthHistory(currentUser));
+  }, [currentUser]);
+
+  // Enregistre le patrimoine net du jour (un seul relevé par jour, mis à jour).
+  useEffect(() => {
+    if (!currentUser || totalWealthAll <= 0) return;
+    setWealthHistory(recordWealthSnapshot(currentUser, totalWealthAll));
+  }, [currentUser, totalWealthAll]);
 
   // ===== Positions Unifiées (Holdings) =====
   const unifiedHoldings = useMemo<UnifiedHolding[]>(() => {
@@ -1265,19 +1260,7 @@ const Dashboard: React.FC = () => {
           {/* Glowing Area Chart */}
           <div className="h-48 mt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={
-                  balanceChartData.length > 0
-                    ? balanceChartData
-                    : [
-                        { dateLabel: "S-4", balance: totalWealthAll * 0.94 },
-                        { dateLabel: "S-3", balance: totalWealthAll * 0.96 },
-                        { dateLabel: "S-2", balance: totalWealthAll * 0.95 },
-                        { dateLabel: "S-1", balance: totalWealthAll * 0.98 },
-                        { dateLabel: "Auj.", balance: totalWealthAll },
-                      ]
-                }
-              >
+              <AreaChart data={wealthChartData}>
                 <defs>
                   <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#c8a55e" stopOpacity={0.25} />
@@ -1309,6 +1292,18 @@ const Dashboard: React.FC = () => {
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          {wealthHistory.length > 0 && wealthHistory.length < 10 && (
+            <p className="text-[10px] text-[#555555] mt-1.5 text-right">
+              Suivi depuis le{" "}
+              {new Date(wealthHistory[0].t).toLocaleDateString("fr-FR", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })}{" "}
+              · {wealthHistory.length}{" "}
+              {wealthHistory.length > 1 ? "relevés" : "relevé"}
+            </p>
+          )}
         </div>
 
         {/* Allocation Card (Span 1) */}
@@ -1547,85 +1542,48 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Les 2 petites modales : Gain/Perte et Rendement (50% de la largeur totale, divisées en 2 cartes) */}
+        {/* Les 2 petites cartes : Gain/Perte et Rendement (50% de la largeur totale, divisées en 2 cartes) */}
         <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
-          {/* Petite modale : Gain/Perte */}
-          <div className="card flex flex-col justify-between p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#8a8a8a]">
-                Gain / Perte
-              </span>
-              <span
-                className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  totalGainLoss >= 0 ? "badge-green" : "badge-red"
-                }`}
-              >
-                {totalGainLoss >= 0 ? "+" : ""}
-                {formatPercent(totalGainLossPercent, 2)}
-              </span>
-            </div>
-
-            <div className="my-auto py-3">
-              <p
-                className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${
-                  totalGainLoss >= 0
-                    ? "text-[#22c55e]"
-                    : "text-[#ef4444]"
-                }`}
-              >
-                {totalGainLoss >= 0 ? "+" : "-"}
-                {formatCurrency(Math.abs(totalGainLoss))}
-              </p>
-              <p className="text-xs text-[#8a8a8a] mt-1">
-                Plus ou moins-value latente
-              </p>
-            </div>
-
-            <div className="pt-3 border-t border-[rgba(255,255,255,0.06)] flex items-center justify-between text-xs">
-              <span className="text-[#8a8a8a]">Investi initial</span>
-              <span className="font-semibold text-[#f5f5f5]">
-                {formatCurrency(totalInvestedInitial)}
-              </span>
-            </div>
+          {/* Petite carte : Gain/Perte */}
+          <div className="card text-center">
+            <span className="text-xs text-[#8a8a8a] block mb-1">
+              Gain / Perte
+            </span>
+            <span
+              className={`text-2xl font-bold ${
+                totalGainLoss >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"
+              }`}
+            >
+              {totalGainLoss >= 0 ? "+" : "-"}
+              {formatCurrency(Math.abs(totalGainLoss))}
+            </span>
+            <span className="text-[11px] text-[#555555] block mt-0.5">
+              {totalGainLossPercent >= 0 ? "+" : "-"}
+              {formatPercent(Math.abs(totalGainLossPercent), 2)} · plus ou
+              moins-value latente
+            </span>
+            <span className="text-[11px] text-[#555555] block mt-0.5">
+              Investi initial {formatCurrency(totalInvestedInitial)}
+            </span>
           </div>
 
-          {/* Petite modale : Rendement */}
-          <div className="card flex flex-col justify-between p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#8a8a8a]">
-                Rendement
-              </span>
-              <span
-                className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  totalGainLossPercent >= 0 ? "badge-green" : "badge-red"
-                }`}
-              >
-                {totalGainLossPercent >= 0 ? "Positif" : "Négatif"}
-              </span>
-            </div>
-
-            <div className="my-auto py-3">
-              <p
-                className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${
-                  totalGainLossPercent >= 0
-                    ? "text-[#22c55e]"
-                    : "text-[#ef4444]"
-                }`}
-              >
-                {totalGainLossPercent >= 0 ? "+" : "-"}
-                {formatPercent(Math.abs(totalGainLossPercent), 2)}
-              </p>
-              <p className="text-xs text-[#8a8a8a] mt-1">
-                Performance globale
-              </p>
-            </div>
-
-            <div className="pt-3 border-t border-[rgba(255,255,255,0.06)] flex items-center justify-between text-xs">
-              <span className="text-[#8a8a8a]">Investissements</span>
-              <span className="font-semibold text-[#f5f5f5]">
-                {formatCurrency(totalInvestmentsAll)}
-              </span>
-            </div>
+          {/* Petite carte : Rendement */}
+          <div className="card text-center">
+            <span className="text-xs text-[#8a8a8a] block mb-1">Rendement</span>
+            <span
+              className={`text-2xl font-bold ${
+                totalGainLossPercent >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"
+              }`}
+            >
+              {totalGainLossPercent >= 0 ? "+" : "-"}
+              {formatPercent(Math.abs(totalGainLossPercent), 2)}
+            </span>
+            <span className="text-[11px] text-[#555555] block mt-0.5">
+              Performance globale
+            </span>
+            <span className="text-[11px] text-[#555555] block mt-0.5">
+              Investissements {formatCurrency(totalInvestmentsAll)}
+            </span>
           </div>
         </div>
       </div>

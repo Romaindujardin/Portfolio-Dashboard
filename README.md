@@ -4,7 +4,7 @@ Application personnelle de suivi de patrimoine : banque (CSV), crypto (wallets +
 
 ## 🚀 Fonctionnalités
 
-- **Dashboard** : patrimoine net, comptes bancaires (CSV), wallets crypto & NFTs, graphiques de flux
+- **Dashboard** : patrimoine net (courbe avec historique quotidien), comptes bancaires (CSV), wallets crypto & NFTs, graphiques de flux
 - **Portefeuille** : wallets blockchain (Etherscan) et Binance (CEX), assets masquables, NFTs
 - **Budget & Tricount** : dépenses/revenus, répartition Romain/Sophie, poches budgétaires
 - **Épargne** : stratégie d'allocation par poches + simulation avec intérêts composés
