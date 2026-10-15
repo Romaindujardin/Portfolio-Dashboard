@@ -25,6 +25,9 @@ backups/
 # Runtime data (miroirs JSON disque — contient des données personnelles)
 data/
 
+# Données temporaires des tests (serveur + base isolés)
+.test-tmp/
+
 # IDE and editor files
 .vscode/
 .idea/
@@ -71,7 +74,6 @@ GEMINI_MIGRATION.md
 
 # Migration scripts (internal)
 migrate-database-schema.js
-restore-database.js
 
 # Local scripts
 check-database.js

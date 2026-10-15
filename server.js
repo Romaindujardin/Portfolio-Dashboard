@@ -292,7 +292,7 @@ const extractCsvFromOutput = (stdout, headerStartsWith) => {
 // Routes existantes
 app.get("/api/test", (req, res) => {
   res.json({
-    message: "Yahoo Finance Proxy Server is running!",
+    message: "Portfolio Dashboard API server is running!",
     timestamp: new Date().toISOString(),
     database: "SQLite initialized",
   });
@@ -968,40 +968,6 @@ app.get("/api/database/stats", (req, res) => {
   }
 });
 
-// Endpoint pour initialiser la base de données
-app.post("/api/database/init", (req, res) => {
-  try {
-    dbManager.initializeTables();
-    res.json({ message: "Database initialized successfully" });
-  } catch (error) {
-    console.error("Error initializing database:", error);
-    res.status(500).json({ error: "Failed to initialize database" });
-  }
-});
-
-// Endpoint pour nettoyer la base de données
-app.post("/api/database/clear", (req, res) => {
-  try {
-    // Supprimer tous les wallets et leurs assets
-    const wallets = dbManager.getAllWallets();
-    wallets.forEach((wallet) => {
-      dbManager.deleteWalletAssets(wallet.id);
-      dbManager.deleteWallet(wallet.id);
-    });
-
-    // Supprimer tous les uploads CSV bancaires
-    const bankCsvUploads = dbManager.getAllBankCsvUploads("Romain");
-    bankCsvUploads.forEach((u) =>
-      dbManager.deleteBankCsvUpload(u.id, "Romain"),
-    );
-
-    res.json({ message: "Database cleared successfully" });
-  } catch (error) {
-    console.error("Error clearing database:", error);
-    res.status(500).json({ error: "Failed to clear database" });
-  }
-});
-
 // ===== BANQUE / IMPORT CSV =====
 
 // GET /api/database/bank-csv - Lister les CSV uploadés
@@ -1512,24 +1478,12 @@ app.get("/api/database/wallets", (req, res) => {
 // POST /api/database/wallets - Créer un wallet
 app.post("/api/database/wallets", (req, res) => {
   try {
-    console.log(
-      "📝 Création d'un wallet avec données:",
-      JSON.stringify(req.body, null, 2),
-    );
-
     const { assets, nfts, ...walletData } = req.body;
-    console.log("📊 Wallet data:", walletData);
-    console.log("📊 Assets:", assets?.length || 0);
-    console.log("📊 NFTs:", nfts?.length || 0);
-
     const walletId = dbManager.createWallet(walletData);
-    console.log("✅ Wallet créé avec ID:", walletId);
 
     // Ajouter les assets du wallet
     if (assets && Array.isArray(assets)) {
-      console.log("➕ Ajout de", assets.length, "assets...");
-      assets.forEach((asset, index) => {
-        console.log(`  - Asset ${index + 1}:`, asset.symbol);
+      assets.forEach((asset) => {
         dbManager.createWalletAsset({
           ...asset,
           wallet_id: walletId,
@@ -1539,17 +1493,14 @@ app.post("/api/database/wallets", (req, res) => {
 
     // Ajouter les NFTs du wallet
     if (nfts && Array.isArray(nfts)) {
-      console.log("➕ Ajout de", nfts.length, "NFTs...");
       nfts.forEach((nft, index) => {
-        console.log(`  - NFT ${index + 1}:`, nft.symbol);
         try {
           dbManager.createWalletNFT({
             ...nft,
             wallet_id: walletId,
           });
-          console.log(`  ✅ NFT ${index + 1} créé`);
         } catch (nftError) {
-          console.error(`  ❌ Erreur NFT ${index + 1}:`, nftError.message);
+          console.error(`Erreur NFT ${index + 1}:`, nftError.message);
         }
       });
     }
@@ -1561,183 +1512,44 @@ app.post("/api/database/wallets", (req, res) => {
   }
 });
 
-// PUT /api/database/wallets - Remplacer tous les wallets
-app.put("/api/database/wallets", (req, res) => {
-  try {
-    const wallets = req.body;
-    const userId = sanitizeUserId(req.query.user_id);
-    if (!userId)
-      return res.status(400).json({ error: "user_id invalide" });
-
-    console.log("📝 Mise à jour des wallets:", wallets.length, "wallets");
-
-    // Sauvegarder les NFTs existants avant de supprimer les wallets
-    const existing = dbManager.getAllWallets(userId);
-    const existingNFTs = new Map(); // Map pour associer l'adresse du wallet à ses NFTs
-
-    existing.forEach((wallet) => {
-      // Récupérer les NFTs avant de supprimer le wallet
-      const walletNFTs = dbManager.getWalletNFTs(wallet.id);
-      if (walletNFTs && walletNFTs.length > 0) {
-        existingNFTs.set(wallet.address, walletNFTs);
-        console.log(
-          `💾 Sauvegarde de ${walletNFTs.length} NFTs pour le wallet ${wallet.address}`,
-        );
-      }
-
-      dbManager.deleteWalletAssets(wallet.id);
-      dbManager.deleteWallet(wallet.id);
-    });
-
-    // Ajouter les nouveaux wallets
-    wallets.forEach((wallet, index) => {
-      console.log(`📊 Traitement du wallet ${index + 1}:`, wallet.name);
-
-      // Transformer les champs camelCase en snake_case
-      const walletData = {
-        user_id: userId,
-        name: wallet.name,
-        address: wallet.address,
-        wallet_type: wallet.walletType || wallet.wallet_type,
-        blockchains: wallet.blockchains,
-        total_value: wallet.totalValue || wallet.total_value || 0,
-        last_updated:
-          wallet.lastUpdated || wallet.last_updated || new Date().toISOString(),
-      };
-
-      console.log("📊 Wallet data transformé:", walletData);
-
-      const walletId = dbManager.createWallet(walletData);
-      console.log("✅ Wallet créé avec ID:", walletId);
-
-      // Ajouter les assets du wallet
-      if (wallet.assets && Array.isArray(wallet.assets)) {
-        console.log("➕ Ajout de", wallet.assets.length, "assets...");
-        wallet.assets.forEach((asset, assetIndex) => {
-          console.log(`  - Asset ${assetIndex + 1}:`, asset.symbol);
-
-          // Transformer les champs de l'asset
-          const assetData = {
-            wallet_id: walletId,
-            symbol: asset.symbol,
-            name: asset.name,
-            balance: asset.balance,
-            decimals: asset.decimals,
-            blockchain: asset.blockchain,
-            contract_address: asset.contractAddress || asset.contract_address,
-            price: asset.price,
-            value: asset.value,
-            logo: asset.logo,
-            is_hidden: asset.isHidden || asset.is_hidden || false,
-          };
-
-          dbManager.createWalletAsset(assetData);
-        });
-      }
-
-      // Ajouter les NFTs du wallet (si fournis)
-      if (wallet.nfts && Array.isArray(wallet.nfts)) {
-        console.log("➕ Ajout de", wallet.nfts.length, "NFTs...");
-        wallet.nfts.forEach((nft, nftIndex) => {
-          console.log(`  - NFT ${nftIndex + 1}:`, nft.symbol);
-
-          // Transformer les champs du NFT
-          const nftData = {
-            wallet_id: walletId,
-            symbol: nft.symbol,
-            name: nft.name,
-            balance: nft.balance,
-            decimals: nft.decimals,
-            blockchain: nft.blockchain,
-            contract_address: nft.contractAddress || nft.contract_address,
-            price: nft.price,
-            value: nft.value,
-            logo: nft.logo,
-            token_id: nft.tokenId || nft.token_id,
-            collection: nft.collection,
-            permalink: nft.permalink,
-            traits: nft.traits,
-            is_hidden: nft.isHidden || nft.is_hidden || false,
-          };
-
-          try {
-            dbManager.createWalletNFT(nftData);
-            console.log(`  ✅ NFT ${nftIndex + 1} créé`);
-          } catch (nftError) {
-            console.error(`  ❌ Erreur NFT ${nftIndex + 1}:`, nftError.message);
-          }
-        });
-      } else {
-        // Si aucun NFT fourni, essayer de récupérer les NFTs existants pour ce wallet
-        console.log("🔍 Récupération des NFTs existants pour ce wallet...");
-        const savedNFTs = existingNFTs.get(wallet.address);
-        if (savedNFTs && savedNFTs.length > 0) {
-          console.log(
-            `  - ${savedNFTs.length} NFTs existants trouvés, transfert vers le nouveau wallet...`,
-          );
-          savedNFTs.forEach((nft, nftIndex) => {
-            try {
-              dbManager.createWalletNFT({
-                ...nft,
-                wallet_id: walletId,
-              });
-              console.log(`  ✅ NFT ${nftIndex + 1} transféré`);
-            } catch (nftError) {
-              console.error(
-                `  ❌ Erreur transfert NFT ${nftIndex + 1}:`,
-                nftError.message,
-              );
-            }
-          });
-        }
-      }
-    });
-
-    res.json({ message: "Wallets updated successfully" });
-  } catch (error) {
-    console.error("❌ Error updating wallets:", error);
-    res.status(500).json({ error: "Failed to update wallets" });
-  }
-});
-
 // PUT /api/database/wallets/:id - Mettre à jour un wallet
 app.put("/api/database/wallets/:id", (req, res) => {
   try {
     const { id } = req.params;
     const { assets, nfts, ...walletData } = req.body;
 
-    // Mettre à jour le wallet
-    const success = dbManager.updateWallet(id, walletData);
-
-    if (success) {
-      // Supprimer les anciens assets et NFTs
-      dbManager.deleteWalletAssets(id);
-      dbManager.deleteWalletNFTs(id);
-
-      // Ajouter les nouveaux assets
-      if (assets && Array.isArray(assets)) {
-        assets.forEach((asset) => {
-          dbManager.createWalletAsset({
-            ...asset,
-            wallet_id: id,
-          });
-        });
-      }
-
-      // Ajouter les nouveaux NFTs
-      if (nfts && Array.isArray(nfts)) {
-        nfts.forEach((nft) => {
-          dbManager.createWalletNFT({
-            ...nft,
-            wallet_id: id,
-          });
-        });
-      }
-
-      res.json({ message: "Wallet updated successfully" });
-    } else {
-      res.status(404).json({ error: "Wallet not found" });
+    // Le wallet doit exister — les champs fournis sont ensuite appliqués
+    // (whitelist), même si le corps ne contient que des assets/NFTs.
+    if (!dbManager.getWalletById(id)) {
+      return res.status(404).json({ error: "Wallet not found" });
     }
+    dbManager.updateWallet(id, walletData);
+
+    // Supprimer les anciens assets et NFTs
+    dbManager.deleteWalletAssets(id);
+    dbManager.deleteWalletNFTs(id);
+
+    // Ajouter les nouveaux assets
+    if (assets && Array.isArray(assets)) {
+      assets.forEach((asset) => {
+        dbManager.createWalletAsset({
+          ...asset,
+          wallet_id: id,
+        });
+      });
+    }
+
+    // Ajouter les nouveaux NFTs
+    if (nfts && Array.isArray(nfts)) {
+      nfts.forEach((nft) => {
+        dbManager.createWalletNFT({
+          ...nft,
+          wallet_id: id,
+        });
+      });
+    }
+
+    res.json({ message: "Wallet updated successfully" });
   } catch (error) {
     console.error("Error updating wallet:", error);
     res.status(500).json({ error: "Failed to update wallet" });
@@ -1819,300 +1631,6 @@ app.put("/api/database/wallets/:id/nfts/:index/visibility", (req, res) => {
   } catch (error) {
     console.error("Error updating NFT visibility:", error);
     res.status(500).json({ error: "Failed to update NFT visibility" });
-  }
-});
-
-// POST /api/database/wallets/:id/sync-nfts - Synchroniser les NFTs d'un wallet
-app.post("/api/database/wallets/:id/sync-nfts", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const wallet = dbManager.getWalletById(id);
-
-    if (!wallet) {
-      return res.status(404).json({ error: "Wallet not found" });
-    }
-
-    console.log(
-      `🔄 Synchronisation des NFTs pour le wallet ${wallet.address}...`,
-    );
-
-    // Supprimer les anciens NFTs
-    dbManager.deleteWalletNFTs(id);
-
-    // Re-scanner les NFTs (simulation - en réalité, il faudrait appeler le service blockchain)
-    // Pour l'instant, on va créer des NFTs de test basés sur les données OpenSea que nous avons
-    const testNFTs = [
-      {
-        wallet_id: id,
-        symbol: "NFT",
-        name: "1905 - Sir Bibendum",
-        balance: 1,
-        decimals: 0,
-        blockchain: "ethereum",
-        contract_address: "0xfad465ca1f33024532febae31761255df9cac5f5",
-        price: 95.09,
-        value: 95.09,
-        logo: "https://i2.seadn.io/ethereum/0xfad465ca1f33024532febae31761255df9cac5f5/b14f9c7a691f01f51b99c70d8f6c088e.jpeg",
-        token_id: "671",
-        collection: "michelin-h3ritage-collection",
-        permalink:
-          "https://opensea.io/assets/ethereum/0xfad465ca1f33024532febae31761255df9cac5f5/671",
-        traits: "[]",
-        is_hidden: false,
-      },
-      {
-        wallet_id: id,
-        symbol: "NFT",
-        name: "Michelin 3xplorer #771",
-        balance: 1,
-        decimals: 0,
-        blockchain: "ethereum",
-        contract_address: "0x87ec044115cd9e0e09221031441640ee48b3a8f2",
-        price: 273.85,
-        value: 273.85,
-        logo: "https://i2.seadn.io/ethereum/0x87ec044115cd9e0e09221031441640ee48b3a8f2/0ad24f73ab24a0f8d496082bf1364d/e10ad24f73ab24a0f8d496082bf1364d.gif",
-        token_id: "771",
-        collection: "michelin3xplorerclub",
-        permalink:
-          "https://opensea.io/assets/ethereum/0x87ec044115cd9e0e09221031441640ee48b3a8f2/771",
-        traits: "[]",
-        is_hidden: false,
-      },
-    ];
-
-    // Ajouter les NFTs
-    testNFTs.forEach((nft) => {
-      dbManager.createWalletNFT(nft);
-    });
-
-    console.log(
-      `✅ ${testNFTs.length} NFTs synchronisés pour le wallet ${wallet.address}`,
-    );
-
-    res.json({
-      message: "NFTs synchronized successfully",
-      nftsCount: testNFTs.length,
-    });
-  } catch (error) {
-    console.error("Error synchronizing NFTs:", error);
-    res.status(500).json({ error: "Failed to synchronize NFTs" });
-  }
-});
-
-// POST /api/database/wallets/test-create-with-nfts - Créer un wallet de test avec NFTs
-app.post("/api/database/wallets/test-create-with-nfts", async (req, res) => {
-  try {
-    const { address, name } = req.body;
-
-    if (!address || !name) {
-      return res.status(400).json({ error: "Address and name are required" });
-    }
-
-    console.log(
-      `🧪 Création d'un wallet de test avec NFTs: ${name} (${address})`,
-    );
-
-    // Créer le wallet
-    const walletId = dbManager.createWallet({
-      user_id: "Romain",
-      name: name,
-      address: address,
-      wallet_type: "metamask",
-      blockchains: JSON.stringify(["ethereum"]),
-      total_value: 368.94, // 95.09 + 273.85
-      last_updated: new Date().toISOString(),
-      added_at: new Date().toISOString(),
-    });
-
-    // Ajouter des assets de test
-    const testAssets = [
-      {
-        wallet_id: walletId,
-        symbol: "ETH",
-        name: "Ethereum",
-        balance: 0.1,
-        decimals: 18,
-        blockchain: "ethereum",
-        price: 2000,
-        value: 200,
-        logo: "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
-        is_hidden: false,
-      },
-    ];
-
-    testAssets.forEach((asset) => {
-      dbManager.createWalletAsset(asset);
-    });
-
-    // Ajouter des NFTs de test
-    const testNFTs = [
-      {
-        wallet_id: walletId,
-        symbol: "NFT",
-        name: "1905 - Sir Bibendum",
-        balance: 1,
-        decimals: 0,
-        blockchain: "ethereum",
-        contract_address: "0xfad465ca1f33024532febae31761255df9cac5f5",
-        price: 95.09,
-        value: 95.09,
-        logo: "https://i2.seadn.io/ethereum/0xfad465ca1f33024532febae31761255df9cac5f5/b14f9c7a691f01f51b99c70d8f6c088e.jpeg",
-        token_id: "671",
-        collection: "michelin-h3ritage-collection",
-        permalink:
-          "https://opensea.io/assets/ethereum/0xfad465ca1f33024532febae31761255df9cac5f5/671",
-        traits: "[]",
-        is_hidden: false,
-      },
-      {
-        wallet_id: walletId,
-        symbol: "NFT",
-        name: "Michelin 3xplorer #771",
-        balance: 1,
-        decimals: 0,
-        blockchain: "ethereum",
-        contract_address: "0x87ec044115cd9e0e09221031441640ee48b3a8f2",
-        price: 273.85,
-        value: 273.85,
-        logo: "https://i2.seadn.io/ethereum/0x87ec044115cd9e0e09221031441640ee48b3a8f2/0ad24f73ab24a0f8d496082bf1364d/e10ad24f73ab24a0f8d496082bf1364d.gif",
-        token_id: "771",
-        collection: "michelin3xplorerclub",
-        permalink:
-          "https://opensea.io/assets/ethereum/0x87ec044115cd9e0e09221031441640ee48b3a8f2/771",
-        traits: "[]",
-        is_hidden: false,
-      },
-    ];
-
-    testNFTs.forEach((nft) => {
-      dbManager.createWalletNFT(nft);
-    });
-
-    console.log(
-      `✅ Wallet de test créé avec ${testAssets.length} assets et ${testNFTs.length} NFTs`,
-    );
-
-    res.json({
-      message: "Test wallet created successfully",
-      walletId: walletId,
-      assetsCount: testAssets.length,
-      nftsCount: testNFTs.length,
-    });
-  } catch (error) {
-    console.error("Error creating test wallet:", error);
-    res.status(500).json({ error: "Failed to create test wallet" });
-  }
-});
-
-// Endpoint pour exporter les données
-app.get("/api/database/export", (req, res) => {
-  try {
-    const wallets = dbManager.getAllWallets();
-
-    const exportData = {
-      wallets,
-      exportDate: new Date().toISOString(),
-    };
-
-    res.json(exportData);
-  } catch (error) {
-    console.error("Error exporting database:", error);
-    res.status(500).json({ error: "Failed to export database" });
-  }
-});
-
-// Endpoint pour importer des données
-app.post("/api/database/import", (req, res) => {
-  try {
-    const { wallets } = req.body;
-
-    // Nettoyer la base de données existante
-    const existingWallets = dbManager.getAllWallets();
-    existingWallets.forEach((wallet) => {
-      dbManager.deleteWalletAssets(wallet.id);
-      dbManager.deleteWallet(wallet.id);
-    });
-
-    // Importer les nouvelles données
-    if (wallets) {
-      wallets.forEach((wallet) => {
-        const walletId = dbManager.createWallet({
-          name: wallet.name,
-          address: wallet.address,
-          wallet_type: wallet.wallet_type,
-          blockchains: wallet.blockchains,
-          total_value: wallet.total_value,
-          last_updated: wallet.last_updated,
-        });
-
-        // Importer les assets du wallet
-        if (wallet.assets) {
-          wallet.assets.forEach((asset) => {
-            dbManager.createWalletAsset({
-              wallet_id: walletId,
-              symbol: asset.symbol,
-              name: asset.name,
-              balance: asset.balance,
-              decimals: asset.decimals,
-              blockchain: asset.blockchain,
-              contract_address: asset.contract_address,
-              price: asset.price,
-              value: asset.value,
-              logo: asset.logo,
-              is_hidden: asset.is_hidden,
-            });
-          });
-        }
-      });
-    }
-
-    res.json({ message: "Database imported successfully" });
-  } catch (error) {
-    console.error("Error importing database:", error);
-    res.status(500).json({ error: "Failed to import database" });
-  }
-});
-
-// Endpoint pour la migration depuis localStorage
-app.post("/api/database/migrate", (req, res) => {
-  try {
-    const { localStorageData } = req.body;
-
-    if (localStorageData.wallets) {
-      localStorageData.wallets.forEach((wallet) => {
-        const walletId = dbManager.createWallet({
-          name: wallet.name,
-          address: wallet.address,
-          wallet_type: wallet.walletType,
-          blockchains: JSON.stringify(wallet.blockchains),
-          total_value: wallet.totalValue,
-          last_updated: wallet.lastUpdated,
-        });
-
-        if (wallet.assets) {
-          wallet.assets.forEach((asset) => {
-            dbManager.createWalletAsset({
-              wallet_id: walletId,
-              symbol: asset.symbol,
-              name: asset.name,
-              balance: asset.balance,
-              decimals: asset.decimals,
-              blockchain: asset.blockchain,
-              contract_address: asset.contractAddress || null,
-              price: asset.price || null,
-              value: asset.value || null,
-              logo: asset.logo || null,
-              is_hidden: asset.isHidden || false,
-            });
-          });
-        }
-      });
-    }
-
-    res.json({ message: "Migration completed successfully" });
-  } catch (error) {
-    console.error("Error during migration:", error);
-    res.status(500).json({ error: "Failed to migrate data" });
   }
 });
 

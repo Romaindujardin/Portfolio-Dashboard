@@ -9,7 +9,9 @@ class DatabaseManager {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     // Créer la base de données dans le répertoire du projet (2 niveaux au-dessus de src/utils/database)
-    this.dbPath = path.join(__dirname, "../../..", "portfolio.db");
+    // Surchargeable via DATABASE_PATH (tests, environnements isolés)
+    this.dbPath =
+      process.env.DATABASE_PATH || path.join(__dirname, "../../..", "portfolio.db");
     this.db = null;
   }
 
@@ -365,42 +367,6 @@ class DatabaseManager {
     return id;
   }
 
-  updateWalletAsset(id, asset) {
-    const db = this.getDatabase();
-    const now = new Date().toISOString();
-
-    // Whitelist des colonnes autorisées (protection contre l'injection SQL par nom de champ)
-    const allowed = [
-      "wallet_id",
-      "symbol",
-      "name",
-      "balance",
-      "decimals",
-      "blockchain",
-      "contract_address",
-      "price",
-      "value",
-      "logo",
-      "is_hidden",
-    ];
-    const fields = Object.keys(asset).filter((key) => allowed.includes(key));
-    if (fields.length === 0) return false;
-    const setClause = fields.map((field) => `${field} = ?`).join(", ");
-    const values = fields.map((field) => {
-      const value = asset[field];
-      return field === "is_hidden" ? (value ? 1 : 0) : value;
-    });
-
-    const stmt = db.prepare(`
-      UPDATE wallet_assets 
-      SET ${setClause}, updated_at = ?
-      WHERE id = ?
-    `);
-
-    const result = stmt.run(...values, now, id);
-    return result.changes > 0;
-  }
-
   deleteWalletAssets(walletId) {
     const db = this.getDatabase();
     const stmt = db.prepare("DELETE FROM wallet_assets WHERE wallet_id = ?");
@@ -478,38 +444,6 @@ class DatabaseManager {
     return id;
   }
 
-  updateWalletNFT(id, nft) {
-    const db = this.getDatabase();
-    const now = new Date().toISOString();
-
-    const stmt = db.prepare(`
-      UPDATE wallet_nfts SET
-        symbol = ?, name = ?, balance = ?, decimals = ?, blockchain = ?,
-        contract_address = ?, price = ?, value = ?, logo = ?, token_id = ?,
-        collection = ?, permalink = ?, traits = ?, is_hidden = ?, updated_at = ?
-      WHERE id = ?
-    `);
-
-    stmt.run(
-      nft.symbol,
-      nft.name,
-      nft.balance,
-      nft.decimals,
-      nft.blockchain,
-      nft.contractAddress,
-      nft.price,
-      nft.value,
-      nft.logo,
-      nft.tokenId,
-      nft.nftData?.collection,
-      nft.nftData?.permalink,
-      nft.nftData?.traits ? JSON.stringify(nft.nftData.traits) : null,
-      nft.isHidden ? 1 : 0,
-      now,
-      id,
-    );
-  }
-
   deleteWalletNFTs(walletId) {
     const db = this.getDatabase();
     const stmt = db.prepare("DELETE FROM wallet_nfts WHERE wallet_id = ?");
@@ -526,23 +460,6 @@ class DatabaseManager {
   }
 
   // ===== BANQUE / IMPORT CSV =====
-  getAllBankCsvUploads(userId = "Romain") {
-    const db = this.getDatabase();
-    // Compat: récupérer aussi les anciens enregistrements sans user_id si besoin
-    if (userId === "Romain") {
-      return db
-        .prepare(
-          "SELECT * FROM bank_csv_uploads WHERE user_id = ? OR user_id IS NULL ORDER BY uploaded_at DESC",
-        )
-        .all(userId);
-    }
-    return db
-      .prepare(
-        "SELECT * FROM bank_csv_uploads WHERE user_id = ? ORDER BY uploaded_at DESC",
-      )
-      .all(userId);
-  }
-
   getAllBankCsvUploadsMeta(userId = "Romain", section = null) {
     const db = this.getDatabase();
     if (userId === "Romain") {
@@ -627,13 +544,6 @@ class DatabaseManager {
     const stmt = db.prepare("DELETE FROM bank_csv_uploads WHERE id = ?");
     const result = stmt.run(id);
     return result.changes > 0;
-  }
-
-  deleteBankCsvUploadsByUser(userId) {
-    const db = this.getDatabase();
-    const stmt = db.prepare("DELETE FROM bank_csv_uploads WHERE user_id = ?");
-    const result = stmt.run(userId);
-    return result.changes;
   }
 
   updateBankCsvUpload(id, userId, updates) {
@@ -895,195 +805,6 @@ class DatabaseManager {
       conf.notes || null,
     );
     return id;
-  }
-
-  restoreTricountFromBankCsv(userId = "Romain", targetMonths = ["2026-09", "2026-10"]) {
-    const db = this.getDatabase();
-    // Trouver le dernier upload BoursoBank
-    const upload = db
-      .prepare(
-        "SELECT id, filename, content FROM bank_csv_uploads WHERE user_id = ? AND (filename LIKE '%bourso-bank%' OR section = 'bank') ORDER BY uploaded_at DESC LIMIT 1",
-      )
-      .get(userId || "Romain");
-
-    if (!upload) {
-      return { expenses: 0, incomes: 0, message: "Aucun fichier bancaire trouvé" };
-    }
-
-    const lines = upload.content
-      .replace(/^\uFEFF/, "")
-      .split(/\r?\n/)
-      .filter((l) => l.trim().length > 0);
-
-    if (lines.length <= 1) {
-      return { expenses: 0, incomes: 0, message: "Fichier bancaire vide" };
-    }
-
-    const parseLine = (line, delimiter = ";") => {
-      const out = [];
-      let cur = "";
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-          if (inQuotes && line[i + 1] === '"') {
-            cur += '"';
-            i++;
-            continue;
-          }
-          inQuotes = !inQuotes;
-          continue;
-        }
-        if (!inQuotes && ch === delimiter) {
-          out.push(cur);
-          cur = "";
-          continue;
-        }
-        cur += ch;
-      }
-      out.push(cur);
-      return out.map((v) => v.trim());
-    };
-
-    const headers = parseLine(lines[0], ";");
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseLine(lines[i], ";");
-      const r = {};
-      for (let c = 0; c < headers.length; c++) {
-        r[headers[c]] = values[c] || "";
-      }
-      rows.push(r);
-    }
-
-    const filtered = rows.filter((r) =>
-      targetMonths.some((m) => (r.dateOp || "").startsWith(m)),
-    );
-
-    const expenses = [];
-    const incomes = [];
-
-    filtered.forEach((r, idx) => {
-      const rawAmt = parseFloat((r.amount || "0").replace(",", "."));
-      const month = (r.dateOp || "").slice(0, 7);
-      const date = r.dateOp || `${month}-01`;
-      const cleanLabel = (r.label || "")
-        .replace(/&#039;/g, "'")
-        .replace(/&amp;/g, "&");
-
-      if (rawAmt > 0) {
-        incomes.push({
-          id: `inc-bank-${r.reference || idx}`,
-          month,
-          date,
-          label: cleanLabel,
-          amount: Math.round(rawAmt * 100) / 100,
-          beneficiaryPersonId: cleanLabel.toLowerCase().includes("caf")
-            ? "shared"
-            : "person1",
-          source: "bank_import",
-          bankAccount: r.accountLabel || "BoursoBank",
-          bankReference: r.reference || undefined,
-          bankRowId: `${upload.id}:${idx}`,
-          createdAt: Date.now() + idx,
-        });
-      } else if (rawAmt < 0) {
-        const absAmt = Math.abs(rawAmt);
-        let pocketId = "unallocated";
-        let pocketName = "Autre / Non classé";
-        let subPocketId = undefined;
-        let subPocketName = undefined;
-
-        const cat = (r.category || "").toLowerCase();
-        const lbl = cleanLabel.toLowerCase();
-
-        if (
-          cat.includes("alimentation") ||
-          cat.includes("restaurant") ||
-          lbl.includes("deliveroo") ||
-          lbl.includes("intermarché") ||
-          lbl.includes("boulangerie") ||
-          lbl.includes("too good to go") ||
-          lbl.includes("kfc") ||
-          lbl.includes("chicken street")
-        ) {
-          pocketId = "poc-2";
-          pocketName = "Alimentation & quotidien";
-          subPocketId = "sub-5";
-          subPocketName = "Courses supermarché";
-        } else if (
-          cat.includes("carburant") ||
-          cat.includes("péages") ||
-          cat.includes("transport") ||
-          lbl.includes("totalenergies") ||
-          lbl.includes("cofiroute") ||
-          lbl.includes("sanef")
-        ) {
-          pocketId = "poc-2";
-          pocketName = "Alimentation & quotidien";
-          subPocketId = "sub-6";
-          subPocketName = "Transports en commun";
-        } else if (
-          cat.includes("médecin") ||
-          cat.includes("santé") ||
-          cat.includes("pharmacie") ||
-          lbl.includes("docteur") ||
-          lbl.includes("pharmacie") ||
-          lbl.includes("dr boudart")
-        ) {
-          pocketId = "poc-2";
-          pocketName = "Alimentation & quotidien";
-          subPocketId = "sub-7";
-          subPocketName = "Santé & pharmacie";
-        } else if (
-          cat.includes("loyer") ||
-          cat.includes("prêt") ||
-          cat.includes("energie") ||
-          lbl.includes("edf") ||
-          lbl.includes("la banque postale") ||
-          lbl.includes("sci ctm")
-        ) {
-          pocketId = "poc-1";
-          pocketName = "Loyer & charges fixes";
-          if (lbl.includes("edf")) {
-            subPocketId = "sub-2";
-            subPocketName = "Électricité & Gaz";
-          } else {
-            subPocketId = "sub-1";
-            subPocketName = "Loyer";
-          }
-        }
-
-        expenses.push({
-          id: `exp-bank-${r.reference || idx}`,
-          month,
-          date,
-          label: cleanLabel,
-          amount: Math.round(absAmt * 100) / 100,
-          payerPersonId: "person1",
-          pocketId,
-          pocketName,
-          subPocketId,
-          subPocketName,
-          splitMethod: "50_50",
-          nature: "expense",
-          source: "bank_import",
-          bankAccount: r.accountLabel || "BoursoBank",
-          bankReference: r.reference || undefined,
-          bankRowId: `${upload.id}:${idx}`,
-          createdAt: Date.now() + idx,
-        });
-      }
-    });
-
-    this.saveTricountExpensesBatch(expenses, userId);
-    this.saveTricountIncomesBatch(incomes, userId);
-
-    return {
-      expenses: expenses.length,
-      incomes: incomes.length,
-      message: `${expenses.length} dépenses et ${incomes.length} revenus restaurés pour ${targetMonths.join(", ")}`,
-    };
   }
 
   // ===== GESTION DE LA STRATÉGIE D'ÉPARGNE =====

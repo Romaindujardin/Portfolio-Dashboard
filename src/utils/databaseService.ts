@@ -1,7 +1,7 @@
 import { Wallet, WalletAsset, BankCsvUpload } from "../types/index.js";
 
 // Normalise un champ "blockchains" potentiellement multi-encodé (JSON dans JSON)
-const parseBlockchains = (raw: unknown): string[] => {
+export const parseBlockchains = (raw: unknown): string[] => {
   let value: unknown = raw;
   for (let i = 0; i < 5 && typeof value === "string"; i++) {
     try {

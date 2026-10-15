@@ -100,6 +100,21 @@ Toutes les clés API se configurent via l'interface : **Paramètres > Clés API*
 └── portfolio.db               # Base SQLite (générée, non versionnée)
 ```
 
+## 🧪 Tests
+
+La suite de tests (Vitest) couvre l'API serveur, les flux de stockage front, les utilitaires purs et la couche SQLite :
+
+```bash
+npm test              # Lance toute la suite (83 tests)
+npm run test:watch    # Mode surveillance
+npm run test:coverage # Rapport de couverture
+```
+
+Le serveur de test est lancé automatiquement sur un **port libre dédié** avec une
+**base SQLite temporaire** (`.test-tmp/`), sans toucher à `portfolio.db` ni aux
+données réelles. En cas d'échec, les logs du serveur restent dans
+`.test-tmp/server.log` (conservés avec `KEEP_TEST_TMP=1`).
+
 ## 🛠️ Résolution de problèmes
 
 ```bash
