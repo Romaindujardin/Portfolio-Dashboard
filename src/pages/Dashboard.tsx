@@ -17,7 +17,6 @@ import {
   TrendingUp,
   BarChart3,
   Briefcase,
-  Layers,
   ArrowUpRight,
   ArrowDownRight,
   Search,
@@ -28,6 +27,7 @@ import {
   ArrowRight,
   Building2,
   ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   AccountSectionKind,
@@ -2546,37 +2546,27 @@ const Dashboard: React.FC = () => {
           {/* 2. DÉTAILS PAR ENVELOPPE (repliable) — PEA, PEE, Banque, Crypto… */}
           {/* ======================================================== */}
           <div id="details-enveloppes" className="scroll-mt-24">
-            <button
-              type="button"
-              onClick={toggleEnvelopeDetails}
-              aria-expanded={showEnvelopeDetails}
-              className="card w-full flex items-center justify-between gap-3 text-left hover:border-[#c8a55e]/40"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-[rgba(200,165,94,0.12)] flex items-center justify-center shrink-0">
-                  <Layers className="h-4 w-4 text-[#c8a55e]" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-[#f5f5f5]">
-                    Détails par enveloppe
-                  </h3>
-                  <p className="text-xs text-[#8a8a8a]">
-                    PEA, PEE, assurance vie, banque et crypto — positions ligne
-                    à ligne
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 text-xs text-[#8a8a8a]">
-                <span className="hidden sm:inline">
-                  {showEnvelopeDetails ? "Masquer" : "Afficher"}
-                </span>
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform duration-200 ${
-                    showEnvelopeDetails ? "rotate-180" : ""
-                  }`}
-                />
-              </div>
-            </button>
+            {/* Simple flèche : déplie les onglets d'enveloppes et leur contenu */}
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={toggleEnvelopeDetails}
+                className="p-2 text-[#8a8a8a] hover:text-[#c8a55e] transition-colors"
+                aria-expanded={showEnvelopeDetails}
+                aria-label={
+                  showEnvelopeDetails
+                    ? "Masquer les détails par enveloppe"
+                    : "Afficher les détails par enveloppe"
+                }
+                title={showEnvelopeDetails ? "Masquer" : "Afficher"}
+              >
+                {showEnvelopeDetails ? (
+                  <ChevronUp size={22} />
+                ) : (
+                  <ChevronDown size={22} />
+                )}
+              </button>
+            </div>
 
             {showEnvelopeDetails && (
               <div className="mt-6">
