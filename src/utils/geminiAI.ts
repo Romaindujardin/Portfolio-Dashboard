@@ -20,16 +20,61 @@ export interface AskAdvisorParams {
   question: string;
 }
 
-export const ADVISOR_MODEL = "gemini-2.5-flash";
+export interface AskAdvisorOptions {
+  /** Modèles essayés dans l'ordre. Défaut : flash → flash-lite → 2.0-flash. */
+  models?: string[];
+  /** Délais de backoff entre deux tentatives sur un même modèle. Défaut : [900]. */
+  retryDelaysMs?: number[];
+}
 
-export const getAdvisorApiUrl = (username: string): string => {
+export const ADVISOR_MODEL = "gemini-2.5-flash";
+// Modèles de repli si le principal est momentanément surchargé (503) ou limité (429).
+export const ADVISOR_FALLBACK_MODELS = [
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+];
+export const ADVISOR_MODELS = [ADVISOR_MODEL, ...ADVISOR_FALLBACK_MODELS];
+
+// Statuts retentables : surcharge / limite de débit / erreurs transitoires.
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const DEFAULT_RETRY_DELAYS_MS = [900];
+
+const HTTP_ERROR_HINTS: Record<number, string> = {
+  400: "requête refusée par Gemini, vérifiez votre clé API et réessayez.",
+  401: "clé API invalide, vérifiez-la dans les paramètres.",
+  403: "accès refusé par Gemini, vérifiez votre clé API.",
+  404: "modèle Gemini introuvable.",
+  429: "limite de requêtes atteinte, patientez quelques secondes puis réessayez.",
+  500: "erreur interne de Gemini, réessayez dans quelques instants.",
+  502: "Gemini est momentanément indisponible, réessayez dans quelques instants.",
+  503: "le modèle est momentanément surchargé, réessayez dans quelques instants.",
+  504: "Gemini n'a pas répondu à temps, réessayez dans quelques instants.",
+};
+
+interface GeminiHttpError extends Error {
+  status?: number;
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const buildHttpErrorMessage = (status: number, detail: string): string => {
+  const hint = HTTP_ERROR_HINTS[status];
+  const suffix = hint ?? (detail || "vérifiez votre clé API et réessayez.");
+  return `Erreur Gemini (${status}) : ${suffix}`;
+};
+
+export const getAdvisorApiUrl = (
+  username: string,
+  model: string = ADVISOR_MODEL,
+): string => {
   const apiKey = getGeminiApiKey(username);
   if (!apiKey) {
     throw new Error(
       "Clé API Gemini non configurée. Renseignez-la dans les paramètres pour utiliser le Conseiller IA.",
     );
   }
-  return `https://generativelanguage.googleapis.com/v1beta/models/${ADVISOR_MODEL}:generateContent?key=${apiKey}`;
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 };
 
 export const buildAdvisorSystemPrompt = (contextText: string): string =>
@@ -71,13 +116,11 @@ export const askGeminiAdvisor = async ({
   contextText,
   history,
   question,
-}: AskAdvisorParams): Promise<string> => {
+}: AskAdvisorParams, options: AskAdvisorOptions = {}): Promise<string> => {
   const trimmedQuestion = (question || "").trim();
   if (!trimmedQuestion) {
     throw new Error("Votre question est vide.");
   }
-
-  const url = getAdvisorApiUrl(username);
 
   const contents = [
     ...history
@@ -100,45 +143,85 @@ export const askGeminiAdvisor = async ({
     },
   };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const models =
+    options.models && options.models.length > 0
+      ? options.models
+      : ADVISOR_MODELS;
+  const retryDelays = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = (await response.text()).slice(0, 300);
-    } catch {
-      detail = "";
+  const requestModel = async (url: string): Promise<string> => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = (await response.text()).slice(0, 300);
+      } catch {
+        detail = "";
+      }
+      const error = new Error(
+        buildHttpErrorMessage(response.status, detail),
+      ) as GeminiHttpError;
+      error.status = response.status;
+      throw error;
     }
-    throw new Error(
-      `Erreur Gemini (${response.status})${
-        detail ? ` : ${detail}` : ". Vérifiez votre clé API et réessayez."
-      }`,
-    );
-  }
 
-  const data: unknown = await response.json();
-  const text = extractCandidateText(data);
-  if (!text) {
-    const finishReason = (
-      (data as { candidates?: Array<{ finishReason?: string }> } | null)
-        ?.candidates?.[0]?.finishReason || ""
-    ).toUpperCase();
-    const blockReason = (
-      data as { promptFeedback?: { blockReason?: string } } | null
-    )?.promptFeedback?.blockReason;
-    if (finishReason === "SAFETY" || blockReason) {
+    const data: unknown = await response.json();
+    const text = extractCandidateText(data);
+    if (!text) {
+      const finishReason = (
+        (data as { candidates?: Array<{ finishReason?: string }> } | null)
+          ?.candidates?.[0]?.finishReason || ""
+      ).toUpperCase();
+      const blockReason = (
+        data as { promptFeedback?: { blockReason?: string } } | null
+      )?.promptFeedback?.blockReason;
+      if (finishReason === "SAFETY" || blockReason) {
+        throw new Error(
+          "La réponse a été bloquée par les filtres de sécurité de Gemini. Reformulez votre question.",
+        );
+      }
       throw new Error(
-        "La réponse a été bloquée par les filtres de sécurité de Gemini. Reformulez votre question.",
+        "Gemini n'a renvoyé aucune réponse exploitable. Réessayez dans un instant.",
       );
     }
-    throw new Error(
-      "Gemini n'a renvoyé aucune réponse exploitable. Réessayez dans un instant.",
-    );
+
+    return text;
+  };
+
+  // Cascade de modèles : en cas de surcharge (503/429...), on réessaie le même
+  // modèle après un court délai puis on bascule sur les modèles de repli.
+  let lastError: Error | null = null;
+  for (const model of models) {
+    const url = getAdvisorApiUrl(username, model);
+    const attempts = retryDelays.length + 1;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await requestModel(url);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const status = (error as GeminiHttpError).status;
+
+        // Erreur non HTTP (réponse vide, sécurité...) : inutile de réessayer.
+        if (status === undefined) throw error;
+
+        // Modèle introuvable : on passe directement au suivant.
+        if (status === 404) break;
+
+        // Erreur non transitoire (clé invalide, requête refusée...) : on remonte.
+        if (!RETRYABLE_STATUSES.has(status)) throw error;
+
+        if (attempt < attempts - 1) {
+          await sleep(retryDelays[attempt] ?? DEFAULT_RETRY_DELAYS_MS[0]);
+        }
+      }
+    }
   }
 
-  return text;
+  throw lastError ?? new Error("Erreur inconnue lors de l'appel à Gemini.");
 };

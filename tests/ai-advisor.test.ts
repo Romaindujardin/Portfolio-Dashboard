@@ -405,20 +405,124 @@ describe("geminiAI — conseiller contextualisé", () => {
     );
   });
 
-  it("remonte les erreurs HTTP de Gemini", async () => {
+  it("remonte une erreur HTTP proprement après la cascade de modèles", async () => {
     seedUser();
+    const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response("quota exceeded", { status: 429 })),
+      vi.fn(async (url: unknown) => {
+        calls.push(String(url));
+        return new Response('{"error":{"code":429}}', { status: 429 });
+      }),
     );
     await expect(
-      askGeminiAdvisor({
+      askGeminiAdvisor(
+        {
+          username: USER,
+          contextText: "contexte",
+          history: [],
+          question: "Question",
+        },
+        { models: ["modele-unique"], retryDelaysMs: [] },
+      ),
+    ).rejects.toThrow(/Erreur Gemini \(429\)/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("réessaie automatiquement après une surcharge (503) puis réussit", async () => {
+    seedUser();
+    const calls: string[] = [];
+    let count = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        calls.push(String(url));
+        count += 1;
+        if (count === 1) {
+          return new Response("overloaded", { status: 503 });
+        }
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { content: { parts: [{ text: "Réponse après nouvelle tentative" }] } },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+
+    const answer = await askGeminiAdvisor(
+      {
         username: USER,
         contextText: "contexte",
         history: [],
         question: "Question",
+      },
+      { models: ["modele-test"], retryDelaysMs: [0] },
+    );
+
+    expect(answer).toBe("Réponse après nouvelle tentative");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("modele-test");
+    expect(calls[1]).toContain("modele-test");
+  });
+
+  it("bascule sur le modèle de repli si la surcharge persiste", async () => {
+    seedUser();
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        const target = String(url);
+        calls.push(target);
+        if (target.includes("modele-principal")) {
+          return new Response("overloaded", { status: 503 });
+        }
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              { content: { parts: [{ text: "Réponse du modèle de repli" }] } },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       }),
-    ).rejects.toThrow(/Erreur Gemini \(429\)/);
+    );
+
+    const answer = await askGeminiAdvisor(
+      {
+        username: USER,
+        contextText: "contexte",
+        history: [],
+        question: "Question",
+      },
+      { models: ["modele-principal", "modele-repli"], retryDelaysMs: [] },
+    );
+
+    expect(answer).toBe("Réponse du modèle de repli");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("modele-principal");
+    expect(calls[1]).toContain("modele-repli");
+  });
+
+  it("affiche un message clair si la surcharge touche tous les modèles", async () => {
+    seedUser();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("overloaded", { status: 503 })),
+    );
+    await expect(
+      askGeminiAdvisor(
+        {
+          username: USER,
+          contextText: "contexte",
+          history: [],
+          question: "Question",
+        },
+        { models: ["modele-a", "modele-b"], retryDelaysMs: [] },
+      ),
+    ).rejects.toThrow(/momentanément surchargé/);
   });
 
   it("gère une réponse vide et le blocage sécurité", async () => {
