@@ -1543,7 +1543,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Colonne droite : 4 petites cartes (Gain/Perte, Rendement, Portefeuilles Actifs, Taux d'Investissement) */}
-        <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
+        <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 sm:grid-rows-2 gap-6 items-stretch">
           {/* Petite carte : Gain/Perte */}
           <div className="card flex flex-col justify-center text-center">
             <span className="text-xs text-[#8a8a8a] block mb-1">
