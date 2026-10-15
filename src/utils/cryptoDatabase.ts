@@ -1,5 +1,5 @@
 // Base de données des cryptomonnaies avec CoinGecko API
-// Mise à jour manuelle seulement - contrôlée par priceUpdateManager
+// Mise à jour manuelle seulement (au démarrage de l'app)
 
 export interface CryptoData {
   id: string;
@@ -80,9 +80,7 @@ export const initializeCryptoDatabase = async (): Promise<void> => {
   // Charger les données au démarrage seulement
   await updateCryptoDatabase();
 
-  console.log(
-    "🚀 Base de données crypto initialisée - mises à jour contrôlées par priceUpdateManager"
-  );
+  console.log("🚀 Base de données crypto initialisée");
 };
 
 // Fonction pour mettre à jour la base de données (appelée manuellement)

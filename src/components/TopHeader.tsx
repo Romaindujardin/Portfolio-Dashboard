@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Search, Eye, EyeOff, Plus, RefreshCw, Bell, Sun, Moon } from "lucide-react";
-import { forceManualUpdate } from "../utils/priceUpdateManager";
+import { Search, Eye, EyeOff, Plus, Bell, Sun, Moon } from "lucide-react";
 import { toggleThemeWithTransition } from "../utils/themeToggle";
 
 interface TopHeaderProps {
@@ -11,7 +10,6 @@ interface TopHeaderProps {
 const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDark, setIsDark] = useState(() => {
     if (typeof window === "undefined") return true;
     return document.documentElement.classList.contains("dark");
@@ -72,18 +70,6 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
     };
   }, []);
 
-  const handleRefreshPrices = async () => {
-    if (isRefreshing) return;
-    setIsRefreshing(true);
-    try {
-      await forceManualUpdate();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setTimeout(() => setIsRefreshing(false), 1200);
-    }
-  };
-
   return (
     <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-[rgba(255,255,255,0.06)]">
       {/* Search Bar */}
@@ -130,18 +116,6 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
           ) : (
             <Eye className="w-4 h-4" />
           )}
-        </button>
-
-        {/* Refresh Prices */}
-        <button
-          type="button"
-          onClick={handleRefreshPrices}
-          title="Actualiser les prix"
-          className="p-2 rounded-full text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.06)] transition-all duration-200"
-        >
-          <RefreshCw
-            className={`w-4 h-4 ${isRefreshing ? "animate-spin text-[#c8a55e]" : ""}`}
-          />
         </button>
 
         {/* Add Asset Pill Button */}

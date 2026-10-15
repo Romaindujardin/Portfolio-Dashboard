@@ -507,9 +507,9 @@ const BudgetTricount: React.FC = () => {
 
     if (p1Val > 0) {
       if (existingP1) {
-        saveIncome({ ...existingP1, amount: p1Val });
+        addOrUpdateIncome({ ...existingP1, amount: p1Val });
       } else {
-        saveIncome({
+        addOrUpdateIncome({
           id: `inc_${Date.now()}_p1`,
           month: selectedMonth,
           date: `${selectedMonth}-01`,
@@ -524,9 +524,9 @@ const BudgetTricount: React.FC = () => {
 
     if (!isSoloMode && p2Val > 0) {
       if (existingP2) {
-        saveIncome({ ...existingP2, amount: p2Val });
+        addOrUpdateIncome({ ...existingP2, amount: p2Val });
       } else {
-        saveIncome({
+        addOrUpdateIncome({
           id: `inc_${Date.now()}_p2`,
           month: selectedMonth,
           date: `${selectedMonth}-01`,

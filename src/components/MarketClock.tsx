@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { RotatingText } from "react-simple-rotating-text";
 
 interface MarketTime {
   name: string;

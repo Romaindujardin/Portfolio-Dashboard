@@ -98,21 +98,6 @@ export interface SavingsStrategy {
   household?: HouseholdConfig;
 }
 
-export interface PortfolioStats {
-  totalValue: number;
-  totalGainLoss: number;
-  totalGainLossPercent: number;
-  topPerformer: Investment | null;
-  worstPerformer: Investment | null;
-}
-
-export interface WatchlistItem {
-  symbol: string;
-  name: string;
-  type: "crypto" | "stock";
-  addedAt: string;
-}
-
 // Types pour les wallets blockchain
 export interface WalletAsset {
   symbol: string;

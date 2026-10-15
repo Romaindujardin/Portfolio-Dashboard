@@ -149,12 +149,7 @@ const Sidebar: React.FC = () => {
       {/* Navigation */}
       <nav className="flex-1 px-3 py-2 space-y-1">
         {navItems.map((item) => {
-          const isActive =
-            location.pathname === item.path ||
-            (item.path === "/budget" &&
-              (location.pathname === "/budget-tracking" ||
-                location.pathname === "/tricount" ||
-                location.pathname === "/market-tracking"));
+          const isActive = location.pathname === item.path;
           const Icon = item.icon;
           return (
             <Link

@@ -1,6 +1,5 @@
 import React, { useState, useRef } from "react";
 import { MessageCircle, X, Send, Loader2 } from "lucide-react";
-import { analyzePortfolio } from "../utils/geminiAI";
 import { useUser } from "../contexts/UserContext";
 import { getGeminiApiKey } from "../utils/userSettings";
 

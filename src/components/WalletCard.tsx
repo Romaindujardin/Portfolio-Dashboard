@@ -26,6 +26,7 @@ interface WalletCardProps {
   onDelete: (id: string) => void;
   onRefresh: (wallet: WalletType) => void;
   onToggleAssetVisibility: (walletId: string, assetIndex: number) => void;
+  onToggleNftVisibility?: (walletId: string, nftIndex: number) => void;
   isLoading?: boolean;
 }
 
@@ -35,6 +36,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
   onDelete,
   onRefresh,
   onToggleAssetVisibility,
+  onToggleNftVisibility,
   isLoading = false,
 }) => {
   const [showAssets, setShowAssets] = useState(false);
@@ -419,8 +421,10 @@ const WalletCard: React.FC<WalletCardProps> = ({
             <NFTCard
               key={`nft-${wallet.id}-${index}`}
               nft={nft}
-              onToggleVisibility={() =>
-                onToggleAssetVisibility(wallet.id, index)
+              onToggleVisibility={
+                onToggleNftVisibility
+                  ? () => onToggleNftVisibility(wallet.id, index)
+                  : undefined
               }
             />
           ))}

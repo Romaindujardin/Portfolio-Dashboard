@@ -4,7 +4,6 @@ import Sidebar from "./components/Sidebar";
 import TopHeader from "./components/TopHeader";
 import Dashboard from "./pages/Dashboard";
 import Investments from "./pages/Investments";
-import MarketTracking from "./pages/MarketTracking";
 import BudgetTricount from "./pages/BudgetTricount";
 import Savings from "./pages/Savings";
 import AIAnalysis from "./pages/AIAnalysis";
@@ -13,9 +12,7 @@ import Banking from "./pages/Banking";
 import GeminiChatBubble from "./components/GeminiChatBubble";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { UserProvider } from "./contexts/UserContext";
-import { initializePriceUpdateManager } from "./utils/priceUpdateManager";
 import { initializeCryptoDatabase } from "./utils/cryptoDatabase";
-import { initializeStockDatabase } from "./utils/stockDatabase";
 
 function App() {
   const [isReady, setIsReady] = useState(false);
@@ -25,19 +22,11 @@ function App() {
       console.log("🚀 Initialisation des bases de données...");
 
       try {
-        // Initialiser les deux bases de données en parallèle
-        await Promise.all([
-          initializeCryptoDatabase(),
-          initializeStockDatabase(),
-        ]);
-
-        // Initialiser le gestionnaire de mise à jour des prix
-        initializePriceUpdateManager();
-
-
+        // Initialiser la base de données crypto (noms/logos des cryptos)
+        await initializeCryptoDatabase();
 
         setIsReady(true);
-        console.log("🚀 Application prête avec bases de données initialisées");
+        console.log("🚀 Application prête");
       } catch (error) {
         console.error(
           "❌ Erreur lors de l'initialisation des bases de données:",
@@ -60,7 +49,7 @@ function App() {
             <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[#c8a55e] animate-spin"></div>
           </div>
           <p className="text-[#8a8a8a] text-sm">
-            Chargement des données de marché...
+            Chargement de l'application...
           </p>
         </div>
       </div>
@@ -80,11 +69,7 @@ function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/investments" element={<Investments />} />
                   <Route path="/budget" element={<BudgetTricount />} />
-                  <Route path="/budget-tracking" element={<BudgetTricount />} />
-                  <Route path="/tricount" element={<BudgetTricount />} />
-                  <Route path="/market-tracking" element={<BudgetTricount />} />
                   <Route path="/savings" element={<Savings />} />
-                  <Route path="/news" element={<Savings />} />
                   <Route path="/ai-analysis" element={<AIAnalysis />} />
                   <Route path="/banking" element={<Banking />} />
                   <Route path="/settings/:username" element={<Settings />} />

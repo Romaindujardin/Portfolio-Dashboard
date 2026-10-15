@@ -41,12 +41,10 @@ import {
 import {
   AccountSectionKind,
   BankCsvColumnMapping,
-  Investment,
   InvestmentCsvColumnMapping,
   Wallet,
 } from "../types";
 import {
-  getStoredInvestments,
   getStoredWallets,
   getStoredBankCsvUploads,
   getBankCsvUploadById,
@@ -112,7 +110,6 @@ type AccountSectionSummary = {
 };
 
 const Dashboard: React.FC = () => {
-  const [investments, setInvestments] = useState<Investment[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -219,16 +216,6 @@ const Dashboard: React.FC = () => {
     `${maskDigits(Number(value || 0).toFixed(digits))}%`;
   const maskText = (text: string) => maskDigits(text);
 
-  const loadInvestments = async () => {
-    try {
-      const data = await getStoredInvestments(currentUser);
-      setInvestments(data);
-    } catch (error) {
-      console.error("❌ Erreur lors du chargement des investissements:", error);
-      setInvestments([]);
-    }
-  };
-
   const loadWallets = async () => {
     try {
       const data = await getStoredWallets(currentUser);
@@ -242,52 +229,21 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([loadInvestments(), loadWallets()]);
+      await loadWallets();
       setLoading(false);
     };
 
     loadData();
 
-    // Écouter les mises à jour de prix et wallets
-    const handlePriceUpdate = async () => {
-      console.log("🔄 Rechargement du dashboard après mise à jour des prix");
-      await loadInvestments();
-      await loadWallets();
-    };
-
+    // Écouter les mises à jour des wallets
     const handleWalletUpdate = async () => {
-      console.log("🔄 Rechargement du dashboard après mise à jour des wallets");
       await loadWallets();
     };
 
-    const handleInvestmentUpdate = async () => {
-      console.log(
-        "🔄 Rechargement du dashboard après mise à jour des investissements",
-      );
-      await loadInvestments();
-    };
-
-    // Ajouter un écouteur pour déboguer l'événement
-    const handlePriceUpdateDebug = (event: any) => {
-      console.log(
-        "📡 Événement investmentPricesUpdated reçu dans Dashboard:",
-        event.detail,
-      );
-    };
-
-    window.addEventListener("investmentPricesUpdated", handlePriceUpdate);
-    window.addEventListener("investmentPricesUpdated", handlePriceUpdateDebug);
     window.addEventListener("walletsUpdated", handleWalletUpdate);
-    window.addEventListener("investmentsUpdated", handleInvestmentUpdate);
 
     return () => {
-      window.removeEventListener("investmentPricesUpdated", handlePriceUpdate);
-      window.removeEventListener(
-        "investmentPricesUpdated",
-        handlePriceUpdateDebug,
-      );
       window.removeEventListener("walletsUpdated", handleWalletUpdate);
-      window.removeEventListener("investmentsUpdated", handleInvestmentUpdate);
     };
   }, [currentUser]);
 
@@ -891,55 +847,7 @@ const Dashboard: React.FC = () => {
 
 
   // Calculs des statistiques
-  const investmentsTotalValue = investments.reduce((sum, inv) => {
-    const currentPrice = inv.currentPrice ?? 0;
-    return sum + inv.quantity * currentPrice;
-  }, 0);
-
-  // Séparer les wallets Binance des autres wallets
-  const binanceWallets = wallets.filter(
-    (wallet) => wallet.walletType === "binance",
-  );
-  const blockchainWallets = wallets.filter(
-    (wallet) => wallet.walletType !== "binance",
-  );
-
-  const walletsTotalValue = blockchainWallets.reduce((sum, wallet) => {
-    return (
-      sum +
-      (wallet.assets || [])
-        .filter((asset) => !asset.isHidden)
-        .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0)
-    );
-  }, 0);
-
-  const binanceWalletsTotalValue = binanceWallets.reduce((sum, wallet) => {
-    return (
-      sum +
-      (wallet.assets || [])
-        .filter((asset) => !asset.isHidden)
-        .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0)
-    );
-  }, 0);
-
-  // Calculer la valeur totale des NFTs
-  const nftsTotalValue = wallets.reduce((sum, wallet) => {
-    return (
-      sum +
-      (wallet.nfts || []).reduce((nftSum, nft) => nftSum + (nft.value || 0), 0)
-    );
-  }, 0);
-
-  const totalValue =
-    investmentsTotalValue +
-    walletsTotalValue +
-    binanceWalletsTotalValue +
-    nftsTotalValue;
-
-  // ===== Crypto total (investissements crypto + wallets/nfts) =====
-  const cryptoInvestmentsValue = investments
-    .filter((inv) => inv.type === "crypto")
-    .reduce((sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0), 0);
+  // ===== Crypto total (wallets + NFTs) =====
   const cryptoWalletsValue = wallets.reduce((sum, wallet) => {
     const assetsValue = (wallet.assets || [])
       .filter((a) => !a.isHidden)
@@ -949,7 +857,7 @@ const Dashboard: React.FC = () => {
       .reduce((s, n) => s + (n.value || 0), 0);
     return sum + assetsValue + nftsValue;
   }, 0);
-  const cryptoTotalValue = cryptoInvestmentsValue + cryptoWalletsValue;
+  const cryptoTotalValue = cryptoWalletsValue;
 
   // ===== Totaux incluant CSV (banque / investissement) + crypto =====
   const bankCash = cashSummary.balance ?? 0;
@@ -957,8 +865,7 @@ const Dashboard: React.FC = () => {
   const totalWealthAll = bankCash + investmentValue + cryptoTotalValue;
   const totalInvestmentsAll = investmentValue;
 
-  const totalInvestedInitial =
-    (investmentSummary.purchaseValue || 0) + cryptoInvestmentsValue;
+  const totalInvestedInitial = investmentSummary.purchaseValue || 0;
   const totalCurrentInvestments =
     (investmentSummary.currentValue ?? investmentSummary.balance ?? 0) +
     cryptoTotalValue;
@@ -1041,56 +948,6 @@ const Dashboard: React.FC = () => {
         });
       });
 
-    // 2. Investissements manuels
-    investments.forEach((inv) => {
-      let envelopeId = "autres";
-      let envelopeLabel = "Autres placements";
-      if (inv.type === "crypto") {
-        envelopeId = "crypto";
-        envelopeLabel = "Crypto & Web3";
-      } else if (inv.accountType) {
-        envelopeId = inv.accountType.toLowerCase();
-        envelopeLabel = inv.accountType;
-      } else {
-        const firstInv = accountSections.find((s) => s.kind === "investment");
-        if (firstInv) {
-          envelopeId = firstInv.id;
-          envelopeLabel = firstInv.label;
-        }
-      }
-
-      const currentPrice = inv.currentPrice ?? inv.purchasePrice;
-      const totalVal = inv.quantity * currentPrice;
-      const investedVal = inv.quantity * inv.purchasePrice;
-      const pnl = totalVal - investedVal;
-      const pnlPercent = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
-
-      list.push({
-        id: `inv-${inv.id}`,
-        name: inv.name,
-        symbol: inv.symbol,
-        envelopeId,
-        envelopeLabel,
-        type:
-          inv.type === "etf"
-            ? "etf"
-            : inv.type === "bond"
-            ? "bond"
-            : inv.type === "crypto"
-            ? "crypto"
-            : "stock",
-        quantity: inv.quantity,
-        buyingPrice: inv.purchasePrice,
-        lastPrice: currentPrice,
-        totalValue: totalVal,
-        investedValue: investedVal,
-        pnl,
-        pnlPercent,
-        allocationPercent: 0,
-        source: "Saisie manuelle",
-      });
-    });
-
     // 3. Wallets crypto
     wallets.forEach((wallet) => {
       (wallet.assets || [])
@@ -1129,7 +986,7 @@ const Dashboard: React.FC = () => {
     }
 
     return list;
-  }, [accountSections, sectionHoldings, investments, wallets]);
+  }, [accountSections, sectionHoldings, wallets]);
 
   // ===== Enveloppes de portefeuilles disponibles =====
   const portfolioEnvelopes = useMemo(() => {
@@ -1280,12 +1137,11 @@ const Dashboard: React.FC = () => {
         label: "Crypto & Web3",
         kind: "crypto",
         totalValue: cryptoTotalValue,
-        investedValue: cryptoInvestmentsValue,
-        pnl: cryptoTotalValue - cryptoInvestmentsValue,
+        investedValue: cryptoWalletsValue,
+        pnl: cryptoTotalValue - cryptoWalletsValue,
         pnlPercent:
-          cryptoInvestmentsValue > 0
-            ? ((cryptoTotalValue - cryptoInvestmentsValue) /
-                cryptoInvestmentsValue) *
+          cryptoWalletsValue > 0
+            ? ((cryptoTotalValue - cryptoWalletsValue) / cryptoWalletsValue) *
               100
             : 0,
         positionsCount: cryptoHoldings.length,
@@ -1314,7 +1170,7 @@ const Dashboard: React.FC = () => {
     unifiedHoldings,
     bankCash,
     cryptoTotalValue,
-    cryptoInvestmentsValue,
+    cryptoWalletsValue,
     wallets,
   ]);
 
@@ -1410,16 +1266,8 @@ const Dashboard: React.FC = () => {
     searchQuery,
   ]);
 
-  // Répartition par type
-  const typeDistribution = investments.reduce(
-    (acc, inv) => {
-      const currentPrice = inv.currentPrice ?? 0;
-      const value = inv.quantity * currentPrice;
-      acc[inv.type] = (acc[inv.type] || 0) + value;
-      return acc;
-    },
-    {} as Record<string, number>,
-  );
+  // Répartition par type (à partir des wallets crypto)
+  const typeDistribution: Record<string, number> = {};
 
   // Ajouter les wallets à la répartition par type
   wallets.forEach((wallet) => {
@@ -3689,9 +3537,7 @@ const Dashboard: React.FC = () => {
                       Capital Investi
                     </span>
                     <span className="text-2xl font-bold text-[#f5f5f5]">
-                      {cryptoInvestmentsValue > 0
-                        ? formatCurrency(cryptoInvestmentsValue)
-                        : "—"}
+                      {"—"}
                     </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">

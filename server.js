@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import yahooFinance from "yahoo-finance2";
 import fetch from "node-fetch";
 import crypto from "crypto";
 import { spawn } from "child_process";
@@ -10,7 +9,7 @@ import os from "os";
 import DatabaseManager from "./src/utils/database/database.js";
 
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 // Middleware — CORS restreint aux origines locales (application locale uniquement).
 // Les requêtes sans Origin (curl, clients natifs) restent autorisées.
@@ -297,27 +296,6 @@ app.get("/api/test", (req, res) => {
     timestamp: new Date().toISOString(),
     database: "SQLite initialized",
   });
-});
-
-// Proxy Yahoo Finance pour les prix
-app.get("/api/price/:symbol", async (req, res) => {
-  const { symbol } = req.params;
-  try {
-    const quote = await yahooFinance.quote(symbol);
-    res.json({
-      symbol: quote.symbol,
-      price: quote.regularMarketPrice,
-      change: quote.regularMarketChange,
-      changePercent: quote.regularMarketChangePercent,
-      volume: quote.regularMarketVolume,
-      marketCap: quote.marketCap,
-      high24h: quote.regularMarketDayHigh,
-      low24h: quote.regularMarketDayLow,
-    });
-  } catch (error) {
-    console.error(`Error fetching price for ${symbol}:`, error);
-    res.status(500).json({ error: "Failed to fetch price" });
-  }
 });
 
 // Proxy Binance API
@@ -1011,14 +989,6 @@ app.post("/api/database/clear", (req, res) => {
       dbManager.deleteWallet(wallet.id);
     });
 
-    // Supprimer tous les investissements
-    const investments = dbManager.getAllInvestments();
-    investments.forEach((inv) => dbManager.deleteInvestment(inv.id));
-
-    // Supprimer tous les éléments de la watchlist
-    const watchlist = dbManager.getAllWatchlistItems();
-    watchlist.forEach((item) => dbManager.deleteWatchlistItem(item.symbol));
-
     // Supprimer tous les uploads CSV bancaires
     const bankCsvUploads = dbManager.getAllBankCsvUploads("Romain");
     bankCsvUploads.forEach((u) =>
@@ -1511,196 +1481,6 @@ app.post("/api/database/user-settings", (req, res) => {
   }
 });
 
-
-// ===== GESTION DES INVESTISSEMENTS =====
-
-// GET /api/database/investments - Récupérer tous les investissements
-app.get("/api/database/investments", (req, res) => {
-  try {
-    const userId = sanitizeUserId(req.query.user_id);
-    if (!userId)
-      return res.status(400).json({ error: "user_id invalide" });
-    const investments = dbManager.getAllInvestments(userId);
-    res.json(investments);
-  } catch (error) {
-    console.error("Error getting investments:", error);
-    res.status(500).json({ error: "Failed to get investments" });
-  }
-});
-
-// POST /api/database/investments - Créer un investissement
-app.post("/api/database/investments", (req, res) => {
-  try {
-    const id = dbManager.createInvestment(req.body);
-    res.json({ id, message: "Investment created successfully" });
-  } catch (error) {
-    console.error("Error creating investment:", error);
-    res.status(500).json({ error: "Failed to create investment" });
-  }
-});
-
-// PUT /api/database/investments - Remplacer tous les investissements
-app.put("/api/database/investments", (req, res) => {
-  try {
-    const investments = req.body;
-    const userId = sanitizeUserId(req.query.user_id);
-    if (!userId)
-      return res.status(400).json({ error: "user_id invalide" });
-
-    // Supprimer tous les investissements existants pour cet utilisateur
-    const existing = dbManager.getAllInvestments(userId);
-    existing.forEach((inv) => dbManager.deleteInvestment(inv.id));
-
-    // Ajouter les nouveaux investissements
-    investments.forEach((investment) => {
-      dbManager.createInvestment({
-        user_id: userId,
-        name: investment.name,
-        type: investment.type,
-        symbol: investment.symbol,
-        quantity: investment.quantity,
-        purchase_price: investment.purchasePrice,
-        current_price: investment.currentPrice,
-        purchase_date: investment.purchaseDate,
-        notes: investment.notes || null,
-        account_type: investment.accountType || null,
-      });
-    });
-
-    res.json({ message: "Investments updated successfully" });
-  } catch (error) {
-    console.error("Error updating investments:", error);
-    res.status(500).json({ error: "Failed to update investments" });
-  }
-});
-
-// PUT /api/database/investments/:id - Mettre à jour un investissement
-app.put("/api/database/investments/:id", (req, res) => {
-  try {
-    const { id } = req.params;
-    const success = dbManager.updateInvestment(id, req.body);
-
-    if (success) {
-      res.json({ message: "Investment updated successfully" });
-    } else {
-      res.status(404).json({ error: "Investment not found" });
-    }
-  } catch (error) {
-    console.error("Error updating investment:", error);
-    res.status(500).json({ error: "Failed to update investment" });
-  }
-});
-
-// DELETE /api/database/investments/:id - Supprimer un investissement
-app.delete("/api/database/investments/:id", (req, res) => {
-  try {
-    const { id } = req.params;
-    const success = dbManager.deleteInvestment(id);
-
-    if (success) {
-      res.json({ message: "Investment deleted successfully" });
-    } else {
-      res.status(404).json({ error: "Investment not found" });
-    }
-  } catch (error) {
-    console.error("Error deleting investment:", error);
-    res.status(500).json({ error: "Failed to delete investment" });
-  }
-});
-
-// PUT /api/database/investments/prices - Mettre à jour les prix
-app.put("/api/database/investments/prices", (req, res) => {
-  try {
-    const updates = req.body;
-    dbManager.updateInvestmentPrices(updates);
-    res.json({ message: "Prices updated successfully" });
-  } catch (error) {
-    console.error("Error updating prices:", error);
-    res.status(500).json({ error: "Failed to update prices" });
-  }
-});
-
-// ===== GESTION DE LA WATCHLIST =====
-
-// GET /api/database/watchlist - Récupérer la watchlist
-app.get("/api/database/watchlist", (req, res) => {
-  try {
-    const userId = sanitizeUserId(req.query.user_id);
-    if (!userId)
-      return res.status(400).json({ error: "user_id invalide" });
-    const watchlist = dbManager.getAllWatchlistItems(userId);
-    res.json(watchlist);
-  } catch (error) {
-    console.error("Error getting watchlist:", error);
-    res.status(500).json({ error: "Failed to get watchlist" });
-  }
-});
-
-// POST /api/database/watchlist - Ajouter à la watchlist
-app.post("/api/database/watchlist", (req, res) => {
-  try {
-    const id = dbManager.createWatchlistItem(req.body);
-    res.json({ id, message: "Watchlist item added successfully" });
-  } catch (error) {
-    console.error("Error adding watchlist item:", error);
-    res.status(500).json({ error: "Failed to add watchlist item" });
-  }
-});
-
-// PUT /api/database/watchlist - Remplacer la watchlist
-app.put("/api/database/watchlist", (req, res) => {
-  try {
-    const watchlist = req.body;
-    const userId = sanitizeUserId(req.query.user_id);
-    if (!userId)
-      return res.status(400).json({ error: "user_id invalide" });
-
-    // Supprimer tous les éléments existants pour cet utilisateur
-    const existing = dbManager.getAllWatchlistItems(userId);
-    existing.forEach((item) =>
-      dbManager.deleteWatchlistItem(item.symbol, userId),
-    );
-
-    // Ajouter les nouveaux éléments
-    watchlist.forEach((item) => {
-      dbManager.createWatchlistItem({
-        user_id: userId,
-        symbol: item.symbol,
-        name: item.name,
-        type: item.type,
-      });
-    });
-
-    res.json({ message: "Watchlist updated successfully" });
-  } catch (error) {
-    console.error("Error updating watchlist:", error);
-    res.status(500).json({ error: "Failed to update watchlist" });
-  }
-});
-
-// DELETE /api/database/watchlist/:symbol - Supprimer de la watchlist
-app.delete("/api/database/watchlist/:symbol", (req, res) => {
-  try {
-    const { symbol } = req.params;
-    const userId = sanitizeUserId(req.query.user_id);
-    if (!userId)
-      return res.status(400).json({ error: "user_id invalide" });
-    const success = dbManager.deleteWatchlistItem(
-      decodeURIComponent(symbol),
-      userId,
-    );
-
-    if (success) {
-      res.json({ message: "Watchlist item deleted successfully" });
-    } else {
-      res.status(404).json({ error: "Watchlist item not found" });
-    }
-  } catch (error) {
-    console.error("Error deleting watchlist item:", error);
-    res.status(500).json({ error: "Failed to delete watchlist item" });
-  }
-});
-
 // ===== GESTION DES WALLETS =====
 
 // GET /api/database/wallets - Récupérer tous les wallets
@@ -2014,6 +1794,34 @@ app.put("/api/database/wallets/:id/assets/:index/visibility", (req, res) => {
   }
 });
 
+// PUT /api/database/wallets/:id/nfts/:index/visibility - Mettre à jour la visibilité d'un NFT
+app.put("/api/database/wallets/:id/nfts/:index/visibility", (req, res) => {
+  try {
+    const { id, index } = req.params;
+    const { isHidden } = req.body;
+
+    const nftIndex = Number.parseInt(index, 10);
+    const nfts = dbManager.getWalletNFTs(id);
+    if (Number.isNaN(nftIndex) || !nfts[nftIndex]) {
+      return res.status(404).json({ error: "NFT not found" });
+    }
+
+    const success = dbManager.updateWalletNFTVisibility(
+      nfts[nftIndex].id,
+      isHidden,
+    );
+
+    if (success) {
+      res.json({ message: "NFT visibility updated successfully" });
+    } else {
+      res.status(404).json({ error: "NFT not found" });
+    }
+  } catch (error) {
+    console.error("Error updating NFT visibility:", error);
+    res.status(500).json({ error: "Failed to update NFT visibility" });
+  }
+});
+
 // POST /api/database/wallets/:id/sync-nfts - Synchroniser les NFTs d'un wallet
 app.post("/api/database/wallets/:id/sync-nfts", async (req, res) => {
   try {
@@ -2199,13 +2007,9 @@ app.post("/api/database/wallets/test-create-with-nfts", async (req, res) => {
 // Endpoint pour exporter les données
 app.get("/api/database/export", (req, res) => {
   try {
-    const investments = dbManager.getAllInvestments();
-    const watchlist = dbManager.getAllWatchlistItems();
     const wallets = dbManager.getAllWallets();
 
     const exportData = {
-      investments,
-      watchlist,
       wallets,
       exportDate: new Date().toISOString(),
     };
@@ -2220,7 +2024,7 @@ app.get("/api/database/export", (req, res) => {
 // Endpoint pour importer des données
 app.post("/api/database/import", (req, res) => {
   try {
-    const { investments, watchlist, wallets } = req.body;
+    const { wallets } = req.body;
 
     // Nettoyer la base de données existante
     const existingWallets = dbManager.getAllWallets();
@@ -2229,41 +2033,7 @@ app.post("/api/database/import", (req, res) => {
       dbManager.deleteWallet(wallet.id);
     });
 
-    const existingInvestments = dbManager.getAllInvestments();
-    existingInvestments.forEach((inv) => dbManager.deleteInvestment(inv.id));
-
-    const existingWatchlist = dbManager.getAllWatchlistItems();
-    existingWatchlist.forEach((item) =>
-      dbManager.deleteWatchlistItem(item.symbol),
-    );
-
     // Importer les nouvelles données
-    if (investments) {
-      investments.forEach((inv) => {
-        dbManager.createInvestment({
-          name: inv.name,
-          type: inv.type,
-          symbol: inv.symbol,
-          quantity: inv.quantity,
-          purchase_price: inv.purchase_price,
-          current_price: inv.current_price,
-          purchase_date: inv.purchase_date,
-          notes: inv.notes,
-          account_type: inv.account_type,
-        });
-      });
-    }
-
-    if (watchlist) {
-      watchlist.forEach((item) => {
-        dbManager.createWatchlistItem({
-          symbol: item.symbol,
-          name: item.name,
-          type: item.type,
-        });
-      });
-    }
-
     if (wallets) {
       wallets.forEach((wallet) => {
         const walletId = dbManager.createWallet({
@@ -2307,32 +2077,6 @@ app.post("/api/database/import", (req, res) => {
 app.post("/api/database/migrate", (req, res) => {
   try {
     const { localStorageData } = req.body;
-
-    if (localStorageData.investments) {
-      localStorageData.investments.forEach((inv) => {
-        dbManager.createInvestment({
-          name: inv.name,
-          type: inv.type,
-          symbol: inv.symbol,
-          quantity: inv.quantity,
-          purchase_price: inv.purchasePrice,
-          current_price: inv.currentPrice,
-          purchase_date: inv.purchaseDate,
-          notes: inv.notes || null,
-          account_type: inv.accountType || null,
-        });
-      });
-    }
-
-    if (localStorageData.watchlist) {
-      localStorageData.watchlist.forEach((item) => {
-        dbManager.createWatchlistItem({
-          symbol: item.symbol,
-          name: item.name,
-          type: item.type,
-        });
-      });
-    }
 
     if (localStorageData.wallets) {
       localStorageData.wallets.forEach((wallet) => {

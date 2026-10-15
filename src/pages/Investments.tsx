@@ -1,55 +1,35 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Edit, Trash2, Search, RefreshCw, Wallet } from "lucide-react";
-import { Investment, Wallet as WalletType } from "../types";
+import { Plus, Search, Wallet, ChevronDown } from "lucide-react";
+import { Wallet as WalletType } from "../types";
 import {
-  getStoredInvestments,
-  addInvestment,
-  updateInvestment,
-  deleteInvestment,
-  testLocalStorage,
-  clearAllStoredData,
   getStoredWallets,
   addWallet,
   updateWallet,
   deleteWallet,
-  updateWalletAssets,
   updateWalletAssetVisibility,
+  updateWalletNFTVisibility,
 } from "../utils/storage";
 import { updateWallet as updateSingleWallet } from "../utils/blockchainService";
-import InvestmentForm from "../components/InvestmentForm";
-import InvestmentCard from "../components/InvestmentCard";
-import PriceRefreshButton from "../components/PriceRefreshButton";
 import WalletForm from "../components/WalletForm";
 import WalletCard from "../components/WalletCard";
 
 import { useUser } from "../contexts/UserContext";
 
 const Investments = () => {
-  const [investments, setInvestments] = useState<Investment[]>([]);
   const [wallets, setWallets] = useState<WalletType[]>([]);
-  const [isFormOpen, setIsFormOpen] = useState(false);
   const [isWalletFormOpen, setIsWalletFormOpen] = useState(false);
-  const [editingInvestment, setEditingInvestment] = useState<Investment | null>(
-    null
-  );
   const [editingWallet, setEditingWallet] = useState<WalletType | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [refreshingWallets, setRefreshingWallets] = useState<Set<string>>(
     new Set()
   );
-  const [isWalletsSectionCollapsed, setIsWalletsSectionCollapsed] =
+  const [isBlockchainSectionCollapsed, setIsBlockchainSectionCollapsed] =
     useState(false);
-  const [isInvestmentsSectionCollapsed, setIsInvestmentsSectionCollapsed] =
-    useState(false);
-  const [isCryptoCollapsed, setIsCryptoCollapsed] = useState(false);
-  const [isPEACollapsed, setIsPEACollapsed] = useState(false);
-  const [isCTOCollapsed, setIsCTOCollapsed] = useState(false);
-  const [isOtherCollapsed, setIsOtherCollapsed] = useState(false);
-  const [isTradfiCollapsed, setIsTradfiCollapsed] = useState(false);
+  const [isCeXSectionCollapsed, setIsCeXSectionCollapsed] = useState(false);
 
   const { currentUser } = useUser();
 
-  // Séparer les wallets Binance des autres wallets
+  // Séparer les wallets Binance (CEX) des wallets blockchain
   const binanceWallets = wallets.filter(
     (wallet) => wallet.walletType === "binance"
   );
@@ -57,84 +37,26 @@ const Investments = () => {
     (wallet) => wallet.walletType !== "binance"
   );
 
-  // Calculer les valeurs totales (excluant les assets masqués)
-  const binanceWalletValue = binanceWallets.reduce(
-    (sum, wallet) =>
-      sum +
-      wallet.assets
-        .filter((asset) => !asset.isHidden)
-        .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-      (wallet.nfts || []).reduce((nftSum, nft) => nftSum + (nft.value || 0), 0),
-    0
-  );
-  const blockchainWalletValue = blockchainWallets.reduce(
-    (sum, wallet) =>
-      sum +
-      wallet.assets
-        .filter((asset) => !asset.isHidden)
-        .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-      (wallet.nfts || []).reduce((nftSum, nft) => nftSum + (nft.value || 0), 0),
-    0
-  );
-  const walletValue = wallets.reduce(
-    (sum, wallet) =>
-      sum +
-      wallet.assets
-        .filter((asset) => !asset.isHidden)
-        .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
-      (wallet.nfts || []).reduce((nftSum, nft) => nftSum + (nft.value || 0), 0),
-    0
-  );
+  // Calculer la valeur d'une liste de wallets (assets masqués exclus)
+  const computeWalletsValue = (list: WalletType[]) =>
+    list.reduce(
+      (sum, wallet) =>
+        sum +
+        wallet.assets
+          .filter((asset) => !asset.isHidden)
+          .reduce((assetSum, asset) => assetSum + (asset.value || 0), 0) +
+        (wallet.nfts || []).reduce(
+          (nftSum, nft) => nftSum + (nft.value || 0),
+          0
+        ),
+      0
+    );
 
-  useEffect(() => {
-    const loadData = async () => {
-      await loadInvestments();
-      await loadWallets();
-    };
-    loadData();
+  const blockchainWalletValue = computeWalletsValue(blockchainWallets);
+  const binanceWalletValue = computeWalletsValue(binanceWallets);
+  const walletValue = computeWalletsValue(wallets);
 
-    // Écouter les mises à jour de prix
-    const handlePriceUpdate = async () => {
-      console.log(
-        "🔄 Rechargement des investissements après mise à jour des prix"
-      );
-      await loadInvestments();
-    };
-
-    // Écouter les mises à jour des wallets
-    const handleWalletUpdate = async () => {
-      console.log("🔄 Rechargement des wallets après mise à jour des assets");
-      await loadWallets();
-    };
-
-    // Écouter les mises à jour des investissements
-    const handleInvestmentUpdate = async () => {
-      console.log("🔄 Rechargement des investissements après modification");
-      await loadInvestments();
-    };
-
-    window.addEventListener("investmentPricesUpdated", handlePriceUpdate);
-    window.addEventListener("walletsUpdated", handleWalletUpdate);
-    window.addEventListener("investmentsUpdated", handleInvestmentUpdate);
-
-    return () => {
-      window.removeEventListener("investmentPricesUpdated", handlePriceUpdate);
-      window.removeEventListener("walletsUpdated", handleWalletUpdate);
-      window.removeEventListener("investmentsUpdated", handleInvestmentUpdate);
-    };
-  }, [currentUser]);
-
-  const loadInvestments = async () => {
-    try {
-      const stored = await getStoredInvestments(currentUser);
-      setInvestments(stored);
-    } catch (error) {
-      console.error("❌ Erreur lors du chargement des investissements:", error);
-      setInvestments([]);
-    }
-  };
-
-  const loadWallets = async () => {
+  const loadingWallets = async () => {
     try {
       const stored = await getStoredWallets(currentUser);
       setWallets(stored);
@@ -144,48 +66,31 @@ const Investments = () => {
     }
   };
 
-  const handleAddInvestment = async (investment: Investment) => {
-    await addInvestment(investment, currentUser);
-    // Petit délai pour s'assurer que la base de données est mise à jour
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await loadInvestments();
-    setIsFormOpen(false);
-  };
+  useEffect(() => {
+    loadingWallets();
 
-  const handleUpdateInvestment = async (investment: Investment) => {
-    await updateInvestment(investment, currentUser);
-    // Petit délai pour s'assurer que la base de données est mise à jour
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await loadInvestments();
-    setEditingInvestment(null);
-    setIsFormOpen(false);
-  };
+    const handleWalletUpdate = async () => {
+      await loadingWallets();
+    };
 
-  const handleDeleteInvestment = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this investment?")) {
-      await deleteInvestment(id, currentUser);
-      // Petit délai pour s'assurer que la base de données est mise à jour
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      await loadInvestments();
-    }
-  };
+    window.addEventListener("walletsUpdated", handleWalletUpdate);
 
-  const handleEditInvestment = (investment: Investment) => {
-    setEditingInvestment(investment);
-    setIsFormOpen(true);
-  };
+    return () => {
+      window.removeEventListener("walletsUpdated", handleWalletUpdate);
+    };
+  }, [currentUser]);
 
   // === GESTION DES WALLETS ===
 
   const handleAddWallet = async (wallet: WalletType) => {
     await addWallet(wallet, currentUser);
-    await loadWallets();
+    await loadingWallets();
     setIsWalletFormOpen(false);
   };
 
   const handleUpdateWallet = async (wallet: WalletType) => {
     await updateWallet(wallet, currentUser);
-    await loadWallets();
+    await loadingWallets();
     setEditingWallet(null);
     setIsWalletFormOpen(false);
   };
@@ -195,7 +100,7 @@ const Investments = () => {
       window.confirm("Êtes-vous sûr de vouloir supprimer ce portefeuille ?")
     ) {
       await deleteWallet(id, currentUser);
-      await loadWallets();
+      await loadingWallets();
     }
   };
 
@@ -204,8 +109,8 @@ const Investments = () => {
 
     try {
       const updatedWallet = await updateSingleWallet(wallet);
-      updateWallet(updatedWallet, currentUser);
-      loadWallets();
+      await updateWallet(updatedWallet, currentUser);
+      await loadingWallets();
     } catch (error) {
       console.error("Erreur lors de la mise à jour du wallet:", error);
     } finally {
@@ -267,71 +172,65 @@ const Investments = () => {
         newIsHidden,
         currentUser
       );
-      console.log(
-        `👁️ Asset ${asset.symbol} ${newIsHidden ? "masqué" : "rendu visible"}`
-      );
     } catch (error) {
       console.error(
         "❌ Erreur lors de la mise à jour de la visibilité:",
         error
       );
       // Recharger les wallets en cas d'erreur
-      await loadWallets();
+      await loadingWallets();
     }
   };
 
-  const handleCleanupStorage = () => {
-    if (
-      window.confirm("Supprimer tous les symboles invalides du portefeuille ?")
-    ) {
-      // Désactivé pour éviter la suppression accidentelle des cryptos
-      // cleanupLocalStorage();
-      console.log(
-        "⚠️ Fonction de nettoyage désactivée pour préserver les actifs crypto"
+  const handleToggleNftVisibility = async (
+    walletId: string,
+    nftIndex: number
+  ) => {
+    const wallet = wallets.find((w) => w.id === walletId);
+    if (!wallet) return;
+
+    const nft = wallet.nfts[nftIndex];
+    if (!nft) return;
+
+    const newIsHidden = !nft.isHidden;
+
+    // Mettre à jour l'état local immédiatement
+    setWallets((prev) =>
+      prev.map((w) => {
+        if (w.id !== walletId) return w;
+        const updatedNfts = [...w.nfts];
+        updatedNfts[nftIndex] = {
+          ...updatedNfts[nftIndex],
+          isHidden: newIsHidden,
+        };
+        return { ...w, nfts: updatedNfts };
+      })
+    );
+
+    // Sauvegarder les changements dans la base de données
+    try {
+      await updateWalletNFTVisibility(walletId, nftIndex, newIsHidden);
+    } catch (error) {
+      console.error(
+        "❌ Erreur lors de la mise à jour de la visibilité du NFT:",
+        error
       );
-      loadInvestments();
+      await loadingWallets();
     }
   };
 
-  const handleResetAllData = () => {
-    if (
-      window.confirm(
-        "⚠️ ATTENTION: Supprimer TOUTES les données sauvegardées ? Cette action est irréversible !"
-      )
-    ) {
-      clearAllStoredData();
-      loadInvestments();
-    }
+  const matchesSearch = (wallet: WalletType) => {
+    const term = searchTerm.toLowerCase();
+    return (
+      wallet.name.toLowerCase().includes(term) ||
+      wallet.address.toLowerCase().includes(term)
+    );
   };
 
-  const filteredInvestments = investments.filter(
-    (investment) =>
-      investment.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      investment.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      investment.type.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  // Filtrer les wallets selon l'onglet actif
-  const filteredWallets = wallets.map((wallet) => ({
-    ...wallet,
-    assets: wallet.assets, // Afficher tous les assets
-    totalValue: wallet.assets
-      .filter((asset) => !asset.isHidden)
-      .reduce((sum, asset) => sum + (asset.value || 0), 0),
-  }));
-
-  const investmentValue = investments.reduce(
-    (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-    0
-  );
-  const totalValue = investmentValue + walletValue;
-
-  const totalGainLoss = investments.reduce((sum, inv) => {
-    const currentPrice = inv.currentPrice ?? 0;
-    const currentValue = inv.quantity * currentPrice;
-    const purchaseValue = inv.quantity * inv.purchasePrice;
-    return sum + (currentValue - purchaseValue);
-  }, 0);
+  const filteredBlockchainWallets = blockchainWallets.filter(matchesSearch);
+  const filteredBinanceWallets = binanceWallets.filter(matchesSearch);
+  const totalFilteredWallets =
+    filteredBlockchainWallets.length + filteredBinanceWallets.length;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -343,56 +242,21 @@ const Investments = () => {
           <p className="text-[#8a8a8a] text-sm mt-1">
             Valeur totale :{" "}
             <span className="font-semibold text-[#f5f5f5]">
-              {totalValue.toLocaleString("fr-FR")} €
-            </span>{" "}
-            • Plus/Moins-value :{" "}
-            <span
-              className={`font-semibold ${
-                totalGainLoss >= 0
-                  ? "text-[#22c55e]"
-                  : "text-[#ef4444]"
-              }`}
-            >
-              {totalGainLoss >= 0 ? "+" : ""}
-              {totalGainLoss.toLocaleString("fr-FR")} €
+              {walletValue.toLocaleString("fr-FR")} €
             </span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={handleCleanupStorage}
-            className="btn-secondary flex items-center gap-2 text-xs"
-            title="Nettoyer les symboles invalides"
-          >
-            <RefreshCw size={15} />
-            <span>Nettoyer</span>
-          </button>
-
-          <button
             onClick={() => {
               setEditingWallet(null);
               setIsWalletFormOpen(true);
             }}
-            className="btn-secondary flex items-center gap-2 text-xs"
-          >
-            <Wallet size={15} />
-            <span>Ajouter un wallet</span>
-          </button>
-          <button
-            onClick={() => {
-              setEditingInvestment(null);
-              setIsFormOpen(true);
-            }}
             className="btn-primary flex items-center gap-2 text-xs"
           >
             <Plus size={15} />
-            <span>Ajouter un actif</span>
+            <span>Ajouter un wallet</span>
           </button>
-          <PriceRefreshButton
-            variant="primary"
-            size="sm"
-            showCountdown={true}
-          />
         </div>
       </div>
 
@@ -404,7 +268,7 @@ const Investments = () => {
         />
         <input
           type="text"
-          placeholder="Rechercher un investissement, action, crypto..."
+          placeholder="Rechercher un portefeuille (nom, adresse)..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="pl-10 pr-4 py-2.5 w-full rounded-xl bg-[#141414] border border-[rgba(255,255,255,0.06)] text-sm text-[#f5f5f5] placeholder-[#555555] focus:outline-none focus:border-[#c8a55e]/50 transition-colors"
@@ -421,433 +285,116 @@ const Investments = () => {
               </h2>
               <button
                 onClick={() =>
-                  setIsWalletsSectionCollapsed(!isWalletsSectionCollapsed)
+                  setIsBlockchainSectionCollapsed(!isBlockchainSectionCollapsed)
                 }
                 className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
                 title={
-                  isWalletsSectionCollapsed
-                    ? "Afficher les portefeuilles"
-                    : "Masquer les portefeuilles"
+                  isBlockchainSectionCollapsed ? "Afficher" : "Masquer"
                 }
               >
-                <svg
+                <ChevronDown
                   className={`w-5 h-5 transform transition-transform ${
-                    isWalletsSectionCollapsed ? "rotate-90" : "-rotate-90"
+                    isBlockchainSectionCollapsed ? "-rotate-90" : "rotate-0"
                   }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
+                />
               </button>
             </div>
             <span className="text-sm text-[#555555]">
               {blockchainWallets.length} portefeuille
-              {blockchainWallets.length > 1 ? "s" : ""} • $
-              {blockchainWalletValue.toLocaleString()}
+              {blockchainWallets.length > 1 ? "s" : ""} •{" "}
+              {blockchainWalletValue.toLocaleString("fr-FR")} €
             </span>
           </div>
 
-          {!isWalletsSectionCollapsed && (
+          {!isBlockchainSectionCollapsed && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {blockchainWallets
-                .filter(
-                  (wallet) =>
-                    wallet.name
-                      .toLowerCase()
-                      .includes(searchTerm.toLowerCase()) ||
-                    wallet.address
-                      .toLowerCase()
-                      .includes(searchTerm.toLowerCase())
-                )
-                .map((wallet) => (
-                  <WalletCard
-                    key={wallet.id}
-                    wallet={wallet}
-                    onUpdate={handleEditWallet}
-                    onDelete={handleDeleteWallet}
-                    onRefresh={handleRefreshWallet}
-                    onToggleAssetVisibility={handleToggleAssetVisibility}
-                    isLoading={refreshingWallets.has(wallet.id)}
-                  />
-                ))}
+              {filteredBlockchainWallets.map((wallet) => (
+                <WalletCard
+                  key={wallet.id}
+                  wallet={wallet}
+                  onUpdate={handleEditWallet}
+                  onDelete={handleDeleteWallet}
+                  onRefresh={handleRefreshWallet}
+                  onToggleAssetVisibility={handleToggleAssetVisibility}
+                  onToggleNftVisibility={handleToggleNftVisibility}
+                  isLoading={refreshingWallets.has(wallet.id)}
+                />
+              ))}
             </div>
           )}
         </div>
       )}
 
-      {/* Investments Section */}
-      <div className="space-y-4">
-        {(investments.length > 0 || binanceWallets.length > 0) && (
+      {/* Wallets Binance (CEX) Section */}
+      {binanceWallets.length > 0 && (
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <h2 className="text-xl font-semibold text-[#f5f5f5]">
-                Investissements sur DEX/CEX
+                Wallets Binance (CEX)
               </h2>
               <button
                 onClick={() =>
-                  setIsInvestmentsSectionCollapsed(
-                    !isInvestmentsSectionCollapsed
-                  )
+                  setIsCeXSectionCollapsed(!isCeXSectionCollapsed)
                 }
                 className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
-                title={
-                  isInvestmentsSectionCollapsed
-                    ? "Afficher les investissements"
-                    : "Masquer les investissements"
-                }
+                title={isCeXSectionCollapsed ? "Afficher" : "Masquer"}
               >
-                <svg
+                <ChevronDown
                   className={`w-5 h-5 transform transition-transform ${
-                    isInvestmentsSectionCollapsed ? "rotate-90" : "-rotate-90"
+                    isCeXSectionCollapsed ? "-rotate-90" : "rotate-0"
                   }`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
+                />
               </button>
             </div>
             <span className="text-sm text-[#555555]">
-              {investments.length + binanceWallets.length} élément
-              {investments.length + binanceWallets.length > 1 ? "s" : ""} • $
-              {(investmentValue + binanceWalletValue).toLocaleString()}
+              {binanceWallets.length} portefeuille
+              {binanceWallets.length > 1 ? "s" : ""} •{" "}
+              {binanceWalletValue.toLocaleString("fr-FR")} €
             </span>
           </div>
-        )}
 
-        {/* Investments Grid avec sous-sections */}
-        {!isInvestmentsSectionCollapsed && (
-          <>
-            {/* Sous-section Crypto */}
-            {(filteredInvestments.filter((inv) => inv.type === "crypto")
-              .length > 0 ||
-              binanceWallets.length > 0) && (
-              <div className="mb-2">
-                <div className="flex items-center space-x-2 mb-2">
-                  <h3 className="text-lg font-semibold text-orange-600">
-                    Crypto
-                  </h3>
-                  <button
-                    onClick={() => setIsCryptoCollapsed((v) => !v)}
-                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
-                    title={isCryptoCollapsed ? "Afficher" : "Masquer"}
-                  >
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${
-                        isCryptoCollapsed ? "rotate-90" : "-rotate-90"
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                {!isCryptoCollapsed && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {/* Wallets Binance */}
-                    {binanceWallets
-                      .filter((wallet) =>
-                        wallet.name
-                          .toLowerCase()
-                          .includes(searchTerm.toLowerCase())
-                      )
-                      .map((wallet) => (
-                        <WalletCard
-                          key={wallet.id}
-                          wallet={wallet}
-                          onUpdate={handleEditWallet}
-                          onDelete={handleDeleteWallet}
-                          onRefresh={handleRefreshWallet}
-                          onToggleAssetVisibility={handleToggleAssetVisibility}
-                          isLoading={refreshingWallets.has(wallet.id)}
-                        />
-                      ))}
-                    {/* Investissements crypto */}
-                    {filteredInvestments
-                      .filter((inv) => inv.type === "crypto")
-                      .map((investment) => (
-                        <InvestmentCard
-                          key={investment.id}
-                          investment={investment}
-                          onEdit={() => handleEditInvestment(investment)}
-                          onDelete={() => handleDeleteInvestment(investment.id)}
-                        />
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Sous-section PEA */}
-            {filteredInvestments.filter(
-              (inv) => inv.type === "stock" && inv.accountType === "PEA"
-            ).length > 0 && (
-              <div className="mb-2">
-                <div className="flex items-center space-x-2 mb-2">
-                  <h3 className="text-lg font-semibold text-blue-700">PEA</h3>
-                  <button
-                    onClick={() => setIsPEACollapsed((v) => !v)}
-                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
-                    title={isPEACollapsed ? "Afficher" : "Masquer"}
-                  >
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${
-                        isPEACollapsed ? "rotate-90" : "-rotate-90"
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                {!isPEACollapsed && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredInvestments
-                      .filter(
-                        (inv) =>
-                          inv.type === "stock" && inv.accountType === "PEA"
-                      )
-                      .map((investment) => (
-                        <InvestmentCard
-                          key={investment.id}
-                          investment={investment}
-                          onEdit={() => handleEditInvestment(investment)}
-                          onDelete={() => handleDeleteInvestment(investment.id)}
-                        />
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Sous-section CTO */}
-            {filteredInvestments.filter(
-              (inv) => inv.type === "stock" && inv.accountType === "CTO"
-            ).length > 0 && (
-              <div className="mb-2">
-                <div className="flex items-center space-x-2 mb-2">
-                  <h3 className="text-lg font-semibold text-green-700">CTO</h3>
-                  <button
-                    onClick={() => setIsCTOCollapsed((v) => !v)}
-                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
-                    title={isCTOCollapsed ? "Afficher" : "Masquer"}
-                  >
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${
-                        isCTOCollapsed ? "rotate-90" : "-rotate-90"
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                {!isCTOCollapsed && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredInvestments
-                      .filter(
-                        (inv) =>
-                          inv.type === "stock" && inv.accountType === "CTO"
-                      )
-                      .map((investment) => (
-                        <InvestmentCard
-                          key={investment.id}
-                          investment={investment}
-                          onEdit={() => handleEditInvestment(investment)}
-                          onDelete={() => handleDeleteInvestment(investment.id)}
-                        />
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Investissements TradFi (stock sans compte spécifique) */}
-            {filteredInvestments.filter(
-              (inv) =>
-                inv.type === "stock" &&
-                inv.accountType !== "PEA" &&
-                inv.accountType !== "CTO"
-            ).length > 0 && (
-              <div className="mb-2">
-                <div className="flex items-center space-x-2 mb-2">
-                  <h3 className="text-lg font-semibold text-purple-700">
-                    TradFi
-                  </h3>
-                  <button
-                    onClick={() => setIsTradfiCollapsed((v) => !v)}
-                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
-                    title={isTradfiCollapsed ? "Afficher" : "Masquer"}
-                  >
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${
-                        isTradfiCollapsed ? "rotate-90" : "-rotate-90"
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                {!isTradfiCollapsed && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredInvestments
-                      .filter(
-                        (inv) =>
-                          inv.type === "stock" &&
-                          inv.accountType !== "PEA" &&
-                          inv.accountType !== "CTO"
-                      )
-                      .map((investment) => (
-                        <InvestmentCard
-                          key={investment.id}
-                          investment={investment}
-                          onEdit={() => handleEditInvestment(investment)}
-                          onDelete={() => handleDeleteInvestment(investment.id)}
-                        />
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Autres types d'investissements (ETF, bond, etc.) */}
-            {filteredInvestments.filter(
-              (inv) => inv.type !== "crypto" && inv.type !== "stock"
-            ).length > 0 && (
-              <div className="mb-2">
-                <div className="flex items-center space-x-2 mb-2">
-                  <h3 className="text-lg font-semibold text-[#8a8a8a]">
-                    Autres
-                  </h3>
-                  <button
-                    onClick={() => setIsOtherCollapsed((v) => !v)}
-                    className="text-[#555555] hover:text-[#f5f5f5] transition-colors"
-                    title={isOtherCollapsed ? "Afficher" : "Masquer"}
-                  >
-                    <svg
-                      className={`w-4 h-4 transform transition-transform ${
-                        isOtherCollapsed ? "rotate-90" : "-rotate-90"
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </button>
-                </div>
-                {!isOtherCollapsed && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredInvestments
-                      .filter(
-                        (inv) => inv.type !== "crypto" && inv.type !== "stock"
-                      )
-                      .map((investment) => (
-                        <InvestmentCard
-                          key={investment.id}
-                          investment={investment}
-                          onEdit={() => handleEditInvestment(investment)}
-                          onDelete={() => handleDeleteInvestment(investment.id)}
-                        />
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Message si aucune correspondance */}
-            {filteredInvestments.length === 0 &&
-              filteredWallets.length === 0 &&
-              searchTerm && (
-                <div className="card text-center py-12">
-                  <div className="text-[#555555] mb-4">
-                    Aucun investissement ou portefeuille trouvé.
-                  </div>
-                </div>
-              )}
-            {filteredInvestments.length === 0 &&
-              filteredWallets.length === 0 &&
-              !searchTerm &&
-              investments.length === 0 &&
-              wallets.length === 0 && (
-                <div className="card text-center py-12">
-                  <div className="text-[#555555] mb-4">
-                    Aucun investissement ou portefeuille trouvé.
-                  </div>
-                  <div className="space-x-3">
-                    <button
-                      onClick={() => setIsFormOpen(true)}
-                      className="btn-primary"
-                    >
-                      Add Your First Investment
-                    </button>
-                    <button
-                      onClick={() => setIsWalletFormOpen(true)}
-                      className="btn-secondary"
-                    >
-                      Add Wallet
-                    </button>
-                  </div>
-                </div>
-              )}
-          </>
-        )}
-      </div>
+          {!isCeXSectionCollapsed && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredBinanceWallets.map((wallet) => (
+                <WalletCard
+                  key={wallet.id}
+                  wallet={wallet}
+                  onUpdate={handleEditWallet}
+                  onDelete={handleDeleteWallet}
+                  onRefresh={handleRefreshWallet}
+                  onToggleAssetVisibility={handleToggleAssetVisibility}
+                  onToggleNftVisibility={handleToggleNftVisibility}
+                  isLoading={refreshingWallets.has(wallet.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Investment Form Modal */}
-      {isFormOpen && (
-        <InvestmentForm
-          investment={editingInvestment}
-          onSubmit={
-            editingInvestment ? handleUpdateInvestment : handleAddInvestment
-          }
-          onCancel={() => {
-            setIsFormOpen(false);
-            setEditingInvestment(null);
-          }}
-        />
+      {/* Message si aucun portefeuille */}
+      {wallets.length === 0 && (
+        <div className="card text-center py-12">
+          <div className="text-[#555555] mb-4">
+            Aucun portefeuille pour le moment.
+          </div>
+          <button
+            onClick={() => setIsWalletFormOpen(true)}
+            className="btn-primary inline-flex items-center gap-2"
+          >
+            <Wallet size={15} />
+            <span>Ajouter un wallet</span>
+          </button>
+        </div>
+      )}
+
+      {wallets.length > 0 && totalFilteredWallets === 0 && searchTerm && (
+        <div className="card text-center py-12">
+          <div className="text-[#555555]">
+            Aucun portefeuille ne correspond à la recherche.
+          </div>
+        </div>
       )}
 
       {/* Wallet Form Modal */}

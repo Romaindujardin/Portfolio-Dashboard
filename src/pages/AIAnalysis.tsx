@@ -8,13 +8,12 @@ import {
   BarChart3,
   Loader2,
 } from "lucide-react";
-import { Investment, Wallet } from "../types";
-import { getStoredInvestments, getStoredWallets } from "../utils/storage";
+import { Wallet } from "../types";
+import { getStoredWallets } from "../utils/storage";
 import { analyzePortfolio, PortfolioAnalysis } from "../utils/geminiAI";
 import { useUser } from "../contexts/UserContext";
 
 const AIAnalysis: React.FC = () => {
-  const [investments, setInvestments] = useState<Investment[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [analysis, setAnalysis] = useState<PortfolioAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,14 +23,10 @@ const AIAnalysis: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const storedInvestments = await getStoredInvestments(currentUser);
-        setInvestments(storedInvestments);
-
         const storedWallets = await getStoredWallets(currentUser);
         setWallets(storedWallets);
       } catch (error) {
         console.error("❌ Erreur lors du chargement des données:", error);
-        setInvestments([]);
         setWallets([]);
       }
     };
@@ -40,17 +35,15 @@ const AIAnalysis: React.FC = () => {
   }, [currentUser]);
 
   const handleAnalyze = async () => {
-    const totalAssets =
-      investments.length +
-      wallets.reduce(
-        (sum, wallet) =>
-          sum + wallet.assets.filter((asset) => !asset.isHidden).length,
-        0
-      );
+    const totalAssets = wallets.reduce(
+      (sum, wallet) =>
+        sum + wallet.assets.filter((asset) => !asset.isHidden).length,
+      0
+    );
 
     if (totalAssets === 0) {
       setError(
-        "Aucun asset à analyser. Ajoutez d'abord des investissements ou des wallets."
+        "Aucun asset à analyser. Ajoutez d'abord un wallet dans la page Portefeuille."
       );
       return;
     }
@@ -59,7 +52,7 @@ const AIAnalysis: React.FC = () => {
     setError("");
 
     try {
-      const result = await analyzePortfolio(investments, wallets, currentUser);
+      const result = await analyzePortfolio(wallets, currentUser);
       setAnalysis(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur lors de l'analyse");
@@ -111,13 +104,12 @@ const AIAnalysis: React.FC = () => {
             <div>
               <p className="text-sm font-medium text-[#8a8a8a]">Assets Totaux</p>
               <p className="text-2xl font-bold text-[#f5f5f5]">
-                {investments.length +
-                  wallets.reduce(
-                    (sum, wallet) =>
-                      sum +
-                      wallet.assets.filter((asset) => !asset.isHidden).length,
-                    0
-                  )}
+                {wallets.reduce(
+                  (sum, wallet) =>
+                    sum +
+                    wallet.assets.filter((asset) => !asset.isHidden).length,
+                  0
+                )}
               </p>
             </div>
             <BarChart3 className="h-8 w-8 text-blue-600" />
@@ -130,12 +122,7 @@ const AIAnalysis: React.FC = () => {
               <p className="text-sm font-medium text-[#8a8a8a]">Valeur Totale</p>
               <p className="text-2xl font-bold text-[#f5f5f5]">
                 $
-                {(
-                  investments.reduce(
-                    (sum, inv) => sum + inv.quantity * (inv.currentPrice ?? 0),
-                    0
-                  ) +
-                  wallets.reduce(
+                {wallets.reduce(
                     (sum, wallet) =>
                       sum +
                       wallet.assets
@@ -144,12 +131,11 @@ const AIAnalysis: React.FC = () => {
                           (assetSum, asset) => assetSum + (asset.value || 0),
                           0
                         ) +
-                      (wallet.nfts || []).reduce(
-                        (nftSum, nft) => nftSum + (nft.value || 0),
-                        0
-                      ),
-                    0
-                  )
+                    (wallet.nfts || []).reduce(
+                      (nftSum, nft) => nftSum + (nft.value || 0),
+                      0
+                    ),
+                  0
                 ).toLocaleString()}
               </p>
             </div>
@@ -174,7 +160,11 @@ const AIAnalysis: React.FC = () => {
       <div className="text-center">
         <button
           onClick={handleAnalyze}
-          disabled={loading || investments.length === 0}
+          disabled={loading ||
+            wallets.every(
+              (wallet) =>
+                wallet.assets.filter((asset) => !asset.isHidden).length === 0
+            )}
           className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? (

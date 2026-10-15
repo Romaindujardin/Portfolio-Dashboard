@@ -283,20 +283,20 @@ Sois précis, constructif et base tes analyses sur les données fournies et le c
 };
 
 // Fonction principale pour analyser le portefeuille
+// (les actifs manuels "investments" ont été retirés de l'app : on analyse les wallets)
 export const analyzePortfolio = async (
-  investments: Investment[],
   wallets: Wallet[],
   username: string = "Romain"
 ): Promise<PortfolioAnalysis> => {
-  if (investments.length === 0) {
-    throw new Error("Aucun investissement à analyser");
+  if (wallets.length === 0) {
+    throw new Error("Aucun portefeuille à analyser");
   }
 
   try {
     console.log("🤖 Analyse du portefeuille avec Gemini AI...");
 
-    const portfolioData = preparePortfolioData(investments, wallets);
-    const marketContext = await getMarketContext(investments, wallets);
+    const portfolioData = preparePortfolioData([], wallets);
+    const marketContext = await getMarketContext([], wallets);
     const prompt = generateAnalysisPrompt(portfolioData, marketContext);
 
     const response = await fetch(getGeminiApiUrl(username), {

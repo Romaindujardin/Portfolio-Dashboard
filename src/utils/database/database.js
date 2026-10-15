@@ -40,37 +40,6 @@ class DatabaseManager {
   initializeTables() {
     const db = this.getDatabase();
 
-    // Table des investissements
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS investments (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        type TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        purchase_price REAL NOT NULL,
-        current_price REAL,
-        purchase_date TEXT NOT NULL,
-        notes TEXT,
-        account_type TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    `);
-
-    // Table de la watchlist
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS watchlist (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        name TEXT NOT NULL,
-        type TEXT NOT NULL,
-        added_at TEXT NOT NULL
-      )
-    `);
-
     // Table des wallets
     db.exec(`
       CREATE TABLE IF NOT EXISTS wallets (
@@ -106,9 +75,6 @@ class DatabaseManager {
         FOREIGN KEY (wallet_id) REFERENCES wallets (id) ON DELETE CASCADE
       )
     `);
-
-    // Supprimer la table wallet_nfts si elle existe (pour la recréer)
-    db.exec(`DROP TABLE IF EXISTS wallet_nfts`);
 
     // Table des NFTs des wallets
     db.exec(`
@@ -249,10 +215,6 @@ class DatabaseManager {
         updated_at TEXT NOT NULL
       );
 
-      CREATE INDEX IF NOT EXISTS idx_investments_user_id ON investments (user_id);
-      CREATE INDEX IF NOT EXISTS idx_investments_symbol ON investments (symbol);
-      CREATE INDEX IF NOT EXISTS idx_watchlist_user_id ON watchlist (user_id);
-      CREATE INDEX IF NOT EXISTS idx_watchlist_symbol ON watchlist (symbol);
       CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets (user_id);
       CREATE INDEX IF NOT EXISTS idx_wallet_assets_wallet_id ON wallet_assets (wallet_id);
       CREATE INDEX IF NOT EXISTS idx_wallet_assets_symbol ON wallet_assets (symbol);
@@ -272,166 +234,6 @@ class DatabaseManager {
     }
 
     console.log("✅ Tables de base de données initialisées");
-  }
-
-  // Gestion des investissements
-  getAllInvestments(userId = "Romain") {
-    const db = this.getDatabase();
-    // Gérer les anciens investissements sans user_id en les attribuant à 'Romain' par défaut
-    if (userId === "Romain") {
-      return db
-        .prepare(
-          "SELECT * FROM investments WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC",
-        )
-        .all(userId);
-    } else {
-      return db
-        .prepare(
-          "SELECT * FROM investments WHERE user_id = ? ORDER BY created_at DESC",
-        )
-        .all(userId);
-    }
-  }
-
-  getInvestmentById(id) {
-    const db = this.getDatabase();
-    const stmt = db.prepare("SELECT * FROM investments WHERE id = ?");
-    return stmt.get(id);
-  }
-
-  createInvestment(investment) {
-    const db = this.getDatabase();
-    const id = uuidv4();
-    const now = new Date().toISOString();
-
-    const stmt = db.prepare(`
-      INSERT INTO investments (
-        id, user_id, name, type, symbol, quantity, purchase_price, current_price,
-        purchase_date, notes, account_type, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      id,
-      investment.user_id || "Romain",
-      investment.name,
-      investment.type,
-      investment.symbol,
-      investment.quantity,
-      investment.purchase_price,
-      investment.current_price,
-      investment.purchase_date,
-      investment.notes,
-      investment.account_type,
-      now,
-      now,
-    );
-
-    return id;
-  }
-
-  updateInvestment(id, investment) {
-    const db = this.getDatabase();
-    const now = new Date().toISOString();
-
-    const stmt = db.prepare(`
-      UPDATE investments 
-      SET user_id = ?, name = ?, type = ?, symbol = ?, quantity = ?, purchase_price = ?, 
-          current_price = ?, purchase_date = ?, notes = ?, account_type = ?, updated_at = ?
-      WHERE id = ?
-    `);
-
-    const result = stmt.run(
-      investment.user_id || "Romain",
-      investment.name,
-      investment.type,
-      investment.symbol,
-      investment.quantity,
-      investment.purchase_price,
-      investment.current_price,
-      investment.purchase_date,
-      investment.notes,
-      investment.account_type,
-      now,
-      id,
-    );
-
-    return result.changes > 0;
-  }
-
-  deleteInvestment(id) {
-    const db = this.getDatabase();
-    const stmt = db.prepare("DELETE FROM investments WHERE id = ?");
-    const result = stmt.run(id);
-    return result.changes > 0;
-  }
-
-  updateInvestmentPrices(investments) {
-    const db = this.getDatabase();
-    const now = new Date().toISOString();
-
-    const stmt = db.prepare(`
-      UPDATE investments 
-      SET current_price = ?, updated_at = ?
-      WHERE id = ?
-    `);
-
-    const transaction = db.transaction(() => {
-      for (const investment of investments) {
-        stmt.run(investment.current_price, now, investment.id);
-      }
-    });
-
-    transaction();
-  }
-
-  // Gestion de la watchlist
-  getAllWatchlistItems(userId = "Romain") {
-    const db = this.getDatabase();
-    // Gérer les anciens éléments sans user_id en les attribuant à 'Romain' par défaut
-    if (userId === "Romain") {
-      return db
-        .prepare(
-          "SELECT * FROM watchlist WHERE user_id = ? OR user_id IS NULL ORDER BY added_at DESC",
-        )
-        .all(userId);
-    } else {
-      return db
-        .prepare(
-          "SELECT * FROM watchlist WHERE user_id = ? ORDER BY added_at DESC",
-        )
-        .all(userId);
-    }
-  }
-
-  createWatchlistItem(item) {
-    const db = this.getDatabase();
-    const id = uuidv4();
-    const now = new Date().toISOString();
-
-    const stmt = db.prepare(`
-      INSERT INTO watchlist (id, user_id, symbol, name, type, added_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      id,
-      item.user_id || "Romain",
-      item.symbol,
-      item.name,
-      item.type,
-      now,
-    );
-    return id;
-  }
-
-  deleteWatchlistItem(symbol, userId = "Romain") {
-    const db = this.getDatabase();
-    const stmt = db.prepare(
-      "DELETE FROM watchlist WHERE symbol = ? AND user_id = ?",
-    );
-    const result = stmt.run(symbol, userId);
-    return result.changes > 0;
   }
 
   // Gestion des wallets
@@ -475,9 +277,18 @@ class DatabaseManager {
 
   updateWallet(id, wallet) {
     const db = this.getDatabase();
-    const fields = Object.keys(wallet).filter(
-      (key) => key !== "id" && key !== "added_at",
-    );
+    // Whitelist des colonnes autorisées (protection contre l'injection SQL par nom de champ)
+    const allowed = [
+      "user_id",
+      "name",
+      "address",
+      "wallet_type",
+      "blockchains",
+      "total_value",
+      "last_updated",
+    ];
+    const fields = Object.keys(wallet).filter((key) => allowed.includes(key));
+    if (fields.length === 0) return false;
     const setClause = fields.map((field) => `${field} = ?`).join(", ");
     const values = fields.map((field) => wallet[field]);
 
@@ -558,9 +369,22 @@ class DatabaseManager {
     const db = this.getDatabase();
     const now = new Date().toISOString();
 
-    const fields = Object.keys(asset).filter(
-      (key) => key !== "id" && key !== "created_at",
-    );
+    // Whitelist des colonnes autorisées (protection contre l'injection SQL par nom de champ)
+    const allowed = [
+      "wallet_id",
+      "symbol",
+      "name",
+      "balance",
+      "decimals",
+      "blockchain",
+      "contract_address",
+      "price",
+      "value",
+      "logo",
+      "is_hidden",
+    ];
+    const fields = Object.keys(asset).filter((key) => allowed.includes(key));
+    if (fields.length === 0) return false;
     const setClause = fields.map((field) => `${field} = ?`).join(", ");
     const values = fields.map((field) => {
       const value = asset[field];
@@ -697,7 +521,8 @@ class DatabaseManager {
     const stmt = db.prepare(
       "UPDATE wallet_nfts SET is_hidden = ? WHERE id = ?",
     );
-    stmt.run(isHidden ? 1 : 0, id);
+    const result = stmt.run(isHidden ? 1 : 0, id);
+    return result.changes > 0;
   }
 
   // ===== BANQUE / IMPORT CSV =====
@@ -1383,12 +1208,6 @@ class DatabaseManager {
   getDatabaseStats() {
     const db = this.getDatabase();
 
-    const investmentCount = db
-      .prepare("SELECT COUNT(*) as count FROM investments")
-      .get();
-    const watchlistCount = db
-      .prepare("SELECT COUNT(*) as count FROM watchlist")
-      .get();
     const walletCount = db
       .prepare("SELECT COUNT(*) as count FROM wallets")
       .get();
@@ -1406,8 +1225,6 @@ class DatabaseManager {
       .get();
 
     return {
-      investments: investmentCount.count,
-      watchlist: watchlistCount.count,
       wallets: walletCount.count,
       assets: assetCount.count,
       bankCsvUploads: bankCsvCount.count,
