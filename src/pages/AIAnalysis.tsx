@@ -5,18 +5,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
-  Brain,
   Check,
-  ChevronDown,
-  ChevronUp,
   Coins,
   Copy,
+  Database,
   Landmark,
   Loader2,
   PiggyBank,
   RotateCcw,
   Send,
   ShieldCheck,
+  Sparkles,
+  X,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import { getGeminiApiKey } from "../utils/userSettings";
@@ -159,30 +159,27 @@ const ContextCard: React.FC<ContextCardProps> = ({
     type="button"
     onClick={onToggle}
     aria-pressed={active}
-    className={`rounded-lg border p-4 text-left transition ${
+    className={`rounded-xl border p-4 text-left transition-all duration-200 ${
       active
-        ? "border-blue-500/60 bg-blue-500/10"
-        : "border-[rgba(255,255,255,0.06)] bg-[#0d0d0d] hover:bg-[#161616]"
+        ? "border-[#c8a55e]/50 bg-[#c8a55e]/10"
+        : "border-[rgba(255,255,255,0.06)] bg-[#0d0d0d] hover:border-[rgba(255,255,255,0.12)]"
     }`}
   >
     <div className="flex items-center justify-between">
-      <Icon
-        size={22}
-        className={active ? "text-blue-400" : "text-[#555555]"}
-      />
+      <Icon size={22} className={active ? "text-[#c8a55e]" : "text-[#555555]"} />
       <span
         className={`flex h-5 w-5 items-center justify-center rounded border ${
-          active ? "border-blue-500 bg-blue-600" : "border-[#333333]"
+          active ? "border-[#c8a55e] bg-[#c8a55e]" : "border-[#333333]"
         }`}
       >
-        {active && <Check size={14} className="text-white" />}
+        {active && <Check size={14} className="text-[#0a0a0a]" />}
       </span>
     </div>
     <p className="mt-3 text-sm font-medium text-[#f5f5f5]">{title}</p>
     <p className="mt-1 text-xs leading-relaxed text-[#8a8a8a]">
       {description}
     </p>
-    {hint && <p className="mt-2 text-xs font-medium text-blue-400">{hint}</p>}
+    {hint && <p className="mt-2 text-xs font-medium text-[#c8a55e]">{hint}</p>}
   </button>
 );
 
@@ -362,11 +359,7 @@ const AIAnalysis: React.FC = () => {
     Boolean(lastUserMessage) &&
     messages[messages.length - 1]?.role === "user";
 
-  const handleToggleContext = async () => {
-    if (showContext) {
-      setShowContext(false);
-      return;
-    }
+  const openContextModal = async () => {
     if (!contextText) {
       setPhase("context");
       try {
@@ -425,21 +418,22 @@ const AIAnalysis: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {/* En-tête */}
-      <div className="rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-white">
-        <div className="mb-2 flex items-center space-x-3">
-          <Brain size={32} />
-          <h1 className="text-2xl font-bold">Conseiller IA</h1>
-          <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-medium">
-            Gemini
-          </span>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
+            Conseiller IA
+          </h1>
+          <p className="text-sm text-[#8a8a8a] mt-1">
+            Joignez vos comptes, vos lignes et votre stratégie d'épargne, puis
+            posez votre question : projet immobilier, rééquilibrage, fiscalité,
+            capacité d'épargne...
+          </p>
         </div>
-        <p className="text-blue-100">
-          Joignez vos comptes, vos lignes et votre stratégie d'épargne, puis
-          posez votre question : projet immobilier, rééquilibrage, fiscalité,
-          capacité d'épargne...
-        </p>
+        <span className="badge badge-gold self-start inline-flex items-center gap-1.5 sm:self-center">
+          <Sparkles size={12} /> Gemini
+        </span>
       </div>
 
       {/* Clé API manquante */}
@@ -452,7 +446,7 @@ const AIAnalysis: React.FC = () => {
               Renseignez votre clé API Gemini dans les{" "}
               <Link
                 to={`/settings/${currentUser}`}
-                className="font-medium underline hover:text-white"
+                className="font-medium text-[#c8a55e] underline hover:text-[#d4b06a]"
               >
                 paramètres
               </Link>{" "}
@@ -463,14 +457,12 @@ const AIAnalysis: React.FC = () => {
       )}
 
       {/* Étape 1 — données à joindre */}
-      <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#111111] p-6">
+      <div className="card">
         <div className="mb-1 flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#c8a55e] text-xs font-semibold text-[#0a0a0a]">
             1
           </span>
-          <h2 className="text-lg font-semibold text-[#f5f5f5]">
-            Données à joindre à votre question
-          </h2>
+          <h2 className="section-title">Données à joindre à votre question</h2>
         </div>
         <p className="mb-4 text-sm text-[#8a8a8a]">
           Le conseiller ne voit que ce que vous cochez. Il reçoit les montants
@@ -484,35 +476,21 @@ const AIAnalysis: React.FC = () => {
 
         {contextMeta && (
           <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-[#8a8a8a]">
-            <span className="rounded-full border border-[rgba(255,255,255,0.08)] bg-[#0d0d0d] px-3 py-1">
+            <span className="badge badge-gold">
               Contexte joint : {summarizeContext(contextMeta)}
             </span>
             <button
               type="button"
-              onClick={handleToggleContext}
-              className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300"
+              onClick={openContextModal}
+              className="inline-flex items-center gap-1 text-[#c8a55e] transition-colors hover:text-[#d4b06a]"
             >
-              {showContext ? (
-                <>
-                  Masquer les données <ChevronUp size={14} />
-                </>
-              ) : (
-                <>
-                  Voir les données envoyées <ChevronDown size={14} />
-                </>
-              )}
+              <Database size={14} /> Voir les données envoyées
             </button>
           </div>
         )}
 
-        {showContext && contextText && (
-          <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0d0d0d] p-4 text-xs leading-relaxed text-[#8a8a8a]">
-            {contextText}
-          </pre>
-        )}
-
         {selectionChanged && (
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200">
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-[#c8a55e]/30 bg-[#c8a55e]/10 p-3 text-sm text-[#e8d5ab]">
             <span>
               La conversation en cours utilise les données sélectionnées au
               départ. Lancez une nouvelle conversation pour appliquer vos
@@ -521,7 +499,7 @@ const AIAnalysis: React.FC = () => {
             <button
               type="button"
               onClick={startNewConversation}
-              className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+              className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
             >
               <RotateCcw size={14} /> Nouvelle conversation
             </button>
@@ -530,14 +508,12 @@ const AIAnalysis: React.FC = () => {
       </div>
 
       {/* Étape 2 — question */}
-      <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#111111] p-6">
+      <div className="card">
         <div className="mb-4 flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#c8a55e] text-xs font-semibold text-[#0a0a0a]">
             2
           </span>
-          <h2 className="text-lg font-semibold text-[#f5f5f5]">
-            Votre question
-          </h2>
+          <h2 className="section-title">Votre question</h2>
         </div>
 
         <textarea
@@ -551,7 +527,7 @@ const AIAnalysis: React.FC = () => {
           }}
           rows={3}
           placeholder="Ex. : voici mon patrimoine, j'aimerais acheter une maison d'ici 10 ans. Comment me conseilles-tu d'agir ?"
-          className="w-full resize-y rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#0d0d0d] px-4 py-3 text-sm text-[#f5f5f5] placeholder-[#555555] focus:border-blue-500/60 focus:outline-none"
+          className="input resize-y"
         />
 
         <div className="mt-3 flex flex-wrap gap-2">
@@ -560,7 +536,7 @@ const AIAnalysis: React.FC = () => {
               key={preset}
               type="button"
               onClick={() => setQuestion(preset)}
-              className="rounded-full border border-[rgba(255,255,255,0.08)] bg-[#0d0d0d] px-3 py-1.5 text-xs text-[#8a8a8a] transition hover:border-blue-500/40 hover:text-[#f5f5f5]"
+              className="rounded-full border border-[rgba(255,255,255,0.08)] bg-[#0d0d0d] px-3 py-1.5 text-xs text-[#8a8a8a] transition hover:border-[#c8a55e]/40 hover:text-[#f5f5f5]"
             >
               {preset}
             </button>
@@ -572,18 +548,18 @@ const AIAnalysis: React.FC = () => {
             type="button"
             onClick={() => sendQuestion(question, true)}
             disabled={loading || !question.trim() || !hasApiKey}
-            className="inline-flex items-center rounded-md bg-gradient-to-r from-blue-600 to-purple-600 px-5 py-2.5 text-sm font-medium text-white transition hover:from-blue-700 hover:to-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-primary inline-flex items-center gap-2 disabled:pointer-events-none disabled:opacity-50"
           >
             {loading ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 {phase === "context"
                   ? "Préparation de vos données..."
                   : "Le conseiller réfléchit..."}
               </>
             ) : (
               <>
-                <Send className="mr-2 h-4 w-4" />
+                <Send className="h-4 w-4" />
                 Demander conseil
               </>
             )}
@@ -604,8 +580,10 @@ const AIAnalysis: React.FC = () => {
           {canRetry && !loading && (
             <button
               type="button"
-              onClick={() => lastUserMessage && sendQuestion(lastUserMessage.text, false)}
-              className="inline-flex items-center gap-1 rounded-md border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-500/20"
+              onClick={() =>
+                lastUserMessage && sendQuestion(lastUserMessage.text, false)
+              }
+              className="btn-secondary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
             >
               <RotateCcw size={14} /> Réessayer
             </button>
@@ -617,13 +595,11 @@ const AIAnalysis: React.FC = () => {
       {messages.length > 0 ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-[#f5f5f5]">
-              Conversation
-            </h2>
+            <h2 className="section-title">Conversation</h2>
             <button
               type="button"
               onClick={startNewConversation}
-              className="inline-flex items-center gap-1 text-xs text-[#8a8a8a] hover:text-[#f5f5f5]"
+              className="inline-flex items-center gap-1 text-xs text-[#8a8a8a] transition-colors hover:text-[#c8a55e]"
             >
               <RotateCcw size={14} /> Nouvelle conversation
             </button>
@@ -633,23 +609,20 @@ const AIAnalysis: React.FC = () => {
             {messages.map((message, index) =>
               message.role === "user" ? (
                 <div key={index} className="flex justify-end">
-                  <div className="max-w-[85%] rounded-lg bg-blue-600/90 px-4 py-3 text-sm text-white">
+                  <div className="max-w-[85%] rounded-xl bg-gradient-to-br from-[#c8a55e] to-[#b8944e] px-4 py-3 text-sm text-[#0a0a0a]">
                     {message.text}
                   </div>
                 </div>
               ) : (
-                <div
-                  key={index}
-                  className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#111111] p-5"
-                >
+                <div key={index} className="card">
                   <div className="mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-medium text-blue-400">
-                      <Brain size={16} /> Conseiller IA
+                    <div className="flex items-center gap-2 text-xs font-medium text-[#c8a55e]">
+                      <Sparkles size={16} /> Conseiller IA
                     </div>
                     <button
                       type="button"
                       onClick={() => handleCopy(message.text, index)}
-                      className="inline-flex items-center gap-1 text-xs text-[#8a8a8a] hover:text-[#f5f5f5]"
+                      className="inline-flex items-center gap-1 text-xs text-[#8a8a8a] transition-colors hover:text-[#c8a55e]"
                     >
                       {copiedIndex === index ? (
                         <>
@@ -668,8 +641,8 @@ const AIAnalysis: React.FC = () => {
             )}
 
             {loading && (
-              <div className="flex items-center gap-3 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#111111] p-5 text-sm text-[#8a8a8a]">
-                <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+              <div className="card flex items-center gap-3 text-sm text-[#8a8a8a]">
+                <Loader2 className="h-4 w-4 animate-spin text-[#c8a55e]" />
                 {phase === "context"
                   ? "Préparation de vos données patrimoniales..."
                   : "Le conseiller analyse votre situation..."}
@@ -679,9 +652,9 @@ const AIAnalysis: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#111111] p-6">
-          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-[#f5f5f5]">
-            <ShieldCheck size={20} className="text-blue-400" />
+        <div className="card">
+          <h2 className="section-title mb-3 flex items-center gap-2">
+            <ShieldCheck size={20} className="text-[#c8a55e]" />
             Comment ça marche ?
           </h2>
           <ul className="space-y-2 text-sm text-[#8a8a8a]">
@@ -703,18 +676,42 @@ const AIAnalysis: React.FC = () => {
         </div>
       )}
 
-      {/* Note de prudence */}
-      <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#111111] p-4">
-        <div className="flex items-start gap-3">
-          <Brain className="mt-0.5 h-5 w-5 shrink-0 text-blue-400" />
-          <p className="text-xs leading-relaxed text-[#8a8a8a]">
-            Les réponses sont générées par Gemini à partir des données que vous
-            joignez (aucune donnée n'est envoyée tant que vous ne posez pas de
-            question). Elles constituent une aide à la décision et ne
-            remplacent pas un conseiller financier réglementé.
-          </p>
+      {/* Modale — données envoyées au conseiller */}
+      {showContext && contextText && (
+        <div className="modal-overlay" onClick={() => setShowContext(false)}>
+          <div
+            className="modal-content max-w-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="section-title flex items-center gap-2">
+                <Database size={18} className="text-[#c8a55e]" />
+                Données envoyées au conseiller
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowContext(false)}
+                className="text-[#8a8a8a] transition-colors hover:text-[#f5f5f5]"
+                aria-label="Fermer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0d0d0d] p-4 text-xs leading-relaxed text-[#8a8a8a]">
+              {contextText}
+            </pre>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowContext(false)}
+                className="btn-secondary"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
