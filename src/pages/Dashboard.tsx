@@ -14,18 +14,13 @@ import {
   Tooltip,
 } from "recharts";
 import {
-  TrendingUp,
   BarChart3,
-  Briefcase,
   ArrowUpRight,
   ArrowDownRight,
   Search,
   Landmark,
-  Wallet as WalletIcon,
   Coins,
-  ShieldCheck,
   ArrowRight,
-  Building2,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -1079,28 +1074,14 @@ const Dashboard: React.FC = () => {
 
   // Onglets des enveloppes (hors « Vue Globale », désormais toujours affichée)
   const navigationTabs = useMemo(() => {
-    return portfolioEnvelopes.map((env) => {
-      let icon = Briefcase;
-      const upper = (env.label || "").toUpperCase();
-      if (upper.includes("PEA")) icon = TrendingUp;
-      else if (upper.includes("PEE")) icon = Building2;
-      else if (upper.includes("ASSURANCE") || upper.includes("VIE"))
-        icon = ShieldCheck;
-      else if (upper.includes("PER") || upper.includes("RETRAITE"))
-        icon = WalletIcon;
-      else if (env.kind === "bank" || env.id === "bank") icon = Landmark;
-      else if (env.kind === "crypto" || env.id === "crypto") icon = Coins;
-
-      return {
-        id: env.id,
-        label: env.label,
-        kind: env.kind,
-        description: env.description,
-        totalValue: env.totalValue,
-        icon,
-        color: env.color,
-      };
-    });
+    return portfolioEnvelopes.map((env) => ({
+      id: env.id,
+      label: env.label,
+      kind: env.kind,
+      description: env.description,
+      totalValue: env.totalValue,
+      color: env.color,
+    }));
   }, [portfolioEnvelopes]);
 
   const selectedEnvelope = useMemo(() => {
@@ -1725,14 +1706,6 @@ const Dashboard: React.FC = () => {
                       totalWealthAll > 0
                         ? (env.totalValue / totalWealthAll) * 100
                         : 0;
-                    let IconComponent = Briefcase;
-                    const upper = (env.label || "").toUpperCase();
-                    if (upper.includes("PEA")) IconComponent = TrendingUp;
-                    else if (upper.includes("PEE")) IconComponent = Building2;
-                    else if (env.kind === "bank" || env.id === "bank")
-                      IconComponent = Landmark;
-                    else if (env.kind === "crypto" || env.id === "crypto")
-                      IconComponent = Coins;
 
                     return (
                       <div
@@ -1742,20 +1715,9 @@ const Dashboard: React.FC = () => {
                       >
                         <div>
                           <div className="flex items-center justify-between gap-2 mb-2">
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="w-6 h-6 rounded-md flex items-center justify-center text-xs"
-                                style={{
-                                  backgroundColor: `${env.color}20`,
-                                  color: env.color,
-                                }}
-                              >
-                                <IconComponent className="h-3.5 w-3.5" />
-                              </div>
-                              <h4 className="font-bold text-[#f5f5f5] text-sm group-hover:text-[#c8a55e] transition-colors">
-                                {env.label}
-                              </h4>
-                            </div>
+                            <h4 className="font-bold text-[#f5f5f5] text-sm group-hover:text-[#c8a55e] transition-colors">
+                              {env.label}
+                            </h4>
                             <span className="text-[11px] px-2 py-0.5 rounded-full bg-[rgba(255,255,255,0.04)] text-[#8a8a8a] font-medium">
                               {formatPercent(share, 1)}
                             </span>
@@ -1814,131 +1776,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Bento Row 3: Graphiques de Répartition (2 Donut Charts) */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Donut 1 : Répartition par Enveloppe */}
-                <div className="card">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h4 className="text-base font-semibold text-[#f5f5f5]">
-                        Répartition par Portefeuille / Enveloppe
-                      </h4>
-                      <p className="text-xs text-[#8a8a8a]">
-                        Poids de chaque compte dans le patrimoine global
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="relative h-64 flex items-center justify-center">
-                    {(() => {
-                      const envPieData = portfolioEnvelopes
-                        .filter((e) => e.totalValue > 0)
-                        .map((e) => ({
-                          name: e.label,
-                          value: e.totalValue,
-                          color: e.color,
-                        }));
-                      const pieData =
-                        envPieData.length > 0
-                          ? envPieData
-                          : [
-                              {
-                                name: "Aucune donnée",
-                                value: 1,
-                                color: isDark ? "#262626" : "#e5e7eb",
-                              },
-                            ];
-
-                      return (
-                        <>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie
-                                data={pieData}
-                                dataKey="value"
-                                nameKey="name"
-                                innerRadius={65}
-                                outerRadius={95}
-                                paddingAngle={envPieData.length > 1 ? 3 : 0}
-                                stroke="none"
-                              >
-                                {pieData.map((entry, index) => (
-                                  <Cell
-                                    key={`cell-env-${index}`}
-                                    fill={entry.color}
-                                  />
-                                ))}
-                              </Pie>
-                              <Tooltip
-                                formatter={(val: any, name: any) => {
-                                  const num = Number(val || 0);
-                                  const pct =
-                                    totalWealthAll > 0
-                                      ? ` (${((num / totalWealthAll) * 100).toFixed(1)}%)`
-                                      : "";
-                                  return [`${formatCurrency(num)}${pct}`, name || "Valeur"];
-                                }}
-                                contentStyle={{
-                                  backgroundColor: isDark
-                                    ? "#161616"
-                                    : "#ffffff",
-                                  borderColor: isDark
-                                    ? "rgba(255,255,255,0.08)"
-                                    : "rgba(0,0,0,0.08)",
-                                  borderRadius: 10,
-                                  color: isDark ? "#f5f5f5" : "#0f172a",
-                                  boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
-                                }}
-                                itemStyle={{ color: isDark ? "#f5f5f5" : "#0f172a" }}
-                                labelStyle={{ color: isDark ? "#f5f5f5" : "#0f172a" }}
-                              />
-                            </PieChart>
-                          </ResponsiveContainer>
-                          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                            <span className="text-base font-bold text-[#f5f5f5]">
-                              {formatCurrency(totalWealthAll)}
-                            </span>
-                            <span className="text-[11px] text-[#8a8a8a]">
-                              Total Net
-                            </span>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Légende */}
-                  <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)]">
-                    {portfolioEnvelopes.map((e) => {
-                      const share =
-                        totalWealthAll > 0
-                          ? (e.totalValue / totalWealthAll) * 100
-                          : 0;
-                      return (
-                        <div
-                          key={e.id}
-                          className="flex items-center justify-between text-xs cursor-pointer hover:opacity-80 transition-opacity"
-                          onClick={() => openEnvelopeDetails(e.id)}
-                        >
-                          <div className="flex items-center gap-1.5 truncate pr-1">
-                            <span
-                              className="w-2 h-2 rounded-full shrink-0"
-                              style={{ backgroundColor: e.color }}
-                            />
-                            <span className="text-[#8a8a8a] truncate">
-                              {e.label}
-                            </span>
-                          </div>
-                          <span className="font-semibold text-[#f5f5f5] shrink-0">
-                            {formatPercent(share, 1)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Donut 2 : Répartition par Classe d'Actifs */}
+              {/* Bento Row 3: Répartition par Classe d'Actifs */}
                 <div className="card">
                   <div className="flex items-center justify-between mb-4">
                     <div>
@@ -2113,7 +1951,6 @@ const Dashboard: React.FC = () => {
                     })}
                   </div>
                 </div>
-              </div>
 
               {/* Bento Row 4: BarChart PnL Portefeuilles & Podiums Gagnants/Perdants */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2574,7 +2411,6 @@ const Dashboard: React.FC = () => {
                 <div className="border-b border-[rgba(255,255,255,0.06)]">
                   <nav className="-mb-px flex space-x-4 sm:space-x-8 overflow-x-auto scrollbar-none">
                     {navigationTabs.map((tab) => {
-                      const Icon = tab.icon;
                       const isActive = selectedPortfolio === tab.id;
                       return (
                         <button
@@ -2587,15 +2423,6 @@ const Dashboard: React.FC = () => {
                               : "border-transparent text-[#8a8a8a] hover:text-[#f5f5f5] hover:border-[rgba(255,255,255,0.1)]"
                           }`}
                         >
-                          <div
-                            className={`p-1.5 rounded-lg transition-colors ${
-                              isActive
-                                ? "bg-[#c8a55e]/15 text-[#c8a55e]"
-                                : "bg-[rgba(255,255,255,0.03)] text-[#8a8a8a] group-hover:text-[#f5f5f5]"
-                            }`}
-                          >
-                            <Icon className="h-4 w-4" />
-                          </div>
                           <div className="text-left">
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-sm">
