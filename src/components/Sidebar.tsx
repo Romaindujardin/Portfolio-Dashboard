@@ -250,7 +250,7 @@ const Sidebar: React.FC = () => {
                           onClick={() => setIsMobileOpen(false)}
                           className={`flex items-center py-2 pl-[21px] pr-4 rounded-lg text-sm font-medium transition-all duration-200 ${
                             isChildActive
-                              ? "text-[#f5f5f5] bg-[rgba(255,255,255,0.08)]"
+                              ? "text-[#c8a55e]"
                               : "text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)]"
                           }`}
                         >

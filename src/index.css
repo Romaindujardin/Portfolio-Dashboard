@@ -632,11 +632,6 @@ html:not(.dark) .bg-\[rgba\(255\,255\,255\,0\.06\)\] {
   background-color: rgba(0, 0, 0, 0.06) !important;
 }
 
-/* Lien enfant actif de la sidebar (Stratégie) — teinte or comme le parent */
-html:not(.dark) .bg-\[rgba\(255\,255\,255\,0\.08\)\] {
-  background-color: rgba(200, 165, 94, 0.16) !important;
-}
-
 html:not(.dark) .hover\:bg-\[rgba\(255\,255\,255\,0\.02\)\]:hover {
   background-color: rgba(0, 0, 0, 0.02) !important;
 }
