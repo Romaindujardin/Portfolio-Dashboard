@@ -3531,7 +3531,7 @@ const Banking: React.FC = () => {
                           return (
                             <tr
                               key={rowKey || getLegacyIndexBankRowId(row)}
-                              className={`even:bg-primary-50/40 dark:even:bg-primary-950/25 hover:bg-primary-50/70 dark:hover:bg-primary-900/30 transition-colors ${
+                              className={`even:bg-[rgba(200,165,94,0.10)] dark:even:bg-[rgba(200,165,94,0.07)] hover:bg-[rgba(200,165,94,0.14)] dark:hover:bg-[rgba(200,165,94,0.11)] transition-colors ${
                                 isInTricount ? "bg-emerald-50/30 dark:bg-emerald-950/15" : ""
                               }`}
                             >
