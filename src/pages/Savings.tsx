@@ -643,7 +643,7 @@ export const Savings: React.FC = () => {
                     {p2Name} : {formatEur(totalP2Placed)}
                   </span>
                 </div>
-                <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden flex">
+                <div className="w-full bg-[#484848] h-2 rounded-full overflow-hidden flex">
                   <div
                     style={{
                       width: `${totalAllTimePlaced > 0 ? (totalP1Placed / totalAllTimePlaced) * 100 : 50}%`,
@@ -1156,7 +1156,7 @@ export const Savings: React.FC = () => {
                             {p2Name} : {formatEur(poc.p2Placed)}
                           </span>
                         </div>
-                        <div className="w-full bg-[#555555] h-1.5 rounded-full overflow-hidden flex">
+                        <div className="w-full bg-[#484848] h-1.5 rounded-full overflow-hidden flex">
                           <div
                             style={{
                               width: `${(poc.p1Placed / poc.totalRealPlaced) * 100}%`,
@@ -1186,7 +1186,7 @@ export const Savings: React.FC = () => {
                             {progressPct}%
                           </span>
                         </div>
-                        <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
+                        <div className="w-full bg-[#484848] h-2 rounded-full overflow-hidden">
                           <div
                             className="h-full rounded-full transition-all duration-500"
                             style={{
@@ -1235,7 +1235,7 @@ export const Savings: React.FC = () => {
                                     : `${formatEur(subCapital)} · ${formatEur(sub.amount)} / mois`}
                                 </span>
                               </div>
-                              <div className="h-1.5 rounded-full bg-[#555555] overflow-hidden">
+                              <div className="h-1.5 rounded-full bg-[#484848] overflow-hidden">
                                 <div
                                   className="h-full rounded-full transition-all"
                                   style={{

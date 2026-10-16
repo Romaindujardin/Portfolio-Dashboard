@@ -604,8 +604,8 @@ html:not(.dark) .text-\[\#555555\] {
   color: #94a3b8 !important;
 }
 
-html:not(.dark) .bg-\[\#555555\] {
-  background-color: #94a3b8 !important;
+html:not(.dark) .bg-\[\#484848\] {
+  background-color: #acb6c6 !important;
 }
 
 html:not(.dark) .border-\[rgba\(255\,255\,255\,0\.04\)\],

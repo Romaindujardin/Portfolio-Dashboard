@@ -1575,7 +1575,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
               )}
             </p>
             <div className="flex items-center gap-2 mt-1">
-              <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
+              <div className="w-full bg-[#484848] h-2 rounded-full overflow-hidden">
                 <div
                   className={`h-full transition-all duration-300 ${
                     (viewFilter === "all"
@@ -3668,7 +3668,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                         %
                                       </span>
                                     </div>
-                                    <div className="h-1.5 w-full bg-[#555555] rounded-full overflow-hidden">
+                                    <div className="h-1.5 w-full bg-[#484848] rounded-full overflow-hidden">
                                       <div
                                         className="h-full rounded-full transition-all duration-300"
                                         style={{
@@ -3697,7 +3697,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                         %
                                       </span>
                                     </div>
-                                    <div className="h-1.5 w-full bg-[#555555] rounded-full overflow-hidden">
+                                    <div className="h-1.5 w-full bg-[#484848] rounded-full overflow-hidden">
                                       <div
                                         className="h-full rounded-full transition-all duration-300"
                                         style={{
@@ -3711,7 +3711,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                               </div>
                             ) : (
                               /* Stacked mini progress bar */
-                              <div className="h-2 w-full bg-[#555555] rounded-full overflow-hidden flex">
+                              <div className="h-2 w-full bg-[#484848] rounded-full overflow-hidden flex">
                                 {p.subItems!.map((sub, sIdx) => {
                                   const subPct =
                                     monthlyEur > 0
@@ -3930,7 +3930,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                     %
                                   </span>
                                 </div>
-                                <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
+                                <div className="w-full bg-[#484848] h-2 rounded-full overflow-hidden">
                                   <div
                                     className="h-full rounded-full transition-all duration-300"
                                     style={{
@@ -3984,7 +3984,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                     %
                                   </span>
                                 </div>
-                                <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
+                                <div className="w-full bg-[#484848] h-2 rounded-full overflow-hidden">
                                   <div
                                     className="h-full rounded-full transition-all duration-300"
                                     style={{
@@ -4016,7 +4016,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                 {progressPct!.toFixed(1)}%
                               </span>
                             </div>
-                            <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
+                            <div className="w-full bg-[#484848] h-2 rounded-full overflow-hidden">
                               <div
                                 className="h-full rounded-full transition-all duration-300"
                                 style={{
