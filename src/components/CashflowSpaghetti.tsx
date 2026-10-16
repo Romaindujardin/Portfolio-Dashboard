@@ -463,7 +463,7 @@ export default function CashflowSpaghetti({
 
       {tooltip.open && (
         <div
-          className="pointer-events-none absolute z-20 rounded-md border border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/60 bg-white/95 bg-[#0a0a0a]/95  px-3 py-2"
+          className="pointer-events-none absolute z-20 rounded-md border border-[rgba(255,255,255,0.06)] bg-white/95 dark:bg-[#0a0a0a]/95 px-3 py-2"
           style={{
             left: Math.max(8, Math.min((width || 0) - 8, tooltip.x + 12)),
             top: Math.max(8, Math.min(innerHeight - 8, tooltip.y + 12)),

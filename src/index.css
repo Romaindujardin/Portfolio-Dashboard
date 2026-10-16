@@ -40,7 +40,13 @@
 
 @layer base {
   * {
-    @apply border-[rgba(255,255,255,0.06)];
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+
+  /* Bordure par défaut en mode clair. :where() garde une spécificité nulle pour que
+     les utilitaires de bordure (ex. border-[#c8a55e]) restent prioritaires. */
+  :where(html:not(.dark)) * {
+    border-color: rgba(0, 0, 0, 0.07);
   }
 
   html {
@@ -57,7 +63,8 @@
   }
 
   body {
-    @apply bg-[#0a0a0a] text-[#f5f5f5] antialiased;
+    background-color: #0a0a0a;
+    color: #f5f5f5;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -597,9 +604,58 @@ html:not(.dark) .text-\[\#555555\] {
   color: #94a3b8 !important;
 }
 
+html:not(.dark) .border-\[rgba\(255\,255\,255\,0\.04\)\],
+html:not(.dark) .border-\[rgba\(255\,255\,255\,0\.05\)\],
 html:not(.dark) .border-\[rgba\(255\,255\,255\,0\.06\)\],
 html:not(.dark) .border-\[rgba\(255\,255\,255\,0\.08\)\] {
   border-color: rgba(0, 0, 0, 0.07) !important;
+}
+
+/* Fonds translucides blancs (invisibles sur blanc) — miroir en noir clair */
+html:not(.dark) .bg-\[rgba\(255\,255\,255\,0\.02\)\] {
+  background-color: rgba(0, 0, 0, 0.02) !important;
+}
+
+html:not(.dark) .bg-\[rgba\(255\,255\,255\,0\.03\)\] {
+  background-color: rgba(0, 0, 0, 0.03) !important;
+}
+
+html:not(.dark) .bg-\[rgba\(255\,255\,255\,0\.04\)\] {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+html:not(.dark) .bg-\[rgba\(255\,255\,255\,0\.06\)\] {
+  background-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Lien enfant actif de la sidebar (Stratégie) — teinte or comme le parent */
+html:not(.dark) .bg-\[rgba\(255\,255\,255\,0\.08\)\] {
+  background-color: rgba(200, 165, 94, 0.16) !important;
+}
+
+html:not(.dark) .hover\:bg-\[rgba\(255\,255\,255\,0\.02\)\]:hover {
+  background-color: rgba(0, 0, 0, 0.02) !important;
+}
+
+html:not(.dark) .hover\:bg-\[rgba\(255\,255\,255\,0\.03\)\]:hover {
+  background-color: rgba(0, 0, 0, 0.03) !important;
+}
+
+html:not(.dark) .hover\:bg-\[rgba\(255\,255\,255\,0\.04\)\]:hover {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+html:not(.dark) .hover\:bg-\[rgba\(255\,255\,255\,0\.06\)\]:hover {
+  background-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Hovers sombres hérités (bg solides) — équivalent clair subtil */
+html:not(.dark) .hover\:bg-\[\#1a1a1a\]:hover,
+html:not(.dark) .hover\:bg-\[\#181818\]:hover,
+html:not(.dark) .hover\:bg-\[\#0a0a0a\]:hover,
+html:not(.dark) .hover\:bg-\[\#0a0a0a\]\/80:hover,
+html:not(.dark) .hover\:bg-\[\#1a1a1a\]\/60:hover {
+  background-color: rgba(0, 0, 0, 0.04) !important;
 }
 
 html:not(.dark) .table-row:hover {

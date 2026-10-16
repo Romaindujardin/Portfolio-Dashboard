@@ -1131,7 +1131,7 @@ export const Savings: React.FC = () => {
                     </div>
 
                     {/* Total réel placé */}
-                    <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)]/60">
+                    <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)]">
                       <div className="text-xs text-[#555555] uppercase tracking-wider font-semibold">
                         Capital suivi
                       </div>
@@ -1199,7 +1199,7 @@ export const Savings: React.FC = () => {
                     )}
 
                     {poc.subItems && poc.subItems.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-[rgba(255,255,255,0.06)]/60 space-y-2">
+                      <div className="mt-3 pt-3 border-t border-[rgba(255,255,255,0.06)] space-y-2">
                         <div className="text-[11px] font-semibold uppercase tracking-wider text-[#555555]">
                           Sous-poches
                         </div>
@@ -1262,7 +1262,7 @@ export const Savings: React.FC = () => {
                   </div>
 
                   {/* Actions / Déplier l'historique */}
-                  <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)]/60 flex items-center justify-between">
+                  <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)] flex items-center justify-between">
                     <span className="text-xs text-[#555555]">
                       {poc.placementsCount} versement
                       {poc.placementsCount > 1 ? "s" : ""}
@@ -1409,7 +1409,7 @@ export const Savings: React.FC = () => {
                   return (
                     <tr
                       key={item.id}
-                      className="hover:bg-[rgba(255,255,255,0.04)]/40 transition"
+                      className="hover:bg-[rgba(255,255,255,0.04)] transition"
                     >
                       <td className="py-3 px-3 text-[#555555] whitespace-nowrap">
                         {item.date}

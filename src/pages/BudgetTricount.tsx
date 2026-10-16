@@ -1016,7 +1016,7 @@ const BudgetTricount: React.FC = () => {
                       </div>
 
                       {displayedIncomes.length === 0 ? (
-                        <div className="py-4 text-center text-xs text-[#555555] bg-white/50 bg-[#0a0a0a]/20 rounded-lg border border-dashed border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)]">
+                        <div className="py-4 text-center text-xs text-[#555555] bg-white/50 dark:bg-[#0a0a0a]/20 rounded-lg border border-dashed border-[rgba(255,255,255,0.06)]">
                           Aucun revenu enregistré pour ce mois.
                         </div>
                       ) : (
@@ -1391,7 +1391,7 @@ const BudgetTricount: React.FC = () => {
                       )}
 
                       {pocketExpenses.length === 0 ? (
-                        <div className="py-4 text-center text-xs text-[#555555] bg-white/50 bg-[#0a0a0a]/20 rounded-lg border border-dashed border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)]">
+                        <div className="py-4 text-center text-xs text-[#555555] bg-white/50 dark:bg-[#0a0a0a]/20 rounded-lg border border-dashed border-[rgba(255,255,255,0.06)]">
                           Aucune dépense enregistrée dans cette poche pour ce
                           mois.
                         </div>
@@ -1718,7 +1718,7 @@ const BudgetTricount: React.FC = () => {
                     {!isSoloMode && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pb-1">
                         {/* Personne 1 */}
-                        <div className="p-2 rounded-lg bg-white/70 bg-[#0a0a0a]/30 border border-[rgba(255,255,255,0.06)]/70 border-[rgba(255,255,255,0.06)] flex items-center justify-between text-xs">
+                        <div className="p-2 rounded-lg bg-white/70 dark:bg-[#0a0a0a]/30 border border-[rgba(255,255,255,0.06)] flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             <span
                               className="font-bold px-1.5 py-0.5 rounded text-[11px]"
@@ -1778,7 +1778,7 @@ const BudgetTricount: React.FC = () => {
                         </div>
 
                         {/* Personne 2 */}
-                        <div className="p-2 rounded-lg bg-white/70 bg-[#0a0a0a]/30 border border-[rgba(255,255,255,0.06)]/70 border-[rgba(255,255,255,0.06)] flex items-center justify-between text-xs">
+                        <div className="p-2 rounded-lg bg-white/70 dark:bg-[#0a0a0a]/30 border border-[rgba(255,255,255,0.06)] flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             <span
                               className="font-bold px-1.5 py-0.5 rounded text-[11px]"
@@ -1916,7 +1916,7 @@ const BudgetTricount: React.FC = () => {
                         </div>
 
                         {placementOps.length === 0 ? (
-                          <div className="py-4 text-center text-xs text-[#555555] bg-white/50 bg-[#0a0a0a]/20 rounded-lg border border-dashed border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)]">
+                          <div className="py-4 text-center text-xs text-[#555555] bg-white/50 dark:bg-[#0a0a0a]/20 rounded-lg border border-dashed border-[rgba(255,255,255,0.06)]">
                             Aucun virement ou placement enregistré dans cette
                             poche pour ce mois.
                           </div>
