@@ -243,7 +243,7 @@ const SavingsProjectionPanel: React.FC<SavingsProjectionPanelProps> = ({
                                 : goal.projectedDate || "Non défini"}
                           </span>
                         </div>
-                        <div className="h-2 rounded-full bg-[#1a1a1a] bg-[#161616] overflow-hidden">
+                        <div className="h-2 rounded-full bg-[#555555] overflow-hidden">
                           <div className="h-full rounded-full bg-emerald-500" style={{ width: `${progress}%` }} />
                         </div>
                         <div className="flex justify-between text-[11px] text-[#555555]">

@@ -1575,7 +1575,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
               )}
             </p>
             <div className="flex items-center gap-2 mt-1">
-              <div className="w-full bg-[#1a1a1a] bg-[#1a1a1a] h-2 rounded-full overflow-hidden">
+              <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
                 <div
                   className={`h-full transition-all duration-300 ${
                     (viewFilter === "all"
@@ -1725,7 +1725,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                     className="w-3 h-3 rounded-full"
                     style={p1Theme.dotStyle}
                   />
-                  <h4 className="font-bold text-sm text-gray-950 text-[#f5f5f5]">
+                  <h4 className="font-bold text-sm text-[#f5f5f5]">
                     {p1.name}
                   </h4>
                 </div>
@@ -1784,7 +1784,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                     className="w-3 h-3 rounded-full"
                     style={p2Theme.dotStyle}
                   />
-                  <h4 className="font-bold text-sm text-gray-950 text-[#f5f5f5]">
+                  <h4 className="font-bold text-sm text-[#f5f5f5]">
                     {p2.name}
                   </h4>
                 </div>
@@ -3668,7 +3668,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                         %
                                       </span>
                                     </div>
-                                    <div className="h-1.5 w-full bg-[#1a1a1a] bg-[#1a1a1a] rounded-full overflow-hidden">
+                                    <div className="h-1.5 w-full bg-[#555555] rounded-full overflow-hidden">
                                       <div
                                         className="h-full rounded-full transition-all duration-300"
                                         style={{
@@ -3697,7 +3697,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                         %
                                       </span>
                                     </div>
-                                    <div className="h-1.5 w-full bg-[#1a1a1a] bg-[#1a1a1a] rounded-full overflow-hidden">
+                                    <div className="h-1.5 w-full bg-[#555555] rounded-full overflow-hidden">
                                       <div
                                         className="h-full rounded-full transition-all duration-300"
                                         style={{
@@ -3711,7 +3711,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                               </div>
                             ) : (
                               /* Stacked mini progress bar */
-                              <div className="h-2 w-full bg-[#1a1a1a] bg-[#1a1a1a] rounded-full overflow-hidden flex">
+                              <div className="h-2 w-full bg-[#555555] rounded-full overflow-hidden flex">
                                 {p.subItems!.map((sub, sIdx) => {
                                   const subPct =
                                     monthlyEur > 0
@@ -3930,7 +3930,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                     %
                                   </span>
                                 </div>
-                                <div className="w-full bg-[#1a1a1a] bg-[#1a1a1a] h-2 rounded-full overflow-hidden">
+                                <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
                                   <div
                                     className="h-full rounded-full transition-all duration-300"
                                     style={{
@@ -3984,7 +3984,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                     %
                                   </span>
                                 </div>
-                                <div className="w-full bg-[#1a1a1a] bg-[#1a1a1a] h-2 rounded-full overflow-hidden">
+                                <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
                                   <div
                                     className="h-full rounded-full transition-all duration-300"
                                     style={{
@@ -4016,7 +4016,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                 {progressPct!.toFixed(1)}%
                               </span>
                             </div>
-                            <div className="w-full bg-[#1a1a1a] bg-[#1a1a1a] h-2 rounded-full overflow-hidden">
+                            <div className="w-full bg-[#555555] h-2 rounded-full overflow-hidden">
                               <div
                                 className="h-full rounded-full transition-all duration-300"
                                 style={{
