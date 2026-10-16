@@ -1672,20 +1672,21 @@ const Banking: React.FC = () => {
     loadSelected();
     setPage(1);
     setGlobalFilter("");
-    // default sort when possible
-    const headerCandidates = ["dateVal", "dateOp"];
-    const found = headerCandidates.find((h) =>
-      Object.values(csvCache).some((txt) => txt.includes(h)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUploadIds, currentUser]);
+
+  // Tri par défaut dès que le contenu CSV est disponible :
+  // dépenses les plus récentes en premier (colonne de date décroissante).
+  useEffect(() => {
+    if (sortKey || selectedUploadIds.length === 0) return;
+    const found = ["dateVal", "dateOp"].find((h) =>
+      selectedUploadIds.some((id) => (csvCache[id] || "").includes(h)),
     );
     if (found) {
       setSortKey(found);
-      setSortDir("asc");
-    } else {
-      setSortKey(null);
-      setSortDir("asc");
+      setSortDir("desc");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUploadIds, currentUser]);
+  }, [csvCache, selectedUploadIds, sortKey]);
 
   const merged = useMemo(() => {
     if (selectedUploadIds.length === 0)
@@ -2091,7 +2092,8 @@ const Banking: React.FC = () => {
   }, [merged.rows, globalFilter, displayHeaders]);
 
   const sortedRows = useMemo(() => {
-    if (!sortKey) return filteredRows;
+    // Sans tri explicite : ordre du fichier inversé (plus récentes en premier)
+    if (!sortKey) return [...filteredRows].reverse();
     const key = sortKey;
     const dir = sortDir === "asc" ? 1 : -1;
 
