@@ -1998,7 +1998,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                   return (
                     <div
                       key={inc.id}
-                      className="flex items-center justify-between p-3 rounded-xl bg-[#0a0a0a]/70 bg-[#161616]/40 transition"
+                      className="flex items-center justify-between p-3 rounded-xl bg-[#161616] transition"
                     >
                       <div>
                         <div className="flex items-center gap-2">
@@ -3118,7 +3118,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
 
                 {/* Déjà épargné, Objectif, Rendement, Couleur, Notes */}
                 {pocketOwnership === "dossier" ? (
-                  <div className="space-y-3 p-4 rounded-xl bg-[#1a1a1a]/70 bg-[#161616]/40 border border-[rgba(255,255,255,0.06)]">
+                  <div className="space-y-3 p-4 rounded-xl bg-[#161616] border border-[rgba(255,255,255,0.06)]">
                     <h5 className="text-xs font-bold text-[#f5f5f5]">
                       Capitaux et Objectifs individuels du Dossier
                     </h5>
@@ -3423,8 +3423,8 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                     key={p.id}
                     className={`p-4 rounded-xl border transition-all ${
                       isDimmed
-                        ? "opacity-45 bg-[#0a0a0a]/40 dark:bg-[#161616]/20 border-dashed border-[rgba(255,255,255,0.06)]"
-                        : "border-[rgba(255,255,255,0.06)] bg-[#0a0a0a]/50 dark:bg-[#161616] hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]"
+                        ? "opacity-45 bg-[#161616] border-dashed border-[rgba(255,255,255,0.06)]"
+                        : "border-[rgba(255,255,255,0.06)] bg-[#161616] hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]"
                     }`}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3811,7 +3811,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                 return (
                                   <div
                                     key={sub.id}
-                                    className="flex items-center justify-between p-2 rounded-lg bg-[#111111] bg-[#161616] border border-[rgba(255,255,255,0.06)]"
+                                    className="flex items-center justify-between p-2 rounded-lg bg-[#161616] border border-[rgba(255,255,255,0.06)]"
                                   >
                                     <div className="flex items-center gap-1.5">
                                       <span

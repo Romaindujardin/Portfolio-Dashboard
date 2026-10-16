@@ -903,7 +903,7 @@ const BudgetTricount: React.FC = () => {
                 .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
               return (
-                <div className="p-3.5 rounded-xl border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] bg-[#0a0a0a]/50 dark:bg-[#161616] space-y-2 transition-all hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]">
+                <div className="p-3.5 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#161616] space-y-2 transition-all hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]">
                   {/* Ligne d'en-tête cliquable */}
                   <div
                     className="flex items-center justify-between cursor-pointer select-none"
@@ -1220,7 +1220,7 @@ const BudgetTricount: React.FC = () => {
               return (
                 <div
                   key={comp.pocketId}
-                  className="p-3.5 rounded-xl border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] bg-[#0a0a0a]/50 dark:bg-[#161616] space-y-2 transition-all hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]"
+                  className="p-3.5 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#161616] space-y-2 transition-all hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]"
                 >
                   {/* Ligne d'en-tête cliquable */}
                   <div
@@ -1371,7 +1371,7 @@ const BudgetTricount: React.FC = () => {
                             return (
                               <div
                                 key={sub.id}
-                                className="text-[11px] px-2 py-0.5 rounded-md bg-[#0a0a0a] dark:bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] flex items-center gap-1.5"
+                                className="text-[11px] px-2 py-0.5 rounded-md bg-[#161616] border border-[rgba(255,255,255,0.06)] flex items-center gap-1.5"
                               >
                                 <span className="font-medium text-[#8a8a8a]">
                                   {sub.name}:
@@ -1438,7 +1438,7 @@ const BudgetTricount: React.FC = () => {
                                       <div className="flex items-center gap-1.5 flex-wrap">
                                         <span>{exp.label}</span>
                                         {exp.subPocketName && (
-                                          <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-[#1a1a1a] text-[#8a8a8a] bg-[#161616] text-[#8a8a8a] border border-[rgba(255,255,255,0.06)] inline-flex items-center gap-1">
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-[#161616] text-[#8a8a8a] border border-[rgba(255,255,255,0.06)] inline-flex items-center gap-1">
                                             ↳ {exp.subPocketName}
                                           </span>
                                         )}
@@ -1621,7 +1621,7 @@ const BudgetTricount: React.FC = () => {
                 return (
                   <div
                     key={comp.pocketId}
-                    className="p-3.5 rounded-xl border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] bg-[#0a0a0a]/50 dark:bg-[#161616] space-y-2 transition-all hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]"
+                    className="p-3.5 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#161616] space-y-2 transition-all hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]"
                   >
                     {/* Ligne d'en-tête cliquable */}
                     <div
