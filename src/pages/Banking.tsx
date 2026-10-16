@@ -4045,13 +4045,10 @@ const Banking: React.FC = () => {
                           setTricountModalType("expense");
                         }
                       }
+                      // Le payeur reste un choix explicite : changer de poche
+                      // ne modifie pas qui a payé.
                       const auto = computeAutoSplit(pid, "");
                       setTricountSplitMethod(auto.splitMethod);
-                      if (auto.splitMethod === "100_person1") {
-                        setTricountPayer("person1");
-                      } else if (auto.splitMethod === "100_person2") {
-                        setTricountPayer("person2");
-                      }
                     }}
                     className="input-field w-full py-1.5"
                   >
@@ -4105,13 +4102,10 @@ const Banking: React.FC = () => {
                           setTricountSubPocketId(subId);
                           const subItem = currentPocket.subItems?.find((s) => s.id === subId);
                           setTricountSubPocketName(subItem ? subItem.name : "");
+                          // Le payeur reste un choix explicite : choisir une
+                          // sous-poche ne modifie pas qui a payé.
                           const auto = computeAutoSplit(tricountPocketId, subId);
                           setTricountSplitMethod(auto.splitMethod);
-                          if (auto.splitMethod === "100_person1") {
-                            setTricountPayer("person1");
-                          } else if (auto.splitMethod === "100_person2") {
-                            setTricountPayer("person2");
-                          }
                         }}
                         className="input-field w-full py-1.5"
                       >

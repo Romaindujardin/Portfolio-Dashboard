@@ -2263,14 +2263,13 @@ const BudgetTricount: React.FC = () => {
                       setFormNature(
                         isPlacementPocket(found) ? "placement" : "expense",
                       );
+                      // Le payeur reste un choix explicite de l'utilisateur :
+                      // changer de poche ne modifie pas qui a payé.
                       if (isSoloMode) {
-                        setFormPayer("person1");
                         setFormSplitMethod("100_person1");
                       } else if (found.ownership === "person1") {
-                        setFormPayer("person1");
                         setFormSplitMethod("100_person1");
                       } else if (found.ownership === "person2") {
-                        setFormPayer("person2");
                         setFormSplitMethod("100_person2");
                       } else if (found.splitMethod) {
                         setFormSplitMethod(
@@ -2342,20 +2341,18 @@ const BudgetTricount: React.FC = () => {
                           (s) => s.id === subId,
                         );
                         setFormSubPocketName(subItem ? subItem.name : "");
+                        // Le payeur reste un choix explicite de l'utilisateur :
+                        // choisir une sous-poche ne modifie pas qui a payé.
                         if (isSoloMode) {
                           setFormSplitMethod("100_person1");
                         } else if (subItem?.personId === "person1") {
                           setFormSplitMethod("100_person1");
-                          setFormPayer("person1");
                         } else if (subItem?.personId === "person2") {
                           setFormSplitMethod("100_person2");
-                          setFormPayer("person2");
                         } else if (curPocket.ownership === "person1") {
                           setFormSplitMethod("100_person1");
-                          setFormPayer("person1");
                         } else if (curPocket.ownership === "person2") {
                           setFormSplitMethod("100_person2");
-                          setFormPayer("person2");
                         } else if (curPocket.splitMethod === "proportional") {
                           setFormSplitMethod("proportional");
                         } else {
