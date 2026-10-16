@@ -1304,7 +1304,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                   className={`w-full flex items-center justify-between px-3 py-2 text-xs rounded-lg font-medium transition ${
                     !strategy.household?.enabled
                       ? "bg-[#1a1a1a] bg-[#161616] text-[#f5f5f5] font-semibold"
-                      : "text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]/60"
+                      : "text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -1337,7 +1337,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                       ? "bg-[#1a1a1a] bg-[#161616] text-[#f5f5f5] font-semibold"
                       : availableUsers.length < 2
                         ? "opacity-40 cursor-not-allowed text-[#555555]"
-                        : "text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]/60"
+                        : "text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
                   }`}
                   title={
                     availableUsers.length < 2
@@ -1756,7 +1756,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                     {formatEur(p1.personalContributionEur)}
                   </strong>
                 </div>
-                <div className="pt-2 border-t border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/40 flex justify-between font-bold text-sm">
+                <div className="pt-2 border-t border-[rgba(255,255,255,0.06)] flex justify-between font-bold text-sm">
                   <span className="text-[#f5f5f5] ">
                     Reste à vivre personnel :
                   </span>
@@ -1815,7 +1815,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                     {formatEur(p2.personalContributionEur)}
                   </strong>
                 </div>
-                <div className="pt-2 border-t border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/40 flex justify-between font-bold text-sm">
+                <div className="pt-2 border-t border-[rgba(255,255,255,0.06)] flex justify-between font-bold text-sm">
                   <span className="text-[#f5f5f5] ">
                     Reste à vivre personnel :
                   </span>
@@ -1871,9 +1871,9 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
             {isAddingIncome && (
               <form
                 onSubmit={handleSaveIncome}
-                className="mb-4 p-4 rounded-xl bg-[#0a0a0a] dark:bg-[#161616] border border-[rgba(255,255,255,0.06)]/80 space-y-3 animate-fade-in shadow-sm"
+                className="mb-4 p-4 rounded-xl bg-[#0a0a0a] dark:bg-[#161616] border border-[rgba(255,255,255,0.06)] space-y-3 animate-fade-in shadow-sm"
               >
-                <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)]/80 pb-2">
+                <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] pb-2">
                   <span className="text-xs font-bold text-[#f5f5f5]">
                     {editingIncomeId
                       ? "Modifier la source de revenus"
@@ -1998,7 +1998,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                   return (
                     <div
                       key={inc.id}
-                      className="flex items-center justify-between p-3 rounded-xl bg-[#0a0a0a]/70 bg-[#161616]/40 border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)]/60 hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)] transition"
+                      className="flex items-center justify-between p-3 rounded-xl bg-[#0a0a0a]/70 bg-[#161616]/40 transition"
                     >
                       <div>
                         <div className="flex items-center gap-2">
@@ -2731,7 +2731,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                 </div>
 
                 {/* Section Sous-sections / Sous-postes (ex: 670€ loyer, 20€ eau, 80€ elec ou PEA P1 / PEA P2) */}
-                <div className="p-4 rounded-xl bg-[#111111] dark:bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)]/80 space-y-3">
+                <div className="p-4 rounded-xl bg-[#111111] dark:bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[rgba(255,255,255,0.06)] pb-2">
                     <div>
                       <h5 className="text-xs font-bold text-[#f5f5f5]">
@@ -2928,7 +2928,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                         return (
                           <div
                             key={sub.id}
-                            className="flex items-center justify-between p-2 rounded-lg bg-[#0a0a0a] bg-[#161616]/60 border border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/60 text-xs hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)] transition"
+                            className="flex items-center justify-between p-2 rounded-lg bg-[#0a0a0a] bg-[#161616]/60 border border-[rgba(255,255,255,0.06)] text-xs hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)] transition"
                           >
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="font-semibold text-[#f5f5f5]  truncate">
@@ -3118,7 +3118,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
 
                 {/* Déjà épargné, Objectif, Rendement, Couleur, Notes */}
                 {pocketOwnership === "dossier" ? (
-                  <div className="space-y-3 p-4 rounded-xl bg-[#1a1a1a]/70 bg-[#161616]/40 border border-[rgba(255,255,255,0.06)]/60">
+                  <div className="space-y-3 p-4 rounded-xl bg-[#1a1a1a]/70 bg-[#161616]/40 border border-[rgba(255,255,255,0.06)]">
                     <h5 className="text-xs font-bold text-[#f5f5f5]">
                       Capitaux et Objectifs individuels du Dossier
                     </h5>
@@ -3421,10 +3421,10 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                 return (
                   <div
                     key={p.id}
-                    className={`p-4 rounded-xl border transition ${
+                    className={`p-4 rounded-xl transition ${
                       isDimmed
-                        ? "opacity-45 bg-[#0a0a0a]/40 bg-[#161616]/20 border-dashed border-[rgba(255,255,255,0.08)] border-[rgba(255,255,255,0.06)]"
-                        : "bg-[#0a0a0a]/80 bg-[#161616]/50 border-[rgba(255,255,255,0.06)]/80 border-[rgba(255,255,255,0.06)]/80 hover:shadow-sm"
+                        ? "opacity-45 bg-[#0a0a0a]/40 bg-[#161616]/20"
+                        : "bg-[#0a0a0a]/80 bg-[#161616]/50 hover:shadow-sm"
                     }`}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3623,7 +3623,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
 
                     {/* Sub-sections toggle button */}
                     {hasSubItems && (
-                      <div className="mt-3 pt-2 border-t border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/60">
+                      <div className="mt-3 pt-2 border-t border-[rgba(255,255,255,0.06)]">
                         <button
                           type="button"
                           onClick={() => toggleExpandPocket(p.id)}
@@ -3811,7 +3811,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                 return (
                                   <div
                                     key={sub.id}
-                                    className="flex items-center justify-between p-2 rounded-lg bg-[#111111] bg-[#161616] border border-[rgba(255,255,255,0.06)]/70 border-[rgba(255,255,255,0.06)]/70"
+                                    className="flex items-center justify-between p-2 rounded-lg bg-[#111111] bg-[#161616] border border-[rgba(255,255,255,0.06)]"
                                   >
                                     <div className="flex items-center gap-1.5">
                                       <span
@@ -3873,7 +3873,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
 
                     {/* Bouton rapide d'ajout de sous-sections si vide */}
                     {!hasSubItems && (
-                      <div className="mt-2 pt-2 border-t border-[rgba(255,255,255,0.06)]/40 border-[rgba(255,255,255,0.06)]/40">
+                      <div className="mt-2 pt-2 border-t border-[rgba(255,255,255,0.06)]">
                         <button
                           type="button"
                           onClick={() => openEditPocket(p)}
@@ -3888,7 +3888,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
 
                     {/* Progression si objectif cible défini */}
                     {hasTarget && (
-                      <div className="mt-3 pt-3 border-t border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/60">
+                      <div className="mt-3 pt-3 border-t border-[rgba(255,255,255,0.06)]">
                         {isDossierPocket &&
                         (p.person1Target || p.person2Target) ? (
                           /* Pour les dossiers : 2 barres individuelles au lieu d'une barre commune */
@@ -4248,7 +4248,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                         >
                           <div>
                             {/* En-tête du Dossier Groupé */}
-                            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/60">
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[rgba(255,255,255,0.06)]">
                               <div className="flex items-center gap-2 min-w-0">
                                 <h4 className="text-sm font-bold text-[#f5f5f5] truncate">
                                   {g.pocketName}
@@ -4371,7 +4371,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                     </div>
                                   </div>
 
-                                  <div className="pt-2 border-t border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/50">
+                                  <div className="pt-2 border-t border-[rgba(255,255,255,0.06)]">
                                     <p
                                       className="text-[11px] flex items-center gap-1 font-medium"
                                       style={p1Theme.textStyle}
@@ -4482,7 +4482,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                                     </div>
                                   </div>
 
-                                  <div className="pt-2 border-t border-[rgba(255,255,255,0.06)]/60 border-[rgba(255,255,255,0.06)]/50">
+                                  <div className="pt-2 border-t border-[rgba(255,255,255,0.06)]">
                                     <p
                                       className="text-[11px] flex items-center gap-1 font-medium"
                                       style={p2Theme.textStyle}
@@ -4586,7 +4586,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                           </div>
                         </div>
 
-                        <div className="mt-4 pt-2 border-t border-[rgba(255,255,255,0.06)]/50 border-[rgba(255,255,255,0.06)]/50">
+                        <div className="mt-4 pt-2 border-t border-[rgba(255,255,255,0.06)]">
                           <p className="text-[11px] text-[#8a8a8a] flex items-center gap-1 font-medium">
                             <Info
                               size={13}

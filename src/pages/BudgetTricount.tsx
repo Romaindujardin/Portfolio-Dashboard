@@ -548,7 +548,7 @@ const BudgetTricount: React.FC = () => {
               >
                 <Calendar
                   size={15}
-                  className={isActive ? "text-primary-500" : "text-[#555555]"}
+                  className={isActive ? "text-[#c8a55e]" : "text-[#555555]"}
                 />
                 <span>{formatMonthLabel(m)}</span>
               </button>
