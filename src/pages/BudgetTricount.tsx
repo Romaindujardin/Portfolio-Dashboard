@@ -953,7 +953,7 @@ const BudgetTricount: React.FC = () => {
                   </div>
 
                   {/* Barre de perception */}
-                  <div className="w-full bg-[#484848] h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-[#4f4f4f] h-1.5 rounded-full overflow-hidden">
                     <div
                       className="h-full transition-all duration-300 bg-emerald-500"
                       style={{
@@ -1299,7 +1299,7 @@ const BudgetTricount: React.FC = () => {
                   </div>
 
                   {/* Barre de consommation du budget */}
-                  <div className="w-full bg-[#484848] h-2.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-[#4f4f4f] h-2.5 rounded-full overflow-hidden">
                     <div
                       className={`h-full transition-all duration-300 ${
                         isOverBudget
@@ -1696,7 +1696,7 @@ const BudgetTricount: React.FC = () => {
                     </div>
 
                     {/* Barre de progression du placement */}
-                    <div className="w-full bg-[#484848] h-2.5 rounded-full overflow-hidden">
+                    <div className="w-full bg-[#4f4f4f] h-2.5 rounded-full overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 ${
                           (comp.remainingToPlace ?? 0) === 0 &&
