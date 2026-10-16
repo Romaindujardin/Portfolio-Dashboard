@@ -233,12 +233,18 @@ const Sidebar: React.FC = () => {
                         key={child.path}
                         to={child.path}
                         onClick={() => setIsMobileOpen(false)}
-                        className={`flex items-center px-4 py-2 pl-[46px] rounded-lg text-sm font-medium transition-all duration-200 ${
+                        className={`flex items-center gap-2 px-4 py-2 pl-[42px] rounded-lg text-sm font-medium transition-all duration-200 ${
                           isChildActive
                             ? "text-[#c8a55e] bg-[rgba(200,165,94,0.08)]"
                             : "text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
+                        <span
+                          aria-hidden="true"
+                          className="font-mono text-xs opacity-60 select-none"
+                        >
+                          {"├─"}
+                        </span>
                         <span>{child.name}</span>
                       </Link>
                     );

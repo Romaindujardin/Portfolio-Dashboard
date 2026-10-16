@@ -367,21 +367,9 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [activeMonth]);
 
-  // Onglets des mois : activité Tricount + stratégies configurées + mois courant et 3 mois futurs préparables
+  // Onglets des mois — même logique que Budget : un mois apparaît dès qu'il a des dépenses/revenus
   const monthTabs = useMemo(() => {
-    const set = new Set<string>([
-      ...getAvailableMonths(),
-      ...getAllConfiguredStrategyMonths(),
-      getCurrentMonthKey(),
-      activeMonth,
-    ]);
-    const [curYear, curMonthNum] = getCurrentMonthKey().split("-").map(Number);
-    for (let i = 1; i <= 3; i++) {
-      const d = new Date(curYear, curMonthNum - 1 + i, 1);
-      set.add(
-        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
-      );
-    }
+    const set = new Set<string>([...getAvailableMonths(), activeMonth]);
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [activeMonth]);
 
