@@ -2996,8 +2996,8 @@ const Banking: React.FC = () => {
                     key={u.id}
                     className={`rounded-lg border p-3 transition-colors ${
                       active
-                        ? "border-[#c8a55e] bg-[rgba(200,165,94,0.12)] hover:bg-primary-200 dark:bg-primary-900/35 dark:hover:bg-primary-900/45"
-                        : "border-[rgba(255,255,255,0.06)] hover:border-primary-300 hover:bg-[#c8a55e] dark:hover:border-primary-600 dark:hover:bg-primary-900/20"
+                        ? "border-[#c8a55e] bg-[rgba(200,165,94,0.12)] hover:bg-[rgba(200,165,94,0.20)] dark:bg-[rgba(200,165,94,0.15)] dark:hover:bg-[rgba(200,165,94,0.22)]"
+                        : "border-[rgba(255,255,255,0.06)] hover:border-[#c8a55e] hover:bg-[#c8a55e] dark:hover:border-[#c8a55e] dark:hover:bg-[rgba(200,165,94,0.10)]"
                     }`}
                   >
                     <div className="flex items-start gap-2">
@@ -3029,7 +3029,7 @@ const Banking: React.FC = () => {
 
                     <div className="flex justify-end items-center gap-3 mt-2">
                       <button
-                        className="text-[#555555] hover:text-[#c8a55e] dark:hover:text-primary-400 transition-colors"
+                        className="text-[#555555] hover:text-[#c8a55e] dark:hover:text-[#c8a55e] transition-colors"
                         title="Télécharger"
                         onClick={() => handleDownloadUpload(u.id)}
                         disabled={loading}
@@ -3037,7 +3037,7 @@ const Banking: React.FC = () => {
                         <Download size={16} />
                       </button>
                       <button
-                        className="text-[#555555] hover:text-[#c8a55e] dark:hover:text-primary-400 transition-colors"
+                        className="text-[#555555] hover:text-[#c8a55e] dark:hover:text-[#c8a55e] transition-colors"
                         title="Renommer"
                         onClick={() => handleRenameUpload(u.id)}
                         disabled={loading}
@@ -3542,7 +3542,7 @@ const Banking: React.FC = () => {
                                   className={`w-7 h-7 inline-flex items-center justify-center rounded-lg transition shadow-xs group ${
                                     isInTricount
                                       ? "bg-emerald-500 text-white hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500 border border-emerald-600 dark:border-emerald-500 ring-2 ring-emerald-500/20"
-                                      : "bg-primary-50 text-[#c8a55e] hover:bg-[#c8a55e] hover:text-white dark:bg-primary-950/60 text-[#c8a55e] dark:hover:bg-[#c8a55e] hover:text-[#f5f5f5] border border-primary-200 dark:border-primary-800"
+                                      : "bg-[rgba(200,165,94,0.14)] text-[#c8a55e] hover:bg-[#c8a55e] hover:text-white dark:bg-[rgba(200,165,94,0.14)] text-[#c8a55e] dark:hover:bg-[#c8a55e] hover:text-[#f5f5f5] border border-[rgba(200,165,94,0.45)] dark:border-[rgba(200,165,94,0.40)]"
                                   }`}
                                   title={
                                     isInTricount
@@ -3748,7 +3748,7 @@ const Banking: React.FC = () => {
           <span>{tricountToast}</span>
           <Link
             to="/budget-tracking"
-            className="text-xs font-bold text-primary-400 dark:text-[#c8a55e] hover:underline flex items-center gap-0.5 ml-2"
+            className="text-xs font-bold text-[#c8a55e] hover:underline flex items-center gap-0.5 ml-2"
           >
             <span>Voir</span>
             <ArrowRight size={12} />
@@ -3891,7 +3891,7 @@ const Banking: React.FC = () => {
                         onClick={() => setTricountBeneficiary("person1")}
                         className={`p-2 rounded-xl border text-center font-bold transition ${
                           tricountBeneficiary === "person1"
-                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            ? "bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border-[#c8a55e] dark:bg-[rgba(200,165,94,0.15)] text-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
@@ -3903,7 +3903,7 @@ const Banking: React.FC = () => {
                         onClick={() => setTricountBeneficiary("person2")}
                         className={`p-2 rounded-xl border text-center font-bold transition ${
                           tricountBeneficiary === "person2"
-                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            ? "bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border-[#c8a55e] dark:bg-[rgba(200,165,94,0.15)] text-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
@@ -4001,7 +4001,7 @@ const Banking: React.FC = () => {
                         onClick={() => setTricountPayer("person1")}
                         className={`p-2 rounded-xl border text-center font-bold transition ${
                           tricountPayer === "person1"
-                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            ? "bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border-[#c8a55e] dark:bg-[rgba(200,165,94,0.15)] text-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
@@ -4013,7 +4013,7 @@ const Banking: React.FC = () => {
                         onClick={() => setTricountPayer("person2")}
                         className={`p-2 rounded-xl border text-center font-bold transition ${
                           tricountPayer === "person2"
-                            ? "bg-primary-50 text-[#c8a55e] border-[#c8a55e] dark:bg-primary-950/40 text-[#c8a55e]"
+                            ? "bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border-[#c8a55e] dark:bg-[rgba(200,165,94,0.15)] text-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
@@ -4139,7 +4139,7 @@ const Banking: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowSplitOverride((prev) => !prev)}
-                        className="text-[10px] text-[#555555] hover:text-[#c8a55e] dark:hover:text-primary-400 underline font-medium"
+                        className="text-[10px] text-[#555555] hover:text-[#c8a55e] dark:hover:text-[#c8a55e] underline font-medium"
                       >
                         {showSplitOverride ? "Masquer ajustements" : "Ajuster manuellement"}
                       </button>
@@ -4197,7 +4197,7 @@ const Banking: React.FC = () => {
                         onClick={() => setTricountSplitMethod("50_50")}
                         className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
                           tricountSplitMethod === "50_50"
-                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            ? "bg-[#c8a55e] text-white border-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
@@ -4209,7 +4209,7 @@ const Banking: React.FC = () => {
                         onClick={() => setTricountSplitMethod("proportional")}
                         className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
                           tricountSplitMethod === "proportional"
-                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            ? "bg-[#c8a55e] text-white border-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
@@ -4224,7 +4224,7 @@ const Banking: React.FC = () => {
                         }}
                         className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
                           tricountSplitMethod === "100_person1"
-                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            ? "bg-[#c8a55e] text-white border-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
@@ -4239,7 +4239,7 @@ const Banking: React.FC = () => {
                         }}
                         className={`p-1.5 rounded-lg border text-center font-bold transition text-xs ${
                           tricountSplitMethod === "100_person2"
-                            ? "bg-[#c8a55e] text-white border-primary-600"
+                            ? "bg-[#c8a55e] text-white border-[#c8a55e]"
                             : "border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] text-[#8a8a8a] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)]"
                         }`}
                       >
