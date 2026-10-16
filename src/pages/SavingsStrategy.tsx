@@ -3421,10 +3421,10 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                 return (
                   <div
                     key={p.id}
-                    className={`p-4 rounded-xl transition ${
+                    className={`p-4 rounded-xl border transition-all ${
                       isDimmed
-                        ? "opacity-45 bg-[#0a0a0a]/40 bg-[#161616]/20"
-                        : "bg-[#0a0a0a]/80 bg-[#161616]/50 hover:shadow-sm"
+                        ? "opacity-45 bg-[#0a0a0a]/40 dark:bg-[#161616]/20 border-dashed border-[rgba(255,255,255,0.06)]"
+                        : "border-[rgba(255,255,255,0.06)] bg-[#0a0a0a]/50 dark:bg-[#161616] hover:border-[rgba(255,255,255,0.08)] dark:hover:border-[rgba(255,255,255,0.06)]"
                     }`}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
