@@ -559,14 +559,6 @@ export const getStoredMonthlyStrategies = (): Record<string, SavingsStrategy> =>
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
-        if (parsed["2026-09"]) {
-          delete parsed["2026-09"];
-          try {
-            localStorage.setItem(STORAGE_KEY_MONTHLY_STRATEGIES, JSON.stringify(parsed));
-          } catch {
-            // ignore
-          }
-        }
         return parsed;
       }
     }

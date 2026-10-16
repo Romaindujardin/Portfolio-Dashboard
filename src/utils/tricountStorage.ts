@@ -373,14 +373,6 @@ export const getStoredConfigs = (): Record<string, MonthlyTricountConfig> => {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (typeof parsed === "object" && parsed !== null) {
-      if (parsed["2026-09"]) {
-        delete parsed["2026-09"];
-        try {
-          localStorage.setItem(STORAGE_KEY_CONFIGS, JSON.stringify(parsed));
-        } catch {
-          // ignore
-        }
-      }
       return parsed;
     }
   } catch (e) {
@@ -475,7 +467,18 @@ export const applyStrategyToMonth = (
     targetSavingsRate,
   };
 
-  saveMonthlyConfig(newConfig);
+  // Ne ré-écrire que si la config stockée diffère réellement : sans ce
+  // garde-fou, un appel effectué pendant le rendu (via getMonthlyConfig)
+  // peut boucler lecture → recalcul → écriture → event → re-rendu → relecture.
+  const existing = getStoredConfigs()[monthKey];
+  const unchanged =
+    !!existing &&
+    existing.p1Income === newConfig.p1Income &&
+    existing.p2Income === newConfig.p2Income &&
+    existing.isStrategyApplied === newConfig.isStrategyApplied &&
+    existing.targetSavingsRate === newConfig.targetSavingsRate;
+
+  if (!unchanged) saveMonthlyConfig(newConfig);
   return newConfig;
 };
 
