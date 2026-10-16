@@ -1625,6 +1625,41 @@ const Dashboard: React.FC = () => {
           {/* ======================================================== */}
           {/* Bento Row 1: KPI Cards & Répartition par Classe d'Actifs */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="card text-center flex flex-col justify-center">
+                  <span className="text-xs text-[#8a8a8a] block mb-1">
+                    Total des Actifs
+                  </span>
+                  <span className="text-2xl font-bold text-[#f5f5f5]">
+                    {unifiedHoldings.length}
+                  </span>
+                  <span className="text-[11px] text-[#555555] block mt-0.5">
+                    positions réparties
+                  </span>
+                </div>
+                <div className="card text-center flex flex-col justify-center">
+                  <span className="text-xs text-[#8a8a8a] block mb-1">
+                    Plus Forte Ligne
+                  </span>
+                  <span className="text-2xl font-bold text-[#f5f5f5]">
+                    {(() => {
+                      const max = unifiedHoldings.reduce(
+                        (m, h) => (h.totalValue > m ? h.totalValue : m),
+                        0,
+                      );
+                      return totalWealthAll > 0
+                        ? formatPercent((max / totalWealthAll) * 100, 1)
+                        : "0%";
+                    })()}
+                  </span>
+                  <span className="text-[11px] text-[#555555] block mt-0.5 truncate">
+                    {(() => {
+                      const topH = unifiedHoldings
+                        .slice()
+                        .sort((a, b) => b.totalValue - a.totalValue)[0];
+                      return topH?.name || "Aucun";
+                    })()}
+                  </span>
+                </div>
                 {/* Répartition par Classe d'Actifs */}
                 <div className="card md:col-span-2">
                   <div className="flex items-center justify-between mb-2">
@@ -1799,41 +1834,6 @@ const Dashboard: React.FC = () => {
                       );
                     })}
                   </div>
-                </div>
-                <div className="card text-center flex flex-col justify-center">
-                  <span className="text-xs text-[#8a8a8a] block mb-1">
-                    Total des Actifs
-                  </span>
-                  <span className="text-2xl font-bold text-[#f5f5f5]">
-                    {unifiedHoldings.length}
-                  </span>
-                  <span className="text-[11px] text-[#555555] block mt-0.5">
-                    positions réparties
-                  </span>
-                </div>
-                <div className="card text-center flex flex-col justify-center">
-                  <span className="text-xs text-[#8a8a8a] block mb-1">
-                    Plus Forte Ligne
-                  </span>
-                  <span className="text-2xl font-bold text-[#f5f5f5]">
-                    {(() => {
-                      const max = unifiedHoldings.reduce(
-                        (m, h) => (h.totalValue > m ? h.totalValue : m),
-                        0,
-                      );
-                      return totalWealthAll > 0
-                        ? formatPercent((max / totalWealthAll) * 100, 1)
-                        : "0%";
-                    })()}
-                  </span>
-                  <span className="text-[11px] text-[#555555] block mt-0.5 truncate">
-                    {(() => {
-                      const topH = unifiedHoldings
-                        .slice()
-                        .sort((a, b) => b.totalValue - a.totalValue)[0];
-                      return topH?.name || "Aucun";
-                    })()}
-                  </span>
                 </div>
               </div>
 
