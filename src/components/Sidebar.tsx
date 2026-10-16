@@ -224,29 +224,35 @@ const Sidebar: React.FC = () => {
                 )}
               </div>
               {hasChildren && isGroupOpen && (
-                <div className="space-y-1 pt-0.5">
-                  {item.children!.map((child) => {
+                <div className="relative -mt-0.5 ml-[25px] space-y-0.5">
+                  {item.children!.map((child, childIndex) => {
                     const isChildActive =
                       location.pathname === child.path;
+                    const isLastChild =
+                      childIndex === item.children!.length - 1;
                     return (
-                      <Link
-                        key={child.path}
-                        to={child.path}
-                        onClick={() => setIsMobileOpen(false)}
-                        className={`flex items-center gap-2 px-4 py-2 pl-[42px] rounded-lg text-sm font-medium transition-all duration-200 ${
-                          isChildActive
-                            ? "text-[#c8a55e] bg-[rgba(200,165,94,0.08)]"
-                            : "text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)]"
-                        }`}
-                      >
+                      <div key={child.path} className="relative">
+                        {/* Connecteur d'arborescence : descente depuis l'icône du parent puis coude vers la sous-page */}
                         <span
                           aria-hidden="true"
-                          className="font-mono text-xs opacity-60 select-none"
+                          className={`absolute left-0 top-0 w-[18px] border-l border-[rgba(255,255,255,0.12)] ${
+                            isLastChild
+                              ? "h-1/2 rounded-bl-md border-b"
+                              : "bottom-0"
+                          }`}
+                        />
+                        <Link
+                          to={child.path}
+                          onClick={() => setIsMobileOpen(false)}
+                          className={`flex items-center py-2 pl-[21px] pr-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                            isChildActive
+                              ? "text-[#c8a55e] bg-[rgba(200,165,94,0.08)]"
+                              : "text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)]"
+                          }`}
                         >
-                          {"├─"}
-                        </span>
-                        <span>{child.name}</span>
-                      </Link>
+                          <span>{child.name}</span>
+                        </Link>
+                      </div>
                     );
                   })}
                 </div>
