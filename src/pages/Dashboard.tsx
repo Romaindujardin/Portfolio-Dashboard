@@ -1623,162 +1623,11 @@ const Dashboard: React.FC = () => {
           {/* ======================================================== */}
           {/* 1. VUE GLOBALE (PATRIMOINE CONSOLIDÉ) — toujours affichée */}
           {/* ======================================================== */}
-          {/* Bento Row 1: KPI Cards */}
+          {/* Bento Row 1: KPI Cards & Répartition par Classe d'Actifs */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="card text-center">
-                  <span className="text-xs text-[#8a8a8a] block mb-1">
-                    Total des Actifs
-                  </span>
-                  <span className="text-2xl font-bold text-[#f5f5f5]">
-                    {unifiedHoldings.length}
-                  </span>
-                  <span className="text-[11px] text-[#555555] block mt-0.5">
-                    positions réparties
-                  </span>
-                </div>
-                <div className="card text-center">
-                  <span className="text-xs text-[#8a8a8a] block mb-1">
-                    Portefeuilles Actifs
-                  </span>
-                  <span className="text-2xl font-bold text-[#c8a55e]">
-                    {portfolioEnvelopes.length}
-                  </span>
-                  <span className="text-[11px] text-[#555555] block mt-0.5">
-                    PEA, PEE, Banque, Crypto
-                  </span>
-                </div>
-                <div className="card text-center">
-                  <span className="text-xs text-[#8a8a8a] block mb-1">
-                    Plus Forte Ligne
-                  </span>
-                  <span className="text-2xl font-bold text-[#f5f5f5]">
-                    {(() => {
-                      const max = unifiedHoldings.reduce(
-                        (m, h) => (h.totalValue > m ? h.totalValue : m),
-                        0,
-                      );
-                      return totalWealthAll > 0
-                        ? formatPercent((max / totalWealthAll) * 100, 1)
-                        : "0%";
-                    })()}
-                  </span>
-                  <span className="text-[11px] text-[#555555] block mt-0.5 truncate">
-                    {(() => {
-                      const topH = unifiedHoldings
-                        .slice()
-                        .sort((a, b) => b.totalValue - a.totalValue)[0];
-                      return topH?.name || "Aucun";
-                    })()}
-                  </span>
-                </div>
-                <div className="card text-center">
-                  <span className="text-xs text-[#8a8a8a] block mb-1">
-                    Taux d'Investissement
-                  </span>
-                  <span className="text-2xl font-bold text-[#f5f5f5]">
-                    {totalWealthAll > 0
-                      ? formatPercent(
-                          ((totalWealthAll - bankCash) / totalWealthAll) * 100,
-                          1,
-                        )
-                      : "0%"}
-                  </span>
-                  <span className="text-[11px] text-[#555555] block mt-0.5">
-                    hors liquidités bancaires
-                  </span>
-                </div>
-              </div>
-
-              {/* Bento Row 2: Synthèse des Portefeuilles & Enveloppes */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-[#8a8a8a] uppercase tracking-wider">
-                    Synthèse des Portefeuilles & Enveloppes
-                  </h3>
-                  <span className="text-xs text-[#555555]">
-                    Cliquez sur un portefeuille pour voir ses détails
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {portfolioEnvelopes.map((env) => {
-                    const share =
-                      totalWealthAll > 0
-                        ? (env.totalValue / totalWealthAll) * 100
-                        : 0;
-
-                    return (
-                      <div
-                        key={env.id}
-                        className="card group hover:border-[#c8a55e]/40 transition-all cursor-pointer flex flex-col justify-between"
-                        onClick={() => openEnvelopeDetails(env.id)}
-                      >
-                        <div>
-                          <div className="flex items-center justify-between gap-2 mb-2">
-                            <h4 className="font-bold text-[#f5f5f5] text-sm group-hover:text-[#c8a55e] transition-colors">
-                              {env.label}
-                            </h4>
-                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-[rgba(255,255,255,0.04)] text-[#8a8a8a] font-medium">
-                              {formatPercent(share, 1)}
-                            </span>
-                          </div>
-
-                          <div className="text-2xl font-bold text-[#f5f5f5] mb-2 tracking-tight">
-                            {formatCurrency(env.totalValue)}
-                          </div>
-
-                          <p className="text-xs text-[#8a8a8a] line-clamp-1 mb-3">
-                            {env.description}
-                          </p>
-                        </div>
-
-                        <div className="pt-2 border-t border-[rgba(255,255,255,0.06)] flex items-center justify-between text-xs">
-                          {env.kind === "investment" ? (
-                            <>
-                              <span className="text-[#8a8a8a]">
-                                {env.positionsCount}{" "}
-                                {env.positionsCount > 1 ? "lignes" : "ligne"}
-                              </span>
-                              <span
-                                className={`font-semibold ${
-                                  env.pnl >= 0
-                                    ? "text-[#22c55e]"
-                                    : "text-[#ef4444]"
-                                }`}
-                              >
-                                {env.pnl >= 0 ? "+" : ""}
-                                {formatCurrency(env.pnl)} (
-                                {env.pnlPercent >= 0 ? "+" : ""}
-                                {formatPercent(env.pnlPercent, 1)})
-                              </span>
-                            </>
-                          ) : env.kind === "bank" ? (
-                            <>
-                              <span className="text-[#8a8a8a]">Liquidités</span>
-                              <span className="text-[#06b6d4] font-medium">
-                                Comptes bancaires
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="text-[#8a8a8a]">
-                                {wallets.length} wallets
-                              </span>
-                              <span className="text-[#f97316] font-medium">
-                                Web3 & Exchanges
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Bento Row 3: Répartition par Classe d'Actifs */}
-                <div className="card">
-                  <div className="flex items-center justify-between mb-4">
+                {/* Répartition par Classe d'Actifs */}
+                <div className="card md:col-span-2">
+                  <div className="flex items-center justify-between mb-2">
                     <div>
                       <h4 className="text-base font-semibold text-[#f5f5f5]">
                         Répartition par Classe d'Actifs
@@ -1789,7 +1638,7 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="relative h-64 flex items-center justify-center">
+                  <div className="relative h-44 flex items-center justify-center">
                     {(() => {
                       const typeShares = unifiedHoldings.reduce((acc, h) => {
                         const t = h.type || "other";
@@ -1850,8 +1699,8 @@ const Dashboard: React.FC = () => {
                                 data={assetData}
                                 dataKey="value"
                                 nameKey="name"
-                                innerRadius={65}
-                                outerRadius={95}
+                                innerRadius={46}
+                                outerRadius={66}
                                 paddingAngle={rawAssetData.length > 1 ? 3 : 0}
                                 stroke="none"
                               >
@@ -1885,7 +1734,7 @@ const Dashboard: React.FC = () => {
                             </PieChart>
                           </ResponsiveContainer>
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                            <span className="text-base font-bold text-[#f5f5f5]">
+                            <span className="text-sm font-bold text-[#f5f5f5]">
                               {formatCurrency(totalWealthAll)}
                             </span>
                             <span className="text-[11px] text-[#8a8a8a]">
@@ -1951,6 +1800,42 @@ const Dashboard: React.FC = () => {
                     })}
                   </div>
                 </div>
+                <div className="card text-center flex flex-col justify-center">
+                  <span className="text-xs text-[#8a8a8a] block mb-1">
+                    Total des Actifs
+                  </span>
+                  <span className="text-2xl font-bold text-[#f5f5f5]">
+                    {unifiedHoldings.length}
+                  </span>
+                  <span className="text-[11px] text-[#555555] block mt-0.5">
+                    positions réparties
+                  </span>
+                </div>
+                <div className="card text-center flex flex-col justify-center">
+                  <span className="text-xs text-[#8a8a8a] block mb-1">
+                    Plus Forte Ligne
+                  </span>
+                  <span className="text-2xl font-bold text-[#f5f5f5]">
+                    {(() => {
+                      const max = unifiedHoldings.reduce(
+                        (m, h) => (h.totalValue > m ? h.totalValue : m),
+                        0,
+                      );
+                      return totalWealthAll > 0
+                        ? formatPercent((max / totalWealthAll) * 100, 1)
+                        : "0%";
+                    })()}
+                  </span>
+                  <span className="text-[11px] text-[#555555] block mt-0.5 truncate">
+                    {(() => {
+                      const topH = unifiedHoldings
+                        .slice()
+                        .sort((a, b) => b.totalValue - a.totalValue)[0];
+                      return topH?.name || "Aucun";
+                    })()}
+                  </span>
+                </div>
+              </div>
 
               {/* Bento Row 4: BarChart PnL Portefeuilles & Podiums Gagnants/Perdants */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
