@@ -5,6 +5,7 @@ import TopHeader from "./components/TopHeader";
 import Dashboard from "./pages/Dashboard";
 import Investments from "./pages/Investments";
 import BudgetTricount from "./pages/BudgetTricount";
+import Strategy from "./pages/Strategy";
 import Savings from "./pages/Savings";
 import AIAnalysis from "./pages/AIAnalysis";
 import Settings from "./pages/Settings";
@@ -68,6 +69,7 @@ function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/investments" element={<Investments />} />
                   <Route path="/budget" element={<BudgetTricount />} />
+                  <Route path="/strategy" element={<Strategy />} />
                   <Route path="/savings" element={<Savings />} />
                   <Route path="/ai-analysis" element={<AIAnalysis />} />
                   <Route path="/banking" element={<Banking />} />

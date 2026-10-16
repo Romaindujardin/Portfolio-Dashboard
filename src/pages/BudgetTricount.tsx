@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Plus,
   Trash2,
@@ -42,7 +43,6 @@ import {
   DEFAULT_SAVINGS_STRATEGY,
   getTotalMonthlyIncome,
 } from "../utils/savingsStorage";
-import MonthlyStrategyModal from "../components/MonthlyStrategyModal";
 import { useUser } from "../contexts/UserContext";
 import { getPersonTheme, getUserAccentColor } from "../utils/theme";
 
@@ -58,6 +58,7 @@ const formatEur = (val: number | null | undefined): string => {
 
 const BudgetTricount: React.FC = () => {
   const { currentUser, availableUsers } = useUser();
+  const navigate = useNavigate();
   const [selectedMonth, setSelectedMonth] =
     useState<string>(getCurrentMonthKey);
   const [strategy, setStrategy] = useState<SavingsStrategy>(() => {
@@ -84,7 +85,6 @@ const BudgetTricount: React.FC = () => {
   >({});
 
   // Modales
-  const [isStrategyModalOpen, setIsStrategyModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<TricountExpense | null>(
     null,
@@ -561,9 +561,9 @@ const BudgetTricount: React.FC = () => {
           {/* Bouton Voir la Stratégie */}
           <button
             type="button"
-            onClick={() => setIsStrategyModalOpen(true)}
+            onClick={() => navigate(`/strategy?mois=${selectedMonth}`)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#111111] text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)] transition shadow-xs"
-            title={`Voir et éditer la stratégie d'épargne pour ${formatMonthLabel(selectedMonth)}`}
+            title={`Ouvrir la stratégie d'épargne de ${formatMonthLabel(selectedMonth)}`}
           >
             <Sliders size={13} className="text-primary-500" />
             <span className="hidden sm:inline">Voir la stratégie</span>
@@ -2728,17 +2728,6 @@ const BudgetTricount: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Modale de la Stratégie d'épargne mensuelle */}
-      <MonthlyStrategyModal
-        isOpen={isStrategyModalOpen}
-        onClose={() => setIsStrategyModalOpen(false)}
-        monthKey={selectedMonth}
-        onStrategySaved={(updatedStrat) => {
-          setStrategy(updatedStrat);
-          loadData();
-        }}
-      />
     </div>
   );
 };

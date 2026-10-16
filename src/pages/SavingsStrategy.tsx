@@ -51,8 +51,6 @@ import {
   PersonId,
 } from "../types";
 import {
-  getSavingsStrategy,
-  saveSavingsStrategy,
   getSavingsStrategyForMonth,
   saveSavingsStrategyForMonth,
   hasCustomStrategyForMonth,
@@ -147,15 +145,15 @@ const formatEur = (val: number, decimals: number = 2) => {
 
 export interface SavingsStrategyPageProps {
   monthKey?: string;
-  isModal?: boolean;
-  onClose?: () => void;
+  onMonthChange?: (month: string) => void;
+  showProjections?: boolean;
   onStrategySaved?: (strategy: SavingsStrategy) => void;
 }
 
 const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
   monthKey: propMonthKey,
-  isModal = false,
-  onClose,
+  onMonthChange,
+  showProjections = false,
   onStrategySaved,
 }) => {
   const { currentUser, availableUsers } = useUser();
@@ -170,29 +168,20 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
   }, [propMonthKey]);
 
   const [strategy, setStrategy] = useState<SavingsStrategy>(() =>
-    propMonthKey || isModal
-      ? getSavingsStrategyForMonth(
-          propMonthKey || getCurrentMonthKey(),
-          currentUser,
-        )
-      : getSavingsStrategy(currentUser),
+    getSavingsStrategyForMonth(propMonthKey || getCurrentMonthKey(), currentUser),
   );
 
   // Synchroniser la stratégie lors d'un changement d'utilisateur actif ou de mois actif
   useEffect(() => {
     const updateStrategy = () => {
-      setStrategy(
-        propMonthKey || isModal
-          ? getSavingsStrategyForMonth(activeMonth, currentUser)
-          : getSavingsStrategy(currentUser),
-      );
+      setStrategy(getSavingsStrategyForMonth(activeMonth, currentUser));
     };
     updateStrategy();
     window.addEventListener("savings_strategy_updated", updateStrategy);
     return () => {
       window.removeEventListener("savings_strategy_updated", updateStrategy);
     };
-  }, [currentUser, activeMonth, propMonthKey, isModal]);
+  }, [currentUser, activeMonth]);
 
   // Écouter les mises à jour des réglages/couleurs utilisateurs
   const [themeVersion, setThemeVersion] = useState(0);
@@ -358,15 +347,11 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
   // Save changes automatically when strategy updates
   const updateStrategy = (newStrategy: SavingsStrategy) => {
     setStrategy(newStrategy);
-    if (propMonthKey || isModal) {
-      saveSavingsStrategyForMonth(activeMonth, newStrategy, currentUser);
-      try {
-        applyStrategyToMonth(activeMonth, newStrategy);
-      } catch (e) {
-        console.error("Erreur sync tricount:", e);
-      }
-    } else {
-      saveSavingsStrategy(currentUser, newStrategy);
+    saveSavingsStrategyForMonth(activeMonth, newStrategy, currentUser);
+    try {
+      applyStrategyToMonth(activeMonth, newStrategy);
+    } catch (e) {
+      console.error("Erreur sync tricount:", e);
     }
     onStrategySaved?.(newStrategy);
     setShowSavedToast(true);
@@ -380,6 +365,40 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
     const configured = getAllConfiguredStrategyMonths();
     const set = new Set<string>([...list, ...configured, activeMonth]);
     return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [activeMonth]);
+
+  // Onglets des mois : activité Tricount + stratégies configurées + mois courant et 3 mois futurs préparables
+  const monthTabs = useMemo(() => {
+    const set = new Set<string>([
+      ...getAvailableMonths(),
+      ...getAllConfiguredStrategyMonths(),
+      getCurrentMonthKey(),
+      activeMonth,
+    ]);
+    const [curYear, curMonthNum] = getCurrentMonthKey().split("-").map(Number);
+    for (let i = 1; i <= 3; i++) {
+      const d = new Date(curYear, curMonthNum - 1 + i, 1);
+      set.add(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      );
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [activeMonth]);
+
+  // Sélection d'un mois : met à jour la stratégie affichée et l'URL
+  const handleSelectMonth = (month: string) => {
+    if (month === activeMonth) return;
+    setActiveMonth(month);
+    onMonthChange?.(month);
+  };
+
+  // Garder l'onglet du mois actif visible dans la barre d'onglets
+  const activeMonthTabRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    activeMonthTabRef.current?.scrollIntoView({
+      inline: "center",
+      block: "nearest",
+    });
   }, [activeMonth]);
 
   const handleApplyStrategyFromOtherMonth = (sourceMonth: string) => {
@@ -544,15 +563,11 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
 
   // Manual explicit save button handler
   const handleManualSave = () => {
-    if (propMonthKey || isModal) {
-      saveSavingsStrategyForMonth(activeMonth, strategy, currentUser);
-      try {
-        applyStrategyToMonth(activeMonth, strategy);
-      } catch (e) {
-        console.error("Erreur synchronisation tricount:", e);
-      }
-    } else {
-      saveSavingsStrategy(currentUser, strategy);
+    saveSavingsStrategyForMonth(activeMonth, strategy, currentUser);
+    try {
+      applyStrategyToMonth(activeMonth, strategy);
+    } catch (e) {
+      console.error("Erreur synchronisation tricount:", e);
     }
     onStrategySaved?.(strategy);
     setShowSavedToast(true);
@@ -1222,34 +1237,32 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
   );
 
   return (
-    <div className={`space-y-8 ${isModal ? "p-4 sm:p-6" : "pb-12"}`}>
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] pb-5">
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
-              {isModal
-                ? `Stratégie d'épargne du mois — ${formatMonthLabel(activeMonth)}`
-                : "Stratégie d'Épargne & Prévisions"}
+              Stratégie d'Épargne
             </h1>
-            {isModal &&
-              (hasCustomStrategyForMonth(activeMonth) ? (
-                <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
-                  <CheckCircle2 size={12} /> Personnalisée pour ce mois
-                </span>
-              ) : (
-                <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
-                  Reconduite depuis{" "}
-                  {getSourceStrategyMonthFor(activeMonth)
-                    ? formatMonthLabel(getSourceStrategyMonthFor(activeMonth)!)
-                    : "la base"}
-                </span>
-              ))}
+            {hasCustomStrategyForMonth(activeMonth) ? (
+              <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
+                <CheckCircle2 size={12} /> Personnalisée pour{" "}
+                {formatMonthLabel(activeMonth)}
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                Reconduite depuis{" "}
+                {getSourceStrategyMonthFor(activeMonth)
+                  ? formatMonthLabel(getSourceStrategyMonthFor(activeMonth)!)
+                  : "la base"}
+              </span>
+            )}
           </div>
           <p className="text-sm text-[#555555] mt-1">
-            {isModal
-              ? "Ajustez les revenus, charges incompressibles et poches d'investissement pour ce mois."
-              : "Budget de couple ou solo, ventilation détaillée par sous-postes et simulation d'objectifs dans le temps."}
+            Ajustez les revenus, charges incompressibles et poches
+            d'investissement de ce mois. Chaque mois se reconduit
+            automatiquement depuis le mois précédent.
           </p>
         </div>
 
@@ -1387,75 +1400,87 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
           >
             <RotateCcw size={15} />
           </button>
-
-          {/* Bouton Fermer (si mode modale) */}
-          {isModal && onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 text-xs font-medium border border-[rgba(255,255,255,0.08)] border-[rgba(255,255,255,0.06)] rounded-xl text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)] bg-[#111111] dark:bg-[#1a1a1a] transition shadow-sm ml-1"
-              title="Fermer la modale"
-            >
-              <X size={16} />
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Barre de copie rapide et d'héritage pour les mois (Mode Modale) */}
-      {isModal && (
-        <div className="bg-gradient-to-r from-primary-500/10 via-emerald-500/10 to-transparent border border-[#c8a55e]/20 dark:border-[#c8a55e]/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
-          <div className="flex items-start md:items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-[#c8a55e] text-white shadow-sm flex-shrink-0 mt-0.5 md:mt-0">
-              <Calendar size={18} />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-[#f5f5f5] uppercase tracking-wider">
-                Règle de reconduction
-              </div>
-              <p className="text-xs text-[#8a8a8a] mt-0.5">
-                La stratégie du dernier mois s'applique automatiquement au mois
-                suivant. Vous pouvez la personnaliser ici ou copier celle d'un
-                autre mois.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 bg-[#111111] dark:bg-[#15171a] border border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] rounded-xl p-1.5 shadow-xs">
-            <RotateCcw
-              size={14}
-              className="text-[#555555] ml-1.5 flex-shrink-0"
-            />
-            <span className="text-xs text-[#8a8a8a] font-medium whitespace-nowrap">
-              Copier :
-            </span>
-            <select
-              value={selectedSourceMonth}
-              onChange={(e) => setSelectedSourceMonth(e.target.value)}
-              className="text-xs font-semibold bg-transparent border-0 text-[#f5f5f5]  focus:ring-0 cursor-pointer py-1"
-            >
-              <option value="">Choisir un mois...</option>
-              {availableMonthsList
-                .filter((m) => m !== activeMonth)
-                .map((m) => (
-                  <option key={m} value={m}>
-                    Stratégie de {formatMonthLabel(m)}
-                  </option>
-                ))}
-            </select>
+      {/* Onglets des mois — chaque mois a sa stratégie (reconduite automatiquement) */}
+      <div className="flex items-center gap-2 sm:gap-6 overflow-x-auto scrollbar-none py-0.5 border-b border-[rgba(255,255,255,0.06)]">
+        {monthTabs.map((m) => {
+          const isActive = m === activeMonth;
+          const isCustom = hasCustomStrategyForMonth(m);
+          const source = getSourceStrategyMonthFor(m);
+          const tabTitle = isCustom
+            ? "Stratégie personnalisée pour ce mois"
+            : source
+              ? `Reconduite depuis ${formatMonthLabel(source)}`
+              : "Stratégie par défaut";
+          return (
             <button
+              key={m}
               type="button"
-              disabled={!selectedSourceMonth}
-              onClick={() =>
-                handleApplyStrategyFromOtherMonth(selectedSourceMonth)
-              }
-              className="px-3 py-1 text-xs font-semibold rounded-lg bg-[#c8a55e] text-white hover:bg-[#d4b06a] disabled:opacity-40 disabled:cursor-not-allowed transition shadow-xs whitespace-nowrap"
+              ref={isActive ? activeMonthTabRef : undefined}
+              onClick={() => handleSelectMonth(m)}
+              title={tabTitle}
+              className={`pb-2.5 text-sm font-bold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+                isActive
+                  ? "border-[#c8a55e] text-[#c8a55e]"
+                  : "border-transparent text-[#555555] hover:text-[#f5f5f5]"
+              }`}
             >
-              Appliquer à {formatMonthLabel(activeMonth).split(" ")[0]}
+              <Calendar
+                size={15}
+                className={isActive ? "text-[#c8a55e]" : "text-[#555555]"}
+              />
+              <span>{formatMonthLabel(m)}</span>
+              {isCustom && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-[#c8a55e]"
+                  aria-hidden="true"
+                />
+              )}
             </button>
-          </div>
+          );
+        })}
+      </div>
+
+      {/* Règle de reconduction — ligne discrète + copie depuis un autre mois */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#111111] px-4 py-3">
+        <p className="text-xs text-[#8a8a8a] flex items-center gap-2">
+          <Calendar size={14} className="text-[#c8a55e] flex-shrink-0" />
+          <span>
+            La stratégie du dernier mois s'applique automatiquement au mois
+            suivant — ou copiez la stratégie d'un autre mois :
+          </span>
+        </p>
+        <div className="flex items-center gap-2 bg-[#0a0a0a] border border-[rgba(255,255,255,0.06)] rounded-lg p-1 shadow-xs flex-shrink-0">
+          <RotateCcw
+            size={14}
+            className="text-[#555555] ml-1.5 flex-shrink-0"
+          />
+          <select
+            value={selectedSourceMonth}
+            onChange={(e) => setSelectedSourceMonth(e.target.value)}
+            className="text-xs font-semibold bg-transparent border-0 text-[#f5f5f5] focus:ring-0 cursor-pointer py-1"
+          >
+            <option value="">Choisir un mois...</option>
+            {availableMonthsList
+              .filter((m) => m !== activeMonth)
+              .map((m) => (
+                <option key={m} value={m}>
+                  Stratégie de {formatMonthLabel(m)}
+                </option>
+              ))}
+          </select>
+          <button
+            type="button"
+            disabled={!selectedSourceMonth}
+            onClick={() => handleApplyStrategyFromOtherMonth(selectedSourceMonth)}
+            className="px-3 py-1 text-xs font-semibold rounded-lg bg-[#c8a55e] text-white hover:bg-[#d4b06a] disabled:opacity-40 disabled:cursor-not-allowed transition shadow-xs whitespace-nowrap"
+          >
+            Appliquer à {formatMonthLabel(activeMonth).split(" ")[0]}
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Centered View Filter Switcher (Simple text with navbar-like active underline) */}
       {household.enabled && (
@@ -4024,8 +4049,8 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
         </div>
       </div>
 
-      {/* Section Simulateur & Projections dans le temps */}
-      {!isModal && (
+      {/* Section Simulateur & Projections dans le temps (masquée : projections non nécessaires ici) */}
+      {showProjections && (
         <div className="card p-6 space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>

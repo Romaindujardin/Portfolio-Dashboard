@@ -17,6 +17,53 @@ import {
   Wallet2,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
+import type { LucideIcon } from "lucide-react";
+
+interface NavChild {
+  name: string;
+  path: string;
+}
+
+interface NavItem {
+  name: string;
+  path: string;
+  icon: LucideIcon;
+  children?: NavChild[];
+}
+
+const navItems: NavItem[] = [
+  {
+    name: "Synthèse",
+    path: "/",
+    icon: LayoutGrid,
+  },
+  {
+    name: "Portefeuille",
+    path: "/investments",
+    icon: BarChart3,
+  },
+  {
+    name: "Banque",
+    path: "/banking",
+    icon: Landmark,
+  },
+  {
+    name: "Budget",
+    path: "/budget",
+    icon: Receipt,
+    children: [{ name: "Stratégie", path: "/strategy" }],
+  },
+  {
+    name: "Épargne",
+    path: "/savings",
+    icon: PiggyBank,
+  },
+  {
+    name: "Conseiller IA",
+    path: "/ai-analysis",
+    icon: Sparkles,
+  },
+];
 
 const Sidebar: React.FC = () => {
   const location = useLocation();
@@ -71,38 +118,18 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  const navItems = [
-    {
-      name: "Synthèse",
-      path: "/",
-      icon: LayoutGrid,
-    },
-    {
-      name: "Portefeuille",
-      path: "/investments",
-      icon: BarChart3,
-    },
-    {
-      name: "Banque",
-      path: "/banking",
-      icon: Landmark,
-    },
-    {
-      name: "Budget",
-      path: "/budget",
-      icon: Receipt,
-    },
-    {
-      name: "Épargne",
-      path: "/savings",
-      icon: PiggyBank,
-    },
-    {
-      name: "Conseiller IA",
-      path: "/ai-analysis",
-      icon: Sparkles,
-    },
-  ];
+  // Sous-page(s) dépliée(s) : « Budget › Stratégie » s'ouvre automatiquement sur sa route
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  React.useEffect(() => {
+    const activeGroup = navItems.find((item) =>
+      item.children?.some((child) => location.pathname === child.path),
+    );
+    if (activeGroup) {
+      setOpenGroups((prev) =>
+        prev[activeGroup.name] ? prev : { ...prev, [activeGroup.name]: true },
+      );
+    }
+  }, [location.pathname]);
 
   const handleAddUser = () => {
     if (newUserName.trim() && availableUsers.length < 2) {
@@ -150,16 +177,75 @@ const Sidebar: React.FC = () => {
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
           const Icon = item.icon;
+          const hasChildren = Boolean(item.children?.length);
+          const isGroupOpen = hasChildren
+            ? Boolean(openGroups[item.name])
+            : false;
           return (
-            <Link
-              key={item.name}
-              to={item.path}
-              onClick={() => setIsMobileOpen(false)}
-              className={`sidebar-link ${isActive ? "active" : ""}`}
-            >
-              <Icon className="w-[18px] h-[18px] flex-shrink-0" />
-              <span>{item.name}</span>
-            </Link>
+            <React.Fragment key={item.name}>
+              <div className="flex items-center gap-0.5">
+                <Link
+                  to={item.path}
+                  onClick={() => setIsMobileOpen(false)}
+                  className={`sidebar-link flex-1 min-w-0 ${isActive ? "active" : ""}`}
+                >
+                  <Icon className="w-[18px] h-[18px] flex-shrink-0" />
+                  <span>{item.name}</span>
+                </Link>
+                {hasChildren && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenGroups((prev) => ({
+                        ...prev,
+                        [item.name]: !isGroupOpen,
+                      }))
+                    }
+                    className="p-1.5 rounded-md text-[#555555] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)] transition-all duration-200 flex-shrink-0"
+                    title={
+                      isGroupOpen
+                        ? "Masquer la sous-page"
+                        : "Afficher la sous-page"
+                    }
+                    aria-label={
+                      isGroupOpen
+                        ? `Masquer la sous-page ${item.children![0].name}`
+                        : `Afficher la sous-page ${item.children![0].name}`
+                    }
+                    aria-expanded={isGroupOpen}
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-200 ${
+                        isGroupOpen ? "rotate-180" : ""
+                      }`}
+                    />
+                  </button>
+                )}
+              </div>
+              {hasChildren && isGroupOpen && (
+                <div className="space-y-1 pt-0.5">
+                  {item.children!.map((child) => {
+                    const isChildActive =
+                      location.pathname === child.path;
+                    return (
+                      <Link
+                        key={child.path}
+                        to={child.path}
+                        onClick={() => setIsMobileOpen(false)}
+                        className={`flex items-center px-4 py-2 pl-[46px] rounded-lg text-sm font-medium transition-all duration-200 ${
+                          isChildActive
+                            ? "text-[#c8a55e] bg-[rgba(200,165,94,0.08)]"
+                            : "text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)]"
+                        }`}
+                      >
+                        <span>{child.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </React.Fragment>
           );
         })}
       </nav>
