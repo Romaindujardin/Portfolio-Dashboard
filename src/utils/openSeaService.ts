@@ -1,6 +1,7 @@
 import { getOpenSeaApiKey } from "./userSettings";
+import { API_ORIGIN } from "./apiBase";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const API_BASE_URL = API_ORIGIN;
 
 interface NFTAsset {
   identifier: string;

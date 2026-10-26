@@ -1,0 +1,16 @@
+# Domaine public défini dans .env.production (sans https://).
+# Caddy obtient et renouvelle automatiquement le certificat Let's Encrypt.
+#
+# Prérequis : le DNS de APP_DOMAIN doit pointer vers ce serveur, et les ports
+# 80 et 443 doivent être accessibles depuis Internet.
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:3001
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000"
+	}
+}

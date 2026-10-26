@@ -10,6 +10,7 @@ import Savings from "./pages/Savings";
 import AIAnalysis from "./pages/AIAnalysis";
 import Settings from "./pages/Settings";
 import Banking from "./pages/Banking";
+import Patrimoine from "./pages/Patrimoine";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { UserProvider } from "./contexts/UserContext";
 import { initializeCryptoDatabase } from "./utils/cryptoDatabase";
@@ -73,6 +74,7 @@ function App() {
                   <Route path="/savings" element={<Savings />} />
                   <Route path="/ai-analysis" element={<AIAnalysis />} />
                   <Route path="/banking" element={<Banking />} />
+                  <Route path="/patrimoine" element={<Patrimoine />} />
                   <Route path="/settings/:username" element={<Settings />} />
                 </Routes>
               </ErrorBoundary>

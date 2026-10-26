@@ -1,0 +1,55 @@
+services:
+  app:
+    build: .
+    image: portfolio-dashboard:latest
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      SERVE_STATIC: "true"
+      DATABASE_PATH: /app/data/portfolio.db
+    volumes:
+      # Base SQLite, clé de chiffrement locale et sauvegardes JSON.
+      - ./data:/app/data
+      # Clé PEM Enable Banking (optionnelle si configurée via l'interface).
+      - ./secrets:/app/secrets:ro
+    ports:
+      # Utile pour un reverse proxy déjà présent sur l'hôte (Nginx, Traefik…).
+      # Non exposé sur Internet : uniquement loopback.
+      - "127.0.0.1:3001:3001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    profiles: ["tls"]
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

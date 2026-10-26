@@ -74,9 +74,14 @@ const windowStub = {
 Object.assign(globalThis, { window: windowStub, localStorage: appStorage });
 
 // Redirection transparente des appels API des modules front vers le serveur de test.
+// Les URLs relatives (`/api/...`, utilisées en production) sont résolues vers
+// le backend local, comme le ferait le navigateur.
 const realFetch = globalThis.fetch.bind(globalThis);
 
 globalThis.fetch = ((input: unknown, init?: RequestInit) => {
+  if (typeof input === "string" && input.startsWith("/")) {
+    input = APP_SERVER_URL + input;
+  }
   if (typeof input === "string" && input.startsWith(APP_SERVER_URL)) {
     input = TEST_SERVER.baseUrl + input.slice(APP_SERVER_URL.length);
   }

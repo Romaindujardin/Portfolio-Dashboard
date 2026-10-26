@@ -1,4 +1,5 @@
 import { Wallet, WalletAsset, BankCsvUpload } from "../types/index.js";
+import { API_BASE } from "./apiBase";
 
 // Normalise un champ "blockchains" potentiellement multi-encodé (JSON dans JSON)
 export const parseBlockchains = (raw: unknown): string[] => {
@@ -15,7 +16,7 @@ export const parseBlockchains = (raw: unknown): string[] => {
 
 // Service de base de données qui utilise l'API REST
 class DatabaseService {
-  private apiBase = `${import.meta.env.VITE_API_URL || "http://localhost:3001"}/api`;
+  private apiBase = API_BASE;
 
   // ===== GESTION DES WALLETS =====
 

@@ -7,6 +7,7 @@ import {
   SplitMode,
 } from "../types";
 import { getAccentColorDef, getUserAccentColor } from "./theme";
+import { API_BASE } from "./apiBase";
 
 export const getToolUsers = (): string[] => {
   if (typeof window === "undefined") return ["Romain"];
@@ -587,7 +588,7 @@ export const saveStoredMonthlyStrategies = (
 };
 
 // ===== SYNCHRONISATION SERVEUR & BASE DE DONNÉES (PERSISTANCE ROBUSTE) =====
-const SAVINGS_API_BASE = "http://localhost:3001/api/database/savings";
+const SAVINGS_API_BASE = `${API_BASE}/database/savings`;
 
 export const fetchSavingsStrategyFromDatabase = async (
   userId: string = "Romain"

@@ -3,8 +3,9 @@ import type {
   BoursoAccountMapping,
   BoursoSyncResult,
 } from "../types";
+import { API_BASE } from "./apiBase";
 
-const apiBase = `${import.meta.env.VITE_API_URL || "http://localhost:3001"}/api`;
+const apiBase = API_BASE;
 
 export async function fetchBoursoAccounts(params: {
   customerId: string;

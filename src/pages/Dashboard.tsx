@@ -38,6 +38,7 @@ import {
 import { Link } from "react-router-dom";
 import MarketClock from "../components/MarketClock";
 import CashflowSpaghetti from "../components/CashflowSpaghetti";
+import PortfolioBridgeCard from "../components/PortfolioBridgeCard";
 import { useUser } from "../contexts/UserContext";
 import { getUserSettings } from "../utils/userSettings";
 import {
@@ -1612,6 +1613,8 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Carte additive : nouveau patrimoine connecté (n'altère aucun calcul existant) */}
+      <PortfolioBridgeCard />
 
       {/* ===== CONTENU PRINCIPAL PAR PORTEFEUILLE (BENTO GRID) ===== */}
       {unifiedHoldings.length === 0 &&

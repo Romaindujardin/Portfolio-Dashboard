@@ -10,6 +10,7 @@ import {
   Plus,
   Settings,
   Landmark,
+  Building2,
   Eye,
   EyeOff,
   Receipt,
@@ -46,6 +47,11 @@ const navItems: NavItem[] = [
     name: "Banque",
     path: "/banking",
     icon: Landmark,
+  },
+  {
+    name: "Patrimoine",
+    path: "/patrimoine",
+    icon: Building2,
   },
   {
     name: "Budget",

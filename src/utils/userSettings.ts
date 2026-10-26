@@ -4,6 +4,7 @@ import type {
   BoursoAccountMapping,
   InvestmentCsvColumnMapping,
 } from "../types";
+import { API_BASE } from "./apiBase";
 
 export interface UserSettings {
   binanceApiKey: string;
@@ -111,7 +112,7 @@ export const saveUserSettings = (
   }
 };
 
-const SETTINGS_API_BASE = "http://localhost:3001/api/database/user-settings";
+const SETTINGS_API_BASE = `${API_BASE}/database/user-settings`;
 
 export const fetchUserSettingsFromDatabase = async (
   username: string = "Romain"

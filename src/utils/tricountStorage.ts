@@ -18,6 +18,7 @@ import {
   getTotalMonthlyIncome,
   calculateHouseholdSummary,
 } from "./savingsStorage";
+import { API_BASE as ROOT_API_BASE } from "./apiBase";
 
 export type {
   TricountExpense,
@@ -49,7 +50,7 @@ export const isPlacementPocket = (
 const STORAGE_KEY_EXPENSES = "portfolio_tricount_expenses";
 const STORAGE_KEY_INCOMES = "portfolio_tricount_incomes";
 const STORAGE_KEY_CONFIGS = "portfolio_tricount_monthly_configs";
-const API_BASE = "http://localhost:3001/api/database/tricount";
+const API_BASE = `${ROOT_API_BASE}/database/tricount`;
 
 export const fetchTricountFromDatabase = async (userId: string = "Romain") => {
   try {

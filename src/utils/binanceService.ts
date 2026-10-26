@@ -1,4 +1,5 @@
 import { WalletAsset } from "../types";
+import { API_ORIGIN } from "./apiBase";
 // Récupère les prix depuis l'API Binance (pas besoin d'authentification)
 async function getCryptoPrices(
   symbols: string[]
@@ -44,7 +45,7 @@ async function getCryptoPrices(
   }
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const API_BASE_URL = API_ORIGIN;
 
 // Récupère les assets d'un compte Binance
 export async function getBinanceAccountInfo(

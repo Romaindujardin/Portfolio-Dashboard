@@ -7,26 +7,163 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import DatabaseManager from "./src/utils/database/database.js";
+import { initializePortfolioSchema } from "./server/db/portfolioSchema.js";
+import { createPortfolioRouter } from "./server/routes/portfolio.js";
+
+// En local, `.env` est chargé par Vite pour le frontend ; on fait de même pour
+// le backend afin que PORT, APP_URL, BASIC_AUTH_* ou DATABASE_PATH soient
+// cohérents. Docker injecte déjà les variables via `env_file`.
+const envFile = path.resolve(process.cwd(), ".env");
+if (typeof process.loadEnvFile === "function" && fs.existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+}
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
+const HOST = process.env.HOST || "127.0.0.1";
+const APP_URL = (process.env.APP_URL || "https://localhost:5173").replace(/\/+$/, "");
+const SERVE_STATIC =
+  process.env.SERVE_STATIC === "true" || process.env.NODE_ENV === "production";
+const DIST_DIR = path.resolve(process.cwd(), "dist");
 
-// Middleware — CORS restreint aux origines locales (application locale uniquement).
+// Derrière Caddy/Nginx/Traefik, les en-têtes X-Forwarded-* doivent être pris
+// en compte. En local, on reste sur le comportement d'origine.
+const trustProxy = process.env.TRUST_PROXY;
+if (
+  trustProxy === "true" ||
+  trustProxy === "1" ||
+  (trustProxy === undefined && process.env.NODE_ENV === "production")
+) {
+  app.set("trust proxy", 1);
+}
+app.disable("x-powered-by");
+
+// Middleware — CORS : origines locales + origine publique configurée.
 // Les requêtes sans Origin (curl, clients natifs) restent autorisées.
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const configuredOrigins = String(process.env.CORS_ORIGINS || APP_URL || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const isAllowedOrigin = (origin) =>
+  !origin || LOCAL_ORIGIN.test(origin) || configuredOrigins.includes(origin);
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || LOCAL_ORIGIN.test(origin)) return callback(null, true);
-      return callback(null, false);
-    },
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
   }),
 );
+
+// Authentification HTTP Basic optionnelle mais fortement recommandée dès que
+// l'application est exposée sur Internet. Elle protège aussi les fichiers
+// statiques et l'API, pas seulement la page d'accueil.
+const BASIC_AUTH_USER = String(process.env.BASIC_AUTH_USER || "");
+const BASIC_AUTH_PASSWORD = String(process.env.BASIC_AUTH_PASSWORD || "");
+const authEnabled = Boolean(BASIC_AUTH_USER && BASIC_AUTH_PASSWORD);
+const requireAuth = process.env.REQUIRE_AUTH === "true";
+const PLACEHOLDER_PASSWORD = "change-me-with-a-long-random-password";
+
+if (BASIC_AUTH_PASSWORD === PLACEHOLDER_PASSWORD) {
+  console.error(
+    "❌ BASIC_AUTH_PASSWORD utilise encore la valeur d'exemple. " +
+      "Choisissez un mot de passe unique avant de démarrer.",
+  );
+  process.exit(1);
+}
+
+if (requireAuth && !authEnabled) {
+  console.error(
+    "❌ REQUIRE_AUTH=true mais BASIC_AUTH_USER / BASIC_AUTH_PASSWORD ne sont pas définis.",
+  );
+  process.exit(1);
+}
+if (!authEnabled && process.env.NODE_ENV === "production") {
+  console.warn(
+    "⚠️  Application en production sans authentification applicative. " +
+      "Définissez BASIC_AUTH_USER et BASIC_AUTH_PASSWORD, ou protégez-la par un VPN/reverse proxy.",
+  );
+}
+if (process.env.NODE_ENV === "production" && !process.env.APP_URL) {
+  console.warn(
+    "⚠️  APP_URL n'est pas défini : le retour OAuth utilisera https://localhost:5173. " +
+      "Définissez APP_URL avec l'origine HTTPS publique.",
+  );
+}
+if (
+  process.env.NODE_ENV === "production" &&
+  !process.env.ENABLE_BANKING_REDIRECT_URI &&
+  !process.env.ENABLEBANKING_REDIRECT_URI
+) {
+  console.warn(
+    "⚠️  ENABLE_BANKING_REDIRECT_URI n'est pas défini : la configuration stockée en base sera utilisée. " +
+      "En production, définissez l'URL HTTPS exacte de callback.",
+  );
+}
+
+const safeEqual = (left, right) => {
+  const a = Buffer.from(String(left));
+  const b = Buffer.from(String(right));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+if (authEnabled) {
+  app.use((req, res, next) => {
+    if (req.method === "OPTIONS") return next();
+    if (req.path === "/api/health" || req.path === "/healthz") return next();
+
+    const header = String(req.headers.authorization || "");
+    if (!header.startsWith("Basic ")) {
+      res.set("WWW-Authenticate", 'Basic realm="Portfolio", charset="UTF-8"');
+      return res.status(401).send("Authentification requise");
+    }
+
+    const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+    const separator = decoded.indexOf(":");
+    const user = separator >= 0 ? decoded.slice(0, separator) : "";
+    const password = separator >= 0 ? decoded.slice(separator + 1) : "";
+    if (safeEqual(user, BASIC_AUTH_USER) && safeEqual(password, BASIC_AUTH_PASSWORD)) {
+      return next();
+    }
+
+    res.set("WWW-Authenticate", 'Basic realm="Portfolio", charset="UTF-8"');
+    return res.status(401).send("Identifiants invalides");
+  });
+}
+
+// Protection CSRF simple : les navigateurs envoient Origin sur les requêtes
+// mutantes. Une origine inconnue est refusée avant même de lire le corps.
+app.use((req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
+    return next();
+  }
+  const origin = req.headers.origin;
+  if (origin && !isAllowedOrigin(origin)) {
+    return res.status(403).json({ error: "Origin not allowed" });
+  }
+  return next();
+});
+
 app.use(express.json({ limit: "10mb" }));
 
 // Initialiser la base de données
 const dbManager = DatabaseManager.getInstance();
 dbManager.initializeTables();
+
+// Tables additives du patrimoine connecté (connecteurs, immobilier, prêts…).
+// Aucune table historique n'est modifiée : la logique CSV/budget/épargne reste
+// strictement inchangée.
+initializePortfolioSchema(dbManager.getDatabase());
+
+// Endpoint de santé pour Docker/Caddy et les vérifications de déploiement.
+// Volontairement accessible sans authentification.
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "portfolio-dashboard",
+    uptime: Math.round(process.uptime()),
+    static: SERVE_STATIC,
+  });
+});
+app.get("/healthz", (req, res) => res.status(200).send("ok"));
 
 // ===== PERSISTANCE DE SECOURS SUR DISQUE (DOUBLE PROTECTION) =====
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -1634,8 +1771,61 @@ app.put("/api/database/wallets/:id/nfts/:index/visibility", (req, res) => {
   }
 });
 
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`🚀 Server running on http://localhost:${PORT} (loopback uniquement)`);
+// ===== PATRIMOINE CONNECTÉ (connecteurs, immobilier, prêts, marché) =====
+app.use(
+  "/api/portfolio",
+  createPortfolioRouter({
+    db: dbManager.getDatabase(),
+    enableBankingBaseUrl:
+      process.env.ENABLE_BANKING_BASE_URL ||
+      process.env.ENABLEBANKING_BASE_URL ||
+      null,
+  }),
+);
+
+// Toute route /api non trouvée doit renvoyer du JSON, jamais index.html.
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "API route not found" });
+});
+
+// En production, Express sert le build Vite et l'API sur la même origine.
+// C'est ce qui permet d'utiliser des URLs relatives côté navigateur et
+// d'éviter les problèmes de CORS/mixed-content sur mobile.
+const indexHtmlPath = path.join(DIST_DIR, "index.html");
+if (SERVE_STATIC && fs.existsSync(indexHtmlPath)) {
+  app.use(
+    express.static(DIST_DIR, {
+      index: false,
+      maxAge: process.env.NODE_ENV === "production" ? "1h" : 0,
+    }),
+  );
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    if (req.path === "/api" || req.path.startsWith("/api/")) return next();
+    return res.sendFile(indexHtmlPath);
+  });
+  console.log(`🖥️  Frontend servi depuis ${DIST_DIR}`);
+} else if (SERVE_STATIC) {
+  console.warn(
+    `⚠️  SERVE_STATIC activé mais ${indexHtmlPath} est absent. Lancez \`npm run build\`.`,
+  );
+}
+
+app.use((err, req, res, next) => {
+  console.error("Erreur serveur non gérée:", err);
+  if (res.headersSent) return next(err);
+  return res.status(500).json({ error: "Internal server error" });
+});
+
+app.listen(PORT, HOST, () => {
+  const displayHost = HOST === "0.0.0.0" ? "localhost" : HOST;
+  console.log(`🚀 Server running on http://${displayHost}:${PORT}`);
   console.log(`📊 Database: SQLite initialized`);
-  console.log(`🔒 CORS restreint aux origines locales`);
+  console.log(`🌐 APP_URL: ${APP_URL}`);
+  console.log(
+    `🔐 Authentification applicative: ${authEnabled ? "activée" : "désactivée"}`,
+  );
+  console.log(
+    `🔒 CORS: origines locales${configuredOrigins.length ? ` + ${configuredOrigins.join(", ")}` : ""}`,
+  );
 });
