@@ -508,23 +508,39 @@ export class PortfolioRepository {
   }
 
   upsertHolding(userId, accountId, data) {
-    const existing = data.ticker
-      ? this.db
-          .prepare(
-            "SELECT * FROM holdings WHERE account_id = ? AND ticker = ?",
-          )
-          .get(accountId, data.ticker)
-      : null;
+    let existing = null;
+    if (data.ticker) {
+      existing = this.db
+        .prepare(
+          "SELECT * FROM holdings WHERE account_id = ? AND ticker = ?",
+        )
+        .get(accountId, data.ticker);
+    }
+    if (!existing && data.isin) {
+      existing = this.db
+        .prepare(
+          "SELECT * FROM holdings WHERE account_id = ? AND isin = ?",
+        )
+        .get(accountId, data.isin);
+    }
+    if (!existing && data.name) {
+      existing = this.db
+        .prepare(
+          "SELECT * FROM holdings WHERE account_id = ? AND name = ?",
+        )
+        .get(accountId, data.name);
+    }
     const now = nowIso();
     if (existing) {
       this.db
         .prepare(
-          `UPDATE holdings SET isin = ?, name = ?, quantity = ?, cost_basis = ?,
+          `UPDATE holdings SET isin = ?, ticker = ?, name = ?, quantity = ?, cost_basis = ?,
            price = ?, currency = ?, last_price_at = ?, metadata_json = ?, updated_at = ?
            WHERE id = ?`,
         )
         .run(
           data.isin || existing.isin,
+          data.ticker || existing.ticker,
           data.name || existing.name,
           Number(data.quantity ?? existing.quantity) || 0,
           data.costBasis == null ? existing.cost_basis : Number(data.costBasis),
@@ -573,6 +589,22 @@ export class PortfolioRepository {
         .prepare("DELETE FROM holdings WHERE id = ? AND account_id = ? AND user_id = ?")
         .run(id, accountId, userId).changes > 0
     );
+  }
+
+  updateHolding(id, data) {
+    const fields = [];
+    const values = [];
+    if ("ticker" in data) { fields.push("ticker = ?"); values.push(data.ticker); }
+    if ("isin" in data) { fields.push("isin = ?"); values.push(data.isin); }
+    if ("name" in data) { fields.push("name = ?"); values.push(data.name); }
+    if ("price" in data) { fields.push("price = ?"); values.push(data.price); }
+    if ("lastPriceAt" in data) { fields.push("last_price_at = ?"); values.push(data.lastPriceAt); }
+    if ("metadata" in data) { fields.push("metadata_json = ?"); values.push(toJson(data.metadata)); }
+    if (fields.length === 0) return;
+    fields.push("updated_at = ?");
+    values.push(nowIso());
+    values.push(id);
+    this.db.prepare(`UPDATE holdings SET ${fields.join(", ")} WHERE id = ?`).run(...values);
   }
 
   updateHoldingPrice(id, price, lastPriceAt, metadata = null) {

@@ -1173,8 +1173,10 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     "/market/refresh",
     asyncHandler(async (req, res) => {
       const userId = bodyUserId(req);
+      const accountId = asOptionalString(req.body?.accountId || req.body?.account_id);
       const result = await market.refreshHoldings(userId, {
         force: toBool(req.body?.force, true),
+        accountId,
       });
       res.json(result);
     }),

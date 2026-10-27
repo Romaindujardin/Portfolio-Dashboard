@@ -1366,7 +1366,7 @@ const HoldingsModal: React.FC<{
     setBusy(true);
     setError("");
     try {
-      const result = await refreshPrices(userId, true);
+      const result = await refreshPrices(userId, true, account.id);
       await load();
       await onChanged();
       notify(

@@ -10,6 +10,7 @@ import path from "path";
 import { encryptJson, decryptJson, isEncryptionAvailable } from "../lib/secrets.js";
 import { nowIso, round2 } from "../lib/validate.js";
 import { PROVIDERS } from "../connectors/types.js";
+import { convertBoursoSymbolToYahoo } from "./marketData.js";
 
 export const BOURSO_PROVIDER = PROVIDERS.BOURSO_SIDECAR || "bourso-sidecar";
 
@@ -426,10 +427,12 @@ export const syncBoursoSidecar = async ({
               const buyingPrice = Number(row.buying_price) || 0;
               const amount = Number(row.amount) || qty * lastPrice;
               const costBasis = buyingPrice > 0 ? buyingPrice * qty : null;
+              const rawSymbol = (row.symbol || "").trim();
+              const yahooTicker = convertBoursoSymbolToYahoo(rawSymbol);
 
               repository.upsertHolding(userId, syncedAccount.id, {
-                isin: row.symbol || null,
-                ticker: row.symbol || null,
+                isin: /^[A-Z]{2}[A-Z0-9]{10}$/i.test(rawSymbol) ? rawSymbol.toUpperCase() : null,
+                ticker: yahooTicker || rawSymbol || null,
                 name: decodeHtmlEntities(row.label || row.symbol),
                 quantity: qty,
                 costBasis,

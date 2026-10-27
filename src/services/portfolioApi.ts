@@ -433,13 +433,13 @@ export const resolveIsin = (isin: string) =>
     query: { isin },
   }).then((data) => data.security);
 
-export const refreshPrices = (userId: string, force = true) =>
+export const refreshPrices = (userId: string, force = true, accountId?: string) =>
   request<{
     updated: number;
     failed: Array<{ ticker: string; error: string }>;
     accounts: number;
   }>("/market/refresh", {
-    ...json({ user_id: userId, force }),
+    ...json({ user_id: userId, force, account_id: accountId }),
   });
 
 // ─── Crypto ─────────────────────────────────────────────────────────────────

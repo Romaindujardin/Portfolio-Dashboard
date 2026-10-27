@@ -277,6 +277,30 @@ const fetchOpenFigi = async (isin) => {
   return Array.isArray(first.data) ? first.data : [];
 };
 
+/**
+ * Convertit un symbole interne BoursoBank (ex: "1rPMC", "1rTPE500", "1rTCW8")
+ * en ticker Yahoo Finance résoluble (ex: "MC.PA", "PE500.PA", "CW8.PA").
+ */
+export const convertBoursoSymbolToYahoo = (symbol) => {
+  if (!symbol || typeof symbol !== "string") return null;
+  const s = symbol.trim();
+  if (!s) return null;
+  // Euronext Paris: 1rP (action), 1rT (tracker/ETF), 1rA (alternext/growth)
+  if (/^1r[pta]/i.test(s)) {
+    return `${s.slice(3).toUpperCase()}.PA`;
+  }
+  // 1r général (Euronext Paris)
+  if (/^1r/i.test(s)) {
+    return `${s.slice(2).toUpperCase()}.PA`;
+  }
+  // 2r (Euronext Amsterdam / Bruxelles)
+  if (/^2r[pta]?/i.test(s)) {
+    const code = s.replace(/^2r[pta]?/i, "").toUpperCase();
+    return `${code}.AS`;
+  }
+  return s.toUpperCase();
+};
+
 export class MarketDataService {
   constructor({ repository } = {}) {
     this.repository = repository;
@@ -435,13 +459,52 @@ export class MarketDataService {
   /**
    * Met à jour les prix de tous les holdings d'un utilisateur et recalcule la
    * valeur des comptes d'investissement concernés.
+   * Exclut les comptes CRYPTO (gérés par le service crypto) et supporte le filtrage
+   * par accountId.
    */
-  async refreshHoldings(userId, { force = true } = {}) {
+  async refreshHoldings(userId, { force = true, accountId = null } = {}) {
     if (!this.repository) throw new Error("Repository requis");
-    const holdings = this.repository.listAllHoldings(userId);
+
+    // Récupérer les comptes pour identifier leur type
+    const accounts = new Map(
+      this.repository.listAccounts(userId).map((a) => [a.id, a]),
+    );
+
+    let holdings = this.repository.listAllHoldings(userId);
+
+    // Ne rafraîchir que les comptes d'investissement (PEA, SECURITIES, OTHER...)
+    // Les comptes CRYPTO sont gérés exclusivement par le service crypto
+    holdings = holdings.filter((holding) => {
+      const account = accounts.get(holding.accountId);
+      return account && account.type !== "CRYPTO";
+    });
+
+    // Filtrer par compte si spécifié (ex: modal positions d'un compte précis)
+    if (accountId) {
+      holdings = holdings.filter((holding) => holding.accountId === accountId);
+    }
+
+    // Auto-conversion des symboles BoursoBank résiduels éventuels (1rPMC -> MC.PA, etc.)
+    for (const holding of holdings) {
+      if (holding.ticker && /^1r/i.test(holding.ticker)) {
+        const converted = convertBoursoSymbolToYahoo(holding.ticker);
+        if (converted && converted !== holding.ticker) {
+          holding.ticker = converted;
+          if (typeof this.repository.updateHolding === "function") {
+            this.repository.updateHolding(holding.id, { ticker: converted });
+          }
+        }
+      }
+    }
+
     const tickers = holdings
       .map((holding) => holding.ticker)
       .filter(Boolean);
+
+    if (tickers.length === 0) {
+      return { updated: 0, failed: [], accounts: 0 };
+    }
+
     const quotes = await this.getQuotes(tickers, { force });
     const byTicker = new Map(quotes.map((quote) => [quote.ticker, quote]));
 
@@ -471,8 +534,8 @@ export class MarketDataService {
       updated += 1;
     }
 
-    for (const accountId of touchedAccounts) {
-      this.recomputeInvestmentAccount(accountId, userId);
+    for (const accId of touchedAccounts) {
+      this.recomputeInvestmentAccount(accId, userId);
     }
 
     return { updated, failed, accounts: touchedAccounts.size };

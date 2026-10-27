@@ -13,6 +13,10 @@ import {
   getBoursoStatus,
   BOURSO_PROVIDER,
 } from "../server/services/boursoSidecarService.js";
+import {
+  convertBoursoSymbolToYahoo,
+  MarketDataService,
+} from "../server/services/marketData.js";
 
 describe("BoursoBank Sidecar Service", () => {
   let db: any;
@@ -223,5 +227,79 @@ date,date_op,label,amount,currency
     const txs = repo.listTransactions(account.id, "Romain");
     expect(txs).toHaveLength(1);
     expect(txs[0].externalId).toBe("tx_12345");
+  });
+
+  it("convertBoursoSymbolToYahoo convertit fidèlement les codes Boursorama en tickers Yahoo Finance", () => {
+    expect(convertBoursoSymbolToYahoo("1rPMC")).toBe("MC.PA");
+    expect(convertBoursoSymbolToYahoo("1rTPE500")).toBe("PE500.PA");
+    expect(convertBoursoSymbolToYahoo("1rTCW8")).toBe("CW8.PA");
+    expect(convertBoursoSymbolToYahoo("1rPAIR")).toBe("AIR.PA");
+    expect(convertBoursoSymbolToYahoo("1rPTTE")).toBe("TTE.PA");
+    expect(convertBoursoSymbolToYahoo("1rSAN")).toBe("SAN.PA");
+    expect(convertBoursoSymbolToYahoo("2rINGA")).toBe("INGA.AS");
+    expect(convertBoursoSymbolToYahoo("AAPL")).toBe("AAPL");
+    expect(convertBoursoSymbolToYahoo(null)).toBe(null);
+  });
+
+  it("MarketDataService.refreshHoldings ignore les comptes CRYPTO et supporte le filtrage accountId", async () => {
+    // 1 compte PEA
+    const pea = repo.upsertSyncedAccount("Romain", {
+      provider: "bourso-sidecar",
+      externalId: "pea-test",
+      name: "PEA Test",
+      type: "PEA",
+      currency: "EUR",
+      balance: 1000,
+    });
+    // 1 compte CRYPTO
+    const crypto = repo.upsertSyncedAccount("Romain", {
+      provider: "manual",
+      externalId: "crypto-test",
+      name: "Metamask",
+      type: "CRYPTO",
+      currency: "EUR",
+      balance: 500,
+    });
+
+    // Positions sur PEA et CRYPTO
+    repo.upsertHolding("Romain", pea.id, {
+      ticker: "1rPMC", // symbole Bourso résiduel
+      name: "LVMH",
+      quantity: 1,
+      price: 350,
+    });
+    repo.upsertHolding("Romain", crypto.id, {
+      ticker: "ETH",
+      name: "Ethereum",
+      quantity: 1,
+      price: 2500,
+    });
+
+    const market = new MarketDataService({ repository: repo });
+    // Mock getQuotes pour simuler les réponses Yahoo
+    market.getQuotes = async (tickers: string[]) => {
+      return tickers.map((t) => ({
+        ticker: t,
+        price: t === "MC.PA" ? 385 : 100,
+        currency: "EUR",
+        fetchedAt: new Date().toISOString(),
+        nativePrice: 385,
+        fxRate: 1,
+        source: "mock",
+      }));
+    };
+
+    const res = await market.refreshHoldings("Romain");
+    expect(res.updated).toBe(1); // Seul MC.PA a été mis à jour, PAS ETH !
+    expect(res.failed).toHaveLength(0);
+
+    // Vérifier que la holding du PEA a été convertie en MC.PA
+    const peaHoldings = repo.listHoldings(pea.id, "Romain");
+    expect(peaHoldings[0].ticker).toBe("MC.PA");
+    expect(peaHoldings[0].price).toBe(385);
+
+    // Vérifier que la holding crypto n'a pas été écrasée par Yahoo
+    const cryptoHoldings = repo.listHoldings(crypto.id, "Romain");
+    expect(cryptoHoldings[0].price).toBe(2500);
   });
 });
