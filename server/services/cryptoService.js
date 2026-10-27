@@ -172,9 +172,11 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = TIMEOUT_MS) => {
   return res.json();
 };
 
+let coinGeckoRateLimitedUntil = 0;
+
 /**
  * Récupère les cours en EUR pour une liste de symboles crypto.
- * Utilise CoinGecko en priorité, avec fallback sur Binance EUR.
+ * Utilise CoinGecko en priorité (avec cooldown 429 comme Picsou), avec fallback sur Binance EUR.
  */
 export async function fetchCryptoQuotes(symbols = []) {
   const uniqueSymbols = Array.from(
@@ -185,27 +187,34 @@ export async function fetchCryptoQuotes(symbols = []) {
 
   const quotes = {};
 
-  // 1. Tenter CoinGecko
-  try {
-    const ids = uniqueSymbols
-      .map((s) => COINGECKO_IDS[s])
-      .filter(Boolean);
+  // 1. Tenter CoinGecko si pas en cooldown 429
+  if (Date.now() >= coinGeckoRateLimitedUntil) {
+    try {
+      const ids = uniqueSymbols
+        .map((s) => COINGECKO_IDS[s])
+        .filter(Boolean);
 
-    if (ids.length > 0) {
-      const url = `${COINGECKO_BASE}/simple/price?ids=${ids.join(",")}&vs_currencies=eur`;
-      const data = await fetchWithTimeout(url, {
-        headers: { Accept: "application/json" },
-      });
+      if (ids.length > 0) {
+        const url = `${COINGECKO_BASE}/simple/price?ids=${ids.join(",")}&vs_currencies=eur`;
+        const data = await fetchWithTimeout(url, {
+          headers: { Accept: "application/json" },
+        });
 
-      for (const sym of uniqueSymbols) {
-        const id = COINGECKO_IDS[sym];
-        if (id && data[id]?.eur) {
-          quotes[sym] = Number(data[id].eur);
+        for (const sym of uniqueSymbols) {
+          const id = COINGECKO_IDS[sym];
+          if (id && data[id]?.eur) {
+            quotes[sym] = Number(data[id].eur);
+          }
         }
       }
+    } catch (err) {
+      if (err.message && err.message.includes("429")) {
+        coinGeckoRateLimitedUntil = Date.now() + 60000;
+        console.warn("⚠️ CoinGecko 429 (rate limit). Cooldown de 60s activé, bascule sur Binance.");
+      } else {
+        console.warn("⚠️ CoinGecko indisponible pour les quotes, tentative Binance:", err.message);
+      }
     }
-  } catch (err) {
-    console.warn("⚠️ CoinGecko indisponible pour les quotes, tentative Binance:", err.message);
   }
 
   // 2. Pour les symboles manquants, interroger Binance

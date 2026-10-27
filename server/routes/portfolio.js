@@ -1130,7 +1130,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         }
         metadata.credentialsEncrypted = encryptJson({ apiKey, apiSecret });
         metadata.apiKeyMasked = `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`;
-      } else if (["evm", "bitcoin", "solana"].includes(provider)) {
+      } else if (["evm", "bitcoin", "solana", "hyperliquid", "aptos"].includes(provider)) {
         const address = asString(req.body?.address, { max: 200 });
         if (!address) throw new HttpError(400, "L'adresse du wallet est requise");
         metadata.address = address;

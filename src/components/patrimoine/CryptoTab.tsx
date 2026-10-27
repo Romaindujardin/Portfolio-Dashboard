@@ -47,6 +47,8 @@ const PROVIDER_INFO: Record<
 > = {
   binance: { label: "Binance CEX", tone: "gold" },
   evm: { label: "EVM Multi-chain", tone: "blue" },
+  hyperliquid: { label: "Hyperliquid L1 & EVM", tone: "green" },
+  aptos: { label: "Aptos (Fewcha)", tone: "blue" },
   bitcoin: { label: "Bitcoin", tone: "gold" },
   solana: { label: "Solana", tone: "green" },
   manual: { label: "Manuel / Cold", tone: "gray" },
@@ -65,7 +67,9 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
 
   // Modal d'ajout
   const [modalOpen, setModalOpen] = useState(false);
-  const [providerType, setProviderType] = useState<"binance" | "evm" | "bitcoin" | "solana" | "manual">("evm");
+  const [providerType, setProviderType] = useState<
+    "binance" | "evm" | "hyperliquid" | "aptos" | "bitcoin" | "solana" | "manual"
+  >("evm");
   const [accountName, setAccountName] = useState("");
   const [address, setAddress] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -156,7 +160,7 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
         }
         payload.apiKey = apiKey.trim();
         payload.apiSecret = apiSecret.trim();
-      } else if (["evm", "bitcoin", "solana"].includes(providerType)) {
+      } else if (["evm", "hyperliquid", "aptos", "bitcoin", "solana"].includes(providerType)) {
         if (!address.trim()) {
           notify("error", "Adresse publique requise");
           setSubmitting(false);
@@ -615,6 +619,40 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
               >
                 <div className="font-semibold">Solana</div>
                 <div className="text-[10px] text-[#8a8a8a]">Phantom / Solflare</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setProviderType("hyperliquid");
+                  if (!accountName) setAccountName("Hyperliquid");
+                }}
+                className={cn(
+                  "p-2.5 rounded-lg border text-left text-xs transition-colors",
+                  providerType === "hyperliquid"
+                    ? "border-[#c8a55e] bg-[rgba(200,165,94,0.08)] text-[#f5f5f5]"
+                    : "border-[rgba(255,255,255,0.08)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.02)]",
+                )}
+              >
+                <div className="font-semibold">Hyperliquid</div>
+                <div className="text-[10px] text-[#8a8a8a]">L1 Spot, Perps & EVM</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setProviderType("aptos");
+                  if (!accountName) setAccountName("Wallet Aptos");
+                }}
+                className={cn(
+                  "p-2.5 rounded-lg border text-left text-xs transition-colors",
+                  providerType === "aptos"
+                    ? "border-[#c8a55e] bg-[rgba(200,165,94,0.08)] text-[#f5f5f5]"
+                    : "border-[rgba(255,255,255,0.08)] text-[#8a8a8a] hover:bg-[rgba(255,255,255,0.02)]",
+                )}
+              >
+                <div className="font-semibold">Aptos</div>
+                <div className="text-[10px] text-[#8a8a8a]">Fewcha / Petra</div>
               </button>
 
               <button
