@@ -451,6 +451,31 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
   );
 
   router.get(
+    "/transactions",
+    asyncHandler(async (req, res) => {
+      const userId = queryUserId(req);
+      const accountId = asOptionalString(req.query.account_id, 100);
+      let transactions;
+      if (accountId) {
+        const account = repository.getAccount(accountId, userId);
+        if (!account) throw new HttpError(404, "Compte introuvable");
+        transactions = repository.listTransactions(account.id, userId, {
+          from: asDate(req.query.from),
+          to: asDate(req.query.to),
+          limit: asOptionalInteger(req.query.limit, { min: 1, max: 10000 }) || 2000,
+        });
+      } else {
+        transactions = repository.listAllTransactions(userId, {
+          from: asDate(req.query.from),
+          to: asDate(req.query.to),
+          limit: asOptionalInteger(req.query.limit, { min: 1, max: 10000 }) || 2000,
+        });
+      }
+      res.json({ transactions });
+    }),
+  );
+
+  router.get(
     "/accounts/:id/transactions",
     asyncHandler(async (req, res) => {
       const userId = queryUserId(req);

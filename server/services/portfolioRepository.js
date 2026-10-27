@@ -360,6 +360,27 @@ export class PortfolioRepository {
       .map(mapTransaction);
   }
 
+  listAllTransactions(userId, { from, to, limit = 2000 } = {}) {
+    const clauses = ["user_id = ?"];
+    const values = [userId];
+    if (from) {
+      clauses.push("date >= ?");
+      values.push(from);
+    }
+    if (to) {
+      clauses.push("date <= ?");
+      values.push(to);
+    }
+    values.push(Math.min(Math.max(Number(limit) || 2000, 1), 10000));
+    return this.db
+      .prepare(
+        `SELECT * FROM transactions WHERE ${clauses.join(" AND ")}
+         ORDER BY date DESC, created_at DESC LIMIT ?`,
+      )
+      .all(...values)
+      .map(mapTransaction);
+  }
+
   getLatestTransactionDate(accountId) {
     const row = this.db
       .prepare("SELECT MAX(date) AS latest FROM transactions WHERE account_id = ?")

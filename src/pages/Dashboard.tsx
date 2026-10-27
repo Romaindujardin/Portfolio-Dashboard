@@ -26,31 +26,26 @@ import {
 } from "lucide-react";
 import {
   AccountSectionKind,
-  BankCsvColumnMapping,
-  InvestmentCsvColumnMapping,
 } from "../types";
-import {
-  getStoredBankCsvUploads,
-  getBankCsvUploadById,
-} from "../utils/storage";
 import { Link } from "react-router-dom";
-import type { PortfolioAccount } from "../types/portfolio";
-import { getCryptoAccounts } from "../services/portfolioApi";
+import type {
+  PortfolioAccount,
+  Overview,
+  Holding,
+} from "../types/portfolio";
+import {
+  getOverview,
+  getAllHoldings,
+  getAllTransactions,
+} from "../services/portfolioApi";
 import MarketClock from "../components/MarketClock";
 import CashflowSpaghetti from "../components/CashflowSpaghetti";
-import PortfolioBridgeCard from "../components/PortfolioBridgeCard";
 import { useUser } from "../contexts/UserContext";
 import { useCurrency } from "../contexts/CurrencyContext";
-import { getUserSettings } from "../utils/userSettings";
 import {
   TimeGranularity,
-  parseBankCsvTransactions,
   buildCashflowSeries,
-  latestBalance,
-  parsePeaCsvHoldings,
-  PeaHolding,
   getTimeBucketKey,
-  sumNumericColumn,
 } from "../utils/csvAnalytics";
 import {
   WealthPeriod,
@@ -105,6 +100,8 @@ type AccountSectionSummary = {
 };
 
 const Dashboard: React.FC = () => {
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [allHoldings, setAllHoldings] = useState<Holding[]>([]);
   const [cryptoAccounts, setCryptoAccounts] = useState<PortfolioAccount[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("all");
   const [showEnvelopeDetails, setShowEnvelopeDetails] = useState(false);
@@ -135,15 +132,8 @@ const Dashboard: React.FC = () => {
   };
   const [selectedAssetTypeFilter, setSelectedAssetTypeFilter] =
     useState<string>("all");
-  const [sectionHoldings, setSectionHoldings] = useState<
-    Record<string, PeaHolding[]>
-  >({});
   const [loading, setLoading] = useState(true);
   const { currentUser } = useUser();
-  const [userSettings, setUserSettings] = useState(() =>
-    getUserSettings(currentUser),
-  );
-  const accountSections = userSettings.accountSections || [];
 
   // ===== CSV Comptes (bank/PEA/PEE) =====
   const [accountsLoading, setAccountsLoading] = useState(false);
@@ -203,329 +193,162 @@ const Dashboard: React.FC = () => {
   const formatPercent = (value: number, digits: number = 2) =>
     `${maskDigits(Number(value || 0).toFixed(digits).replace(".", ","))}%`;
 
-  const loadCryptoAccounts = async () => {
+
+
+
+  const loadPortfolioData = useCallback(async () => {
+    setAccountsLoading(true);
+    setAccountsError("");
     try {
-      const data = await getCryptoAccounts(currentUser);
-      setCryptoAccounts(data || []);
-    } catch {
-      setCryptoAccounts([]);
-    }
-  };
+      const [overviewData, holdingsData, txsData] = await Promise.all([
+        getOverview(currentUser).catch(() => null),
+        getAllHoldings(currentUser).catch(() => []),
+        getAllTransactions(currentUser, { limit: 2000 }).catch(() => []),
+      ]);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      await loadCryptoAccounts();
-      setLoading(false);
-    };
-
-    loadData();
-
-    // Écouter les mises à jour des comptes crypto
-    const handleWalletUpdate = async () => {
-      await loadCryptoAccounts();
-    };
-
-    window.addEventListener("walletsUpdated", handleWalletUpdate);
-    window.addEventListener("cryptoUpdated", handleWalletUpdate);
-
-    return () => {
-      window.removeEventListener("walletsUpdated", handleWalletUpdate);
-      window.removeEventListener("cryptoUpdated", handleWalletUpdate);
-    };
-  }, [currentUser]);
-
-  useEffect(() => {
-    setUserSettings(getUserSettings(currentUser));
-  }, [currentUser]);
-
-  useEffect(() => {
-    const refresh = (event?: Event) => {
-      const detail = (event as CustomEvent | undefined)?.detail as
-        | { username?: string }
-        | undefined;
-      if (detail?.username && detail.username !== currentUser) return;
-      setUserSettings(getUserSettings(currentUser));
-    };
-    window.addEventListener("userSettingsUpdated", refresh as EventListener);
-    window.addEventListener("storage", refresh as EventListener);
-    return () => {
-      window.removeEventListener(
-        "userSettingsUpdated",
-        refresh as EventListener,
-      );
-      window.removeEventListener("storage", refresh as EventListener);
-    };
-  }, [currentUser]);
-
-  useEffect(() => {
-    const loadAccountCsv = async () => {
-      setAccountsLoading(true);
-      setAccountsError("");
-      try {
-        const summaries: AccountSectionSummary[] = [];
-        const holdingsBySection: Record<string, PeaHolding[]> = {};
-        const allBankTxs: any[] = [];
-        let totalBankBalance = 0;
-        let totalIncome = 0;
-        let totalExpenses = 0;
-        let totalInvestmentBalance = 0;
-        let totalInvestmentPnl = 0;
-        let totalInvestmentPurchase = 0;
-        let totalInvestmentCurrent = 0;
-
-        const buildHoldingsSummary = (
-          holdings: ReturnType<typeof parsePeaCsvHoldings>,
-        ) => {
-          const getHoldingVal = (h: PeaHolding) =>
-            h.amount && h.amount > 0
-              ? h.amount
-              : h.lastPrice && h.quantity
-              ? h.lastPrice * h.quantity
-              : 0;
-
-          const balance =
-            holdings.length > 0
-              ? holdings.reduce((s, h) => s + getHoldingVal(h), 0)
-              : null;
-
-          const pnl =
-            holdings.length > 0
-              ? holdings.reduce((sum, h) => {
-                  if (
-                    h.amountVariation != null &&
-                    Number.isFinite(h.amountVariation)
-                  ) {
-                    return sum + h.amountVariation;
-                  }
-                  if (
-                    h.buyingPrice == null ||
-                    h.lastPrice == null ||
-                    !Number.isFinite(h.buyingPrice) ||
-                    !Number.isFinite(h.lastPrice)
-                  )
-                    return sum;
-                  const q = Number(h.quantity || 0);
-                  if (!Number.isFinite(q) || q === 0) return sum;
-                  return sum + (h.lastPrice - h.buyingPrice) * q;
-                }, 0)
-              : null;
-
-          const purchaseValue =
-            holdings.length > 0
-              ? holdings.reduce((sum, h) => {
-                  if (
-                    h.buyingPrice != null &&
-                    Number.isFinite(h.buyingPrice) &&
-                    h.quantity > 0
-                  ) {
-                    return sum + h.buyingPrice * h.quantity;
-                  }
-                  const val = getHoldingVal(h);
-                  if (
-                    h.amountVariation != null &&
-                    Number.isFinite(h.amountVariation)
-                  ) {
-                    return sum + Math.max(0, val - h.amountVariation);
-                  }
-                  return sum + val;
-                }, 0)
-              : 0;
-
-          const currentValue = balance;
-          return { balance, pnl, purchaseValue, currentValue };
-        };
-
-        const sumFromContents = (
-          csvContents: string[],
-          column?: string,
-          multiplierColumn?: string,
-        ): number | null => {
-          if (!column) return null;
-          let total = 0;
-          let used = false;
-          for (const content of csvContents) {
-            const value = sumNumericColumn(content, column, multiplierColumn);
-            if (value == null) continue;
-            total += value;
-            used = true;
-          }
-          return used ? total : null;
-        };
-
-        for (const section of accountSections) {
-          const metas = await getStoredBankCsvUploads(currentUser, section.id);
-          const contents = await Promise.all(
-            metas.map(async (m) => {
-              const u = await getBankCsvUploadById(m.id, currentUser);
-              return u?.content || "";
-            }),
-          );
-
-          const sectionMapping =
-            (userSettings.csvColumnMappings?.[section.id] as
-              | BankCsvColumnMapping
-              | InvestmentCsvColumnMapping
-              | undefined) || undefined;
-
-          if (section.kind === "bank") {
-            const txs = contents.flatMap((c) =>
-              parseBankCsvTransactions(
-                c,
-                sectionMapping as BankCsvColumnMapping,
-              ),
-            );
-            txs.sort((a, b) => a.date.getTime() - b.date.getTime());
-            allBankTxs.push(...txs);
-            const balance = latestBalance(txs);
-            const income = txs
-              .filter((t) => t.amount >= 0)
-              .reduce((s, t) => s + t.amount, 0);
-            const expenses = txs
-              .filter((t) => t.amount < 0)
-              .reduce((s, t) => s + Math.abs(t.amount), 0);
-            const net = income - expenses;
-
-            if (balance != null) totalBankBalance += balance;
-            totalIncome += income;
-            totalExpenses += expenses;
-
-            summaries.push({
-              id: section.id,
-              label: section.label,
-              kind: section.kind,
-              balance,
-              income,
-              expenses,
-              net,
-            });
-          } else {
-            const holdings = contents.flatMap((c) =>
-              parsePeaCsvHoldings(
-                c,
-                sectionMapping as InvestmentCsvColumnMapping,
-              ),
-            );
-            holdingsBySection[section.id] = holdings;
-            const holdingsSummary = buildHoldingsSummary(holdings);
-
-            const investmentMapping =
-              (sectionMapping as InvestmentCsvColumnMapping | undefined) ||
-              undefined;
-            const calcCurrent = sumFromContents(
-              contents,
-              investmentMapping?.currentValueColumn,
-              investmentMapping?.currentValueMultiplierColumn,
-            );
-            const calcInitial = sumFromContents(
-              contents,
-              investmentMapping?.initialValueColumn,
-              investmentMapping?.initialValueMultiplierColumn,
-            );
-            const calcPnl = sumFromContents(
-              contents,
-              investmentMapping?.pnlColumn,
-            );
-            const derivedPnl =
-              calcCurrent != null && calcInitial != null
-                ? calcCurrent - calcInitial
-                : null;
-            const derivedInitial =
-              calcCurrent != null && calcPnl != null
-                ? calcCurrent - calcPnl
-                : null;
-
-            const hasHoldings =
-              holdings.length > 0 &&
-              holdingsSummary.balance != null &&
-              holdingsSummary.balance > 0;
-
-            const summaryBalance = holdingsSummary.balance ?? 0;
-            let balance: number | null = hasHoldings
-              ? calcCurrent != null && calcCurrent > summaryBalance
-                ? calcCurrent
-                : summaryBalance
-              : calcCurrent ?? holdingsSummary.balance ?? null;
-
-            if (balance == null && contents.length > 0) {
-              const fallbackTxs = contents.flatMap((c) =>
-                c ? parseBankCsvTransactions(c) : [],
-              );
-              balance = latestBalance(fallbackTxs);
-            }
-
-            const effectiveCurrent =
-              balance ?? holdingsSummary.currentValue ?? calcCurrent;
-
-            const effectivePurchase =
-              hasHoldings && holdingsSummary.purchaseValue > 0
-                ? holdingsSummary.purchaseValue
-                : (calcInitial ??
-                  derivedInitial ??
-                  (holdingsSummary.purchaseValue > 0
-                    ? holdingsSummary.purchaseValue
-                    : null));
-
-            const effectivePnl =
-              hasHoldings && holdingsSummary.pnl != null
-                ? holdingsSummary.pnl
-                : (calcPnl ?? derivedPnl ?? holdingsSummary.pnl);
-
-            summaries.push({
-              id: section.id,
-              label: section.label,
-              kind: section.kind,
-              balance,
-              pnl: effectivePnl,
-              purchaseValue: effectivePurchase,
-              currentValue: effectiveCurrent,
-            });
-
-            totalInvestmentBalance += balance ?? 0;
-            totalInvestmentPnl += effectivePnl ?? 0;
-            totalInvestmentPurchase += effectivePurchase || 0;
-            totalInvestmentCurrent += effectiveCurrent || 0;
-          }
-        }
-
-        const series = buildCashflowSeries(allBankTxs, cashGranularity);
-        const net = totalIncome - totalExpenses;
-        const hasBankSections = accountSections.some((s) => s.kind === "bank");
-
-        setBankSeries(
-          series.map((p) => ({
-            key: p.key,
-            date: p.date,
-            income: p.income,
-            expenses: p.expenses,
-            net: p.net,
-            balance: p.endingBalance ?? null,
-          })),
-        );
-        setBankTxs(allBankTxs);
-        setSectionHoldings(holdingsBySection);
-        setAccountSummaries(summaries);
-        setCashSummary({
-          balance: hasBankSections ? totalBankBalance : null,
-          income: totalIncome,
-          expenses: totalExpenses,
-          net,
-        });
-        setInvestmentSummary({
-          balance: totalInvestmentBalance,
-          pnl: totalInvestmentPnl,
-          purchaseValue: totalInvestmentPurchase,
-          currentValue: totalInvestmentCurrent,
-        });
-      } catch (e: any) {
-        setAccountsError(e?.message || "Erreur lors du chargement des CSV");
-      } finally {
-        setAccountsLoading(false);
+      if (overviewData) {
+        setOverview(overviewData);
+        const cryptoAccs = (overviewData.accounts || []).filter((a) => a.type === "CRYPTO");
+        setCryptoAccounts(cryptoAccs);
       }
+      setAllHoldings(holdingsData || []);
+
+      const accounts = overviewData?.accounts || [];
+      const holdingsByAcc = new Map<string, Holding[]>();
+      for (const h of holdingsData || []) {
+        if (!holdingsByAcc.has(h.accountId)) holdingsByAcc.set(h.accountId, []);
+        holdingsByAcc.get(h.accountId)!.push(h);
+      }
+
+      // Convertir les transactions réelles en flux bancaires
+      const bankTxsFormatted = (txsData || []).map((t) => ({
+        date: new Date(t.date),
+        amount: Number(t.amount) || 0,
+        label: t.label || "",
+        category: t.category || "Autre",
+        subCategory: t.category || "",
+        supplierFound: t.counterparty || t.label || "",
+      }));
+      setBankTxs(bankTxsFormatted);
+
+      const series = buildCashflowSeries(bankTxsFormatted, cashGranularity);
+      setBankSeries(
+        series.map((p) => ({
+          key: p.key,
+          date: p.date,
+          income: p.income,
+          expenses: p.expenses,
+          net: p.net,
+          balance: p.endingBalance ?? null,
+        })),
+      );
+
+      const totalIncome = bankTxsFormatted
+        .filter((t) => t.amount >= 0)
+        .reduce((s, t) => s + t.amount, 0);
+      const totalExpenses = bankTxsFormatted
+        .filter((t) => t.amount < 0)
+        .reduce((s, t) => s + Math.abs(t.amount), 0);
+
+      const summaries: AccountSectionSummary[] = [];
+
+      // Liquidités / Banques (Courants + livrets sans titres)
+      const checkingAccounts = accounts.filter(
+        (a) =>
+          a.type === "CHECKING" ||
+          (a.type === "SAVINGS" && (holdingsByAcc.get(a.id)?.length || 0) === 0),
+      );
+      const totalCash = checkingAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
+
+      checkingAccounts.forEach((acc) => {
+        summaries.push({
+          id: acc.id,
+          label: acc.name,
+          kind: "bank",
+          balance: acc.balance,
+          income: 0,
+          expenses: 0,
+          net: 0,
+        });
+      });
+
+      // Investissements (PEA, PEE, Titres, et contrats avec titres comme Gresham)
+      const investmentAccounts = accounts.filter(
+        (a) =>
+          ["PEA", "SECURITIES", "EMPLOYEE_SAVINGS"].includes(a.type) ||
+          (a.type === "SAVINGS" && (holdingsByAcc.get(a.id)?.length || 0) > 0),
+      );
+
+      let totalInvBalance = 0;
+      let totalInvPnl = 0;
+      let totalInvCost = 0;
+
+      investmentAccounts.forEach((acc) => {
+        const accHoldings = holdingsByAcc.get(acc.id) || [];
+        const hVal = accHoldings.reduce((s, h) => s + (h.quantity || 0) * (h.price || 0), 0);
+        const hCost = accHoldings.reduce(
+          (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
+          0,
+        );
+        const bal = Math.max(acc.balance, hVal);
+        const pnl = hVal > 0 ? hVal - hCost : 0;
+
+        totalInvBalance += bal;
+        totalInvPnl += pnl;
+        totalInvCost += bal - pnl;
+
+        summaries.push({
+          id: acc.id,
+          label: acc.name,
+          kind: "investment",
+          balance: bal,
+          currentValue: bal,
+          purchaseValue: bal - pnl,
+          pnl,
+        });
+      });
+
+      setAccountSummaries(summaries);
+      setCashSummary({
+        balance: totalCash,
+        income: totalIncome,
+        expenses: totalExpenses,
+        net: totalIncome - totalExpenses,
+      });
+      setInvestmentSummary({
+        balance: totalInvBalance,
+        currentValue: totalInvBalance,
+        purchaseValue: totalInvCost,
+        pnl: totalInvPnl,
+      });
+    } catch (err: any) {
+      setAccountsError(err?.message || "Erreur de chargement du patrimoine");
+    } finally {
+      setAccountsLoading(false);
+      setLoading(false);
+    }
+  }, [currentUser, cashGranularity]);
+
+  useEffect(() => {
+    void loadPortfolioData();
+
+    const handleUpdate = () => {
+      void loadPortfolioData();
     };
 
-    loadAccountCsv();
-  }, [currentUser, cashGranularity, accountSections]);
+    window.addEventListener("portfolioUpdated", handleUpdate);
+    window.addEventListener("walletsUpdated", handleUpdate);
+    window.addEventListener("cryptoUpdated", handleUpdate);
+    window.addEventListener("userSettingsUpdated", handleUpdate);
+    window.addEventListener("storage", handleUpdate);
+    return () => {
+      window.removeEventListener("portfolioUpdated", handleUpdate);
+      window.removeEventListener("walletsUpdated", handleUpdate);
+      window.removeEventListener("cryptoUpdated", handleUpdate);
+      window.removeEventListener("userSettingsUpdated", handleUpdate);
+      window.removeEventListener("storage", handleUpdate);
+    };
+  }, [loadPortfolioData]);
 
   // Trier les séries par ordre décroissant (plus récentes en premier)
   const sortedBankSeries = React.useMemo(() => {
@@ -711,10 +534,13 @@ const Dashboard: React.FC = () => {
     0,
   );
 
-  // ===== Totaux incluant CSV (banque / investissement) + crypto =====
+  // ===== Totaux consolidés du patrimoine connecté =====
   const bankCash = cashSummary.balance ?? 0;
   const investmentValue = investmentSummary.balance ?? 0;
-  const totalWealthAll = bankCash + investmentValue + cryptoTotalValue;
+  const totalWealthAll =
+    overview?.totals?.netWorth != null && overview.totals.netWorth > 0
+      ? overview.totals.netWorth
+      : bankCash + investmentValue + cryptoTotalValue;
   const totalInvestmentsAll = investmentValue;
 
   const totalInvestedInitial = investmentSummary.purchaseValue || 0;
@@ -739,121 +565,76 @@ const Dashboard: React.FC = () => {
 
   // ===== Positions Unifiées (Holdings) =====
   const unifiedHoldings = useMemo<UnifiedHolding[]>(() => {
-    const list: UnifiedHolding[] = [];
+    const accountsMap = new Map<string, PortfolioAccount>();
+    (overview?.accounts || []).forEach((a) => accountsMap.set(a.id, a));
 
-    // 1. Enveloppes d'investissement CSV (PEA, PEE, etc.)
-    accountSections
-      .filter((s) => s.kind === "investment")
-      .forEach((section) => {
-        const holdings = sectionHoldings[section.id] || [];
-        holdings.forEach((h, idx) => {
-          const n = (h.name || "").toUpperCase();
-          const isEtf =
-            n.includes("ETF") ||
-            n.includes("MSCI") ||
-            n.includes("CW8") ||
-            n.includes("SP500") ||
-            n.includes("S&P") ||
-            n.includes("ISHARES") ||
-            n.includes("AMUNDI") ||
-            n.includes("VANGUARD") ||
-            n.includes("LYXOR");
-          const isFund =
-            n.includes("SICAV") ||
-            n.includes("FCP") ||
-            n.includes("OPCVM") ||
-            n.includes("FONDS") ||
-            n.includes("PART");
-          const type: UnifiedHolding["type"] = isEtf
-            ? "etf"
-            : isFund
-            ? "fund"
-            : "stock";
+    const list: UnifiedHolding[] = allHoldings.map((h, idx) => {
+      const account = accountsMap.get(h.accountId);
+      const isCrypto =
+        account?.type === "CRYPTO" ||
+        h.ticker?.toUpperCase() === "BTC" ||
+        h.ticker?.toUpperCase() === "ETH";
+      const n = (h.name || h.ticker || "").toUpperCase();
+      const isEtf =
+        n.includes("ETF") ||
+        n.includes("MSCI") ||
+        n.includes("CW8") ||
+        n.includes("SP500") ||
+        n.includes("S&P") ||
+        n.includes("ISHARES") ||
+        n.includes("AMUNDI") ||
+        n.includes("VANGUARD") ||
+        n.includes("LYXOR");
+      const isFund =
+        n.includes("SICAV") ||
+        n.includes("FCP") ||
+        n.includes("OPCVM") ||
+        n.includes("FONDS") ||
+        n.includes("PART") ||
+        n.includes("TRESORERIE") ||
+        n.includes("SELECTION") ||
+        n.includes("QUADRIGE") ||
+        n.includes("SCHRODER") ||
+        n.includes("STRATEGIE");
 
-          const qty = Number(h.quantity || 0);
-          const lastPrice =
-            h.lastPrice ?? (qty > 0 && h.amount ? h.amount / qty : 0);
-          const buyingPrice =
-            h.buyingPrice ??
-            (qty > 0 && h.amountVariation != null
-              ? (h.amount - h.amountVariation) / qty
-              : lastPrice);
-          const totalVal = h.amount || qty * lastPrice;
-          const investedVal =
-            h.buyingPrice != null && qty > 0
-              ? h.buyingPrice * qty
-              : h.amountVariation != null
-              ? Math.max(0, totalVal - h.amountVariation)
-              : totalVal;
-          const pnl =
-            h.amountVariation ??
-            (totalVal - investedVal);
-          const pnlPercent =
-            h.variationPercent ??
-            (investedVal > 0 ? (pnl / investedVal) * 100 : 0);
+      const type: UnifiedHolding["type"] = isCrypto
+        ? "crypto"
+        : isEtf
+        ? "etf"
+        : isFund
+        ? "fund"
+        : "stock";
 
-          list.push({
-            id: `${section.id}-${h.isin || h.name}-${idx}`,
-            name: h.name || h.isin || "Position",
-            symbol: h.isin || h.name,
-            envelopeId: section.id,
-            envelopeLabel: section.label,
-            type,
-            quantity: qty,
-            buyingPrice,
-            lastPrice,
-            totalValue: totalVal,
-            investedValue: investedVal,
-            pnl,
-            pnlPercent,
-            allocationPercent: 0,
-            source: `Import ${section.label}`,
-          });
-        });
-      });
+      const qty = Number(h.quantity || 0);
+      const lastPrice = Number(h.price || 0);
+      const totalVal = qty * lastPrice;
+      const investedVal = h.costBasis != null ? Number(h.costBasis) : totalVal;
+      const pnl = totalVal - investedVal;
+      const pnlPercent = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
 
-    // 3. Wallets & comptes crypto
-    cryptoAccounts.forEach((account) => {
-      const provLabel =
-        account.provider === "binance"
-          ? "Binance"
-          : account.provider === "evm"
-            ? "EVM Multi-chain"
-            : account.provider === "bitcoin"
-              ? "Bitcoin"
-              : account.provider === "solana"
-                ? "Solana"
-                : account.name || "Crypto";
-      (account.holdings || []).forEach((holding, idx) => {
-        const val =
-          holding.value ??
-          (holding.quantity || 0) * (holding.price || 0);
-        const cost =
-          (holding.quantity || 0) *
-          (holding.costBasis ?? holding.price ?? 0);
-        const pnl = val - cost;
-        const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
-        list.push({
-          id: `ca-${account.id}-${holding.ticker || holding.id}-${idx}`,
-          name: holding.name || holding.ticker || "Crypto",
-          symbol: holding.ticker || "",
-          envelopeId: "crypto",
-          envelopeLabel: "Crypto & Web3",
-          type: "crypto",
-          quantity: holding.quantity,
-          buyingPrice: holding.costBasis ?? holding.price ?? 0,
-          lastPrice: holding.price || 0,
-          totalValue: val,
-          investedValue: cost || val,
-          pnl,
-          pnlPercent: pnlPct,
-          allocationPercent: 0,
-          source: `${provLabel} (${account.name})`,
-        });
-      });
+      const envelopeLabel =
+        account?.name || (isCrypto ? "Crypto & Web3" : "Investissement");
+      const envelopeId = isCrypto ? "crypto" : h.accountId;
+
+      return {
+        id: h.id || `${h.accountId}-${h.ticker || h.name}-${idx}`,
+        name: h.name || h.ticker || "Position",
+        symbol: h.ticker || h.isin || h.name || "",
+        envelopeId,
+        envelopeLabel,
+        type,
+        quantity: qty,
+        buyingPrice: qty > 0 && h.costBasis != null ? h.costBasis / qty : lastPrice,
+        lastPrice,
+        totalValue: totalVal,
+        investedValue: investedVal,
+        pnl,
+        pnlPercent,
+        allocationPercent: 0,
+        source: account?.name || "Patrimoine",
+      };
     });
 
-    // 4. Calculer l'allocation % par rapport au total
     const total = list.reduce((s, h) => s + h.totalValue, 0);
     if (total > 0) {
       list.forEach((h) => {
@@ -862,7 +643,7 @@ const Dashboard: React.FC = () => {
     }
 
     return list;
-  }, [accountSections, sectionHoldings, cryptoAccounts]);
+  }, [allHoldings, overview]);
 
   // ===== Enveloppes de portefeuilles disponibles =====
   const portfolioEnvelopes = useMemo(() => {
@@ -886,155 +667,114 @@ const Dashboard: React.FC = () => {
       "#8b5cf6",
       "#ec4899",
       "#06b6d4",
+      "#f97316",
+      "#14b8a6",
     ];
 
-    // 1. Enveloppes investissement (PEA, PEE, etc.)
-    accountSections
-      .filter((s) => s.kind === "investment")
-      .forEach((s, idx) => {
-        const summary = accountSummaries.find((acc) => acc.id === s.id);
-        const holdings = unifiedHoldings.filter((h) => h.envelopeId === s.id);
-        const totalVal =
-          summary?.balance ??
-          summary?.currentValue ??
-          holdings.reduce((sum, h) => sum + h.totalValue, 0);
-        const investedVal =
-          summary?.purchaseValue ??
-          holdings.reduce((sum, h) => sum + h.investedValue, 0);
-        const pnl = summary?.pnl ?? (totalVal - investedVal);
-        const pnlPct = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
+    const accounts = overview?.accounts || [];
+    const holdingsByAcc = new Map<string, Holding[]>();
+    for (const h of allHoldings) {
+      if (!holdingsByAcc.has(h.accountId)) holdingsByAcc.set(h.accountId, []);
+      holdingsByAcc.get(h.accountId)!.push(h);
+    }
 
-        const label = s.label || s.id || "Portefeuille";
-        const upper = (label || "").toUpperCase();
-        list.push({
-          id: s.id,
-          label,
-          kind: "investment",
-          totalValue: totalVal,
-          investedValue: investedVal,
-          pnl,
-          pnlPercent: pnlPct,
-          positionsCount: holdings.length,
-          color: colors[idx % colors.length],
-          description: upper.includes("PEA")
-            ? "Plan d'Épargne en Actions"
-            : upper.includes("PEE")
-            ? "Plan d'Épargne Entreprise"
-            : upper.includes("ASSURANCE") || upper.includes("VIE")
-            ? "Assurance vie multisupport"
-            : upper.includes("PER") || upper.includes("RETRAITE")
-            ? "Plan d'Épargne Retraite"
-            : "Portefeuille d'investissement",
-        });
-      });
+    // 1. Enveloppes d'investissement (PEA, CTO, PEE, Assurance-vie comme Gresham)
+    const investmentAccounts = accounts.filter(
+      (a) =>
+        ["PEA", "SECURITIES", "EMPLOYEE_SAVINGS"].includes(a.type) ||
+        (a.type === "SAVINGS" && (holdingsByAcc.get(a.id)?.length || 0) > 0),
+    );
 
-    // Assurer la présence explicite du PEA si absent des sections
-    if (!list.some((e) => e.id === "pea" || (e.label || "").toUpperCase().includes("PEA"))) {
-      const peaHoldings = unifiedHoldings.filter((h) => h.envelopeId === "pea");
-      const peaSummary = accountSummaries.find((acc) => acc.id === "pea");
-      const totalVal =
-        peaSummary?.balance ??
-        peaSummary?.currentValue ??
-        peaHoldings.reduce((sum, h) => sum + h.totalValue, 0);
-      const investedVal =
-        peaSummary?.purchaseValue ??
-        peaHoldings.reduce((sum, h) => sum + h.investedValue, 0);
-      const pnl = peaSummary?.pnl ?? (totalVal - investedVal);
+    investmentAccounts.forEach((acc, idx) => {
+      const accHoldings = holdingsByAcc.get(acc.id) || [];
+      const holdingsTotal = accHoldings.reduce(
+        (s, h) => s + (h.quantity || 0) * (h.price || 0),
+        0,
+      );
+      const holdingsCost = accHoldings.reduce(
+        (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
+        0,
+      );
+      const totalVal = Math.max(acc.balance, holdingsTotal);
+      const pnl = holdingsTotal > 0 ? holdingsTotal - holdingsCost : 0;
+      const investedVal = totalVal - pnl;
       const pnlPct = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
-      list.unshift({
-        id: "pea",
-        label: "PEA",
+
+      const upper = acc.name.toUpperCase();
+      list.push({
+        id: acc.id,
+        label: acc.name,
         kind: "investment",
         totalValue: totalVal,
         investedValue: investedVal,
         pnl,
         pnlPercent: pnlPct,
-        positionsCount: peaHoldings.length,
-        color: "#3b82f6",
-        description: "Plan d'Épargne en Actions",
+        positionsCount: accHoldings.length,
+        color: colors[idx % colors.length],
+        description: upper.includes("PEA")
+          ? "Plan d'Épargne en Actions"
+          : upper.includes("PER")
+          ? "Plan d'Épargne Retraite"
+          : upper.includes("ENTREPRISE") || upper.includes("PEE")
+          ? "Plan d'Épargne Entreprise"
+          : upper.includes("GRESHAM") || upper.includes("ASSURANCE") || upper.includes("VIE")
+          ? "Contrat d'Assurance-Vie / Capitalisation"
+          : "Compte Titres / Investissement",
       });
-    }
+    });
 
-    // Assurer la présence explicite du PEE si absent des sections
-    if (!list.some((e) => e.id === "pee" || (e.label || "").toUpperCase().includes("PEE"))) {
-      const peeHoldings = unifiedHoldings.filter((h) => h.envelopeId === "pee");
-      const peeSummary = accountSummaries.find((acc) => acc.id === "pee");
-      const totalVal =
-        peeSummary?.balance ??
-        peeSummary?.currentValue ??
-        peeHoldings.reduce((sum, h) => sum + h.totalValue, 0);
-      const investedVal =
-        peeSummary?.purchaseValue ??
-        peeHoldings.reduce((sum, h) => sum + h.investedValue, 0);
-      const pnl = peeSummary?.pnl ?? (totalVal - investedVal);
-      const pnlPct = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
-      list.push({
-        id: "pee",
-        label: "PEE",
-        kind: "investment",
-        totalValue: totalVal,
-        investedValue: investedVal,
-        pnl,
-        pnlPercent: pnlPct,
-        positionsCount: peeHoldings.length,
-        color: "#10b981",
-        description: "Plan d'Épargne Entreprise",
-      });
-    }
+    // 2. Liquidités & Banque (BoursoBank checking, livrets épargne sans titres)
+    const bankAccounts = accounts.filter(
+      (a) =>
+        a.type === "CHECKING" ||
+        (a.type === "SAVINGS" && (holdingsByAcc.get(a.id)?.length || 0) === 0),
+    );
+    const bankTotal = bankAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
+    list.push({
+      id: "bank",
+      label: "Banque & Liquidités",
+      kind: "bank",
+      totalValue: bankTotal,
+      investedValue: bankTotal,
+      pnl: 0,
+      pnlPercent: 0,
+      positionsCount: bankAccounts.length,
+      color: "#06b6d4",
+      description: "Comptes courants et livrets bancaires",
+    });
 
-    // 2. Liquidités & Banque (toujours présent)
-    if (!list.some((e) => e.id === "bank")) {
-      const bankSummaries = accountSummaries.filter((s) => s.kind === "bank");
-      const bankTotal = bankSummaries.reduce(
-        (sum, s) => sum + (s.balance || 0),
-        0,
-      );
-      list.push({
-        id: "bank",
-        label: "Banque & Liquidités",
-        kind: "bank",
-        totalValue: bankCash || bankTotal,
-        investedValue: bankCash || bankTotal,
-        pnl: 0,
-        pnlPercent: 0,
-        positionsCount: bankSummaries.length,
-        color: "#06b6d4",
-        description: "Comptes courants et livrets bancaires",
-      });
-    }
-
-    // 3. Crypto & Web3 (toujours présent)
-    if (!list.some((e) => e.id === "crypto")) {
-      const cryptoHoldings = unifiedHoldings.filter(
-        (h) => h.envelopeId === "crypto",
-      );
-      const cryptoInvested = cryptoHoldings.reduce(
-        (s, h) => s + (h.investedValue || 0),
-        0,
-      );
-      const cryptoPnl = cryptoTotalValue - cryptoInvested;
-      const cryptoPnlPercent =
-        cryptoInvested > 0 ? (cryptoPnl / cryptoInvested) * 100 : 0;
-      list.push({
-        id: "crypto",
-        label: "Crypto & Web3",
-        kind: "crypto",
-        totalValue: cryptoTotalValue,
-        investedValue: cryptoInvested,
-        pnl: cryptoPnl,
-        pnlPercent: cryptoPnlPercent,
-        positionsCount: cryptoHoldings.length,
-        color: "#f97316",
-        description: "Exchanges (Binance) et wallets blockchain",
-      });
-    }
+    // 3. Crypto & Web3
+    const cryptoAccs = accounts.filter((a) => a.type === "CRYPTO");
+    const cryptoHoldings = allHoldings.filter((h) => {
+      const a = accounts.find((acc) => acc.id === h.accountId);
+      return a?.type === "CRYPTO";
+    });
+    const cryptoTotal = cryptoAccs.reduce((sum, a) => sum + (a.balance || 0), 0);
+    const cryptoCost = cryptoHoldings.reduce(
+      (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
+      0,
+    );
+    const cryptoPnl = cryptoTotal > 0 && cryptoCost > 0 ? cryptoTotal - cryptoCost : 0;
+    const cryptoPnlPct = cryptoCost > 0 ? (cryptoPnl / cryptoCost) * 100 : 0;
+    list.push({
+      id: "crypto",
+      label: "Crypto & Web3",
+      kind: "crypto",
+      totalValue: cryptoTotal,
+      investedValue: cryptoCost || cryptoTotal,
+      pnl: cryptoPnl,
+      pnlPercent: cryptoPnlPct,
+      positionsCount: cryptoHoldings.length,
+      color: "#f97316",
+      description: "Exchanges et wallets blockchain",
+    });
 
     // Ordonner naturellement : PEA, PEE, Assurance vie, PER, Banque, Crypto, puis autres
     const orderScore = (id: string, label: string) => {
       const u = (label || id || "").toUpperCase();
       if (u.includes("PEA")) return 1;
-      if (u.includes("PEE")) return 2;
-      if (u.includes("ASSURANCE") || u.includes("VIE")) return 3;
+      if (u.includes("ENTREPRISE") || u.includes("PEE")) return 2;
+      if (u.includes("GRESHAM") || u.includes("ASSURANCE") || u.includes("VIE")) return 3;
       if (u.includes("PER") || u.includes("RETRAITE")) return 4;
       if (id === "bank" || u.includes("BANQUE")) return 5;
       if (id === "crypto" || u.includes("CRYPTO")) return 6;
@@ -1043,13 +783,7 @@ const Dashboard: React.FC = () => {
     list.sort((a, b) => orderScore(a.id, a.label) - orderScore(b.id, b.label));
 
     return list;
-  }, [
-    accountSections,
-    accountSummaries,
-    unifiedHoldings,
-    bankCash,
-    cryptoTotalValue,
-  ]);
+  }, [overview, allHoldings]);
 
   // Onglets des enveloppes (hors « Vue Globale », désormais toujours affichée)
   const navigationTabs = useMemo(() => {
@@ -1133,8 +867,8 @@ const Dashboard: React.FC = () => {
           Importez un relevé CSV (PEA, PEE, Banque) ou ajoutez un investissement
           pour visualiser les graphiques et analyses.
         </p>
-        <Link to="/banking" className="btn-primary">
-          Gérer les comptes et imports CSV
+        <Link to="/patrimoine" className="btn-primary">
+          Gérer les comptes et patrimoines
         </Link>
       </div>
     </div>
@@ -1581,9 +1315,6 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Carte additive : nouveau patrimoine connecté (n'altère aucun calcul existant) */}
-      <PortfolioBridgeCard />
 
       {/* ===== CONTENU PRINCIPAL PAR PORTEFEUILLE (BENTO GRID) ===== */}
       {unifiedHoldings.length === 0 &&
@@ -2723,11 +2454,11 @@ const Dashboard: React.FC = () => {
                             Aucune position enregistrée dans ce portefeuille.
                             <div className="mt-3">
                               <Link
-                                to="/banking"
+                                to="/patrimoine"
                                 className="btn-secondary !py-1.5 !px-3 text-xs inline-flex items-center gap-1.5"
                               >
                                 <Landmark className="h-3.5 w-3.5 text-[#c8a55e]" />
-                                <span>Importer un relevé CSV (PEA / PEE)</span>
+                                <span>Gérer le patrimoine et imports CSV</span>
                               </Link>
                             </div>
                           </td>
@@ -2876,7 +2607,7 @@ const Dashboard: React.FC = () => {
                     Comptes Bancaires Importés
                   </h4>
                   <Link
-                    to="/banking"
+                    to="/patrimoine"
                     className="text-xs text-[#c8a55e] hover:underline inline-flex items-center gap-1"
                   >
                     <span>Gérer les comptes</span>

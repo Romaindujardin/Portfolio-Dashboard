@@ -8,7 +8,6 @@ import {
   X,
   Plus,
   Settings,
-  Landmark,
   Building2,
   Receipt,
   Menu,
@@ -34,11 +33,6 @@ const navItems: NavItem[] = [
     name: "Synthèse",
     path: "/",
     icon: LayoutGrid,
-  },
-  {
-    name: "Banque",
-    path: "/banking",
-    icon: Landmark,
   },
   {
     name: "Patrimoine",

@@ -5,14 +5,11 @@ import {
   ArrowUpRight,
   BarChart2,
   Coins,
-  Compass,
   Flame,
   Globe,
   RefreshCw,
   Search,
   Sparkles,
-  TrendingDown,
-  TrendingUp,
 } from "lucide-react";
 import type { Holding, PortfolioAccount, Quote } from "../../types/portfolio";
 import {
@@ -26,7 +23,6 @@ import {
   Button,
   Card,
   ErrorBanner,
-  Field,
   Input,
   SectionHeader,
   cn,
@@ -72,7 +68,6 @@ const POPULAR_TICKERS = [
 
 const MarketTab: React.FC<MarketTabProps> = ({
   userId,
-  holdings,
   onReload,
   notify,
 }) => {

@@ -164,6 +164,20 @@ export const getTransactions = (
     query: { user_id: userId, ...options },
   }).then((data) => data.transactions);
 
+export const getAllTransactions = (
+  userId: string,
+  options: { from?: string; to?: string; limit?: number; accountId?: string } = {},
+) =>
+  request<{ transactions: Transaction[] }>("/transactions", {
+    query: {
+      user_id: userId,
+      account_id: options.accountId,
+      from: options.from,
+      to: options.to,
+      limit: options.limit,
+    },
+  }).then((data) => data.transactions);
+
 export const createTransaction = (
   accountId: string,
   userId: string,

@@ -550,7 +550,6 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
             const hasHoldings = accountHoldings.length > 0;
             const isInvestment = INVESTMENT_ACCOUNT_TYPES.has(account.type) || hasHoldings;
             const isBankChecking = account.type === "CHECKING";
-            const isSavings = account.type === "SAVINGS";
             return (
               <Card key={account.id} className="overflow-hidden">
                 <div className="flex flex-wrap items-center gap-3 px-4 py-3">
