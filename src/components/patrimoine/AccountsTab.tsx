@@ -678,12 +678,6 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                           </Button>
                         )}
 
-                        {/* 3. Bouton Mouvements : pour les comptes d'investissement avec historique bancaire/liquidités */}
-                        {!isBankChecking && !isSavings && !isLoan && !isRealEstate && (account.connectionId || account.provider === "bourso-sidecar") && (
-                          <Button size="sm" variant="ghost" onClick={() => openTransactions(account)}>
-                            <Receipt className="h-3.5 w-3.5" /> Mouvements
-                          </Button>
-                        )}
                         {(account.connectionId || account.provider === "bourso-sidecar") && !isManaged && (
                           <Button
                             size="sm"
@@ -885,6 +879,10 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         onClose={() => setHoldingsAccount(null)}
         onChanged={onReload}
         notify={notify}
+        onOpenCsvImport={(accountId) => {
+          setCsvTargetAccountId(accountId);
+          setCsvImportOpen(true);
+        }}
       />
 
       {/* Modal Transactions */}
@@ -1372,7 +1370,8 @@ const HoldingsModal: React.FC<{
   onClose: () => void;
   onChanged: () => Promise<void>;
   notify: Notify;
-}> = ({ userId, account, onClose, onChanged, notify }) => {
+  onOpenCsvImport?: (accountId: string) => void;
+}> = ({ userId, account, onClose, onChanged, notify, onOpenCsvImport }) => {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1503,9 +1502,28 @@ const HoldingsModal: React.FC<{
         {loading ? (
           <p className="py-4 text-center text-xs text-[#8a8a8a]">Chargement…</p>
         ) : holdings.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-[rgba(255,255,255,0.08)] px-3 py-4 text-center text-xs text-[#8a8a8a]">
-            Aucune position. Ajoutez un ISIN ou un ticker ci-dessous.
-          </p>
+          <div className="space-y-3 rounded-xl border border-dashed border-[rgba(255,255,255,0.12)] p-4 text-center">
+            <p className="text-sm font-medium text-[#f5f5f5]">
+              Aucune position détaillée
+            </p>
+            <p className="text-xs text-[#8a8a8a] max-w-md mx-auto leading-relaxed">
+              Le solde global du compte ({formatEur(account.balance)}) est bien pris en compte dans votre patrimoine. Les agrégateurs bancaires transmettent uniquement la valorisation globale des plans d'épargne ou comptes externes (PEE/PER Natixis, etc.), sans le détail des unités de compte ou fonds.
+            </p>
+            {onOpenCsvImport && (
+              <div className="flex justify-center pt-1">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => {
+                    onClose();
+                    onOpenCsvImport(account.id);
+                  }}
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" /> Importer un relevé de positions CSV
+                </Button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
