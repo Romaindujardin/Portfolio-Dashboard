@@ -292,9 +292,9 @@ const Settings: React.FC = () => {
         } assets trouvés ($${totalValue.toLocaleString()}) - Paramètres sauvegardés`,
       });
 
-      // Rediriger vers l'onglet Investissements après 2 secondes
+      // Rediriger vers l'onglet Crypto du Patrimoine après 2 secondes
       setTimeout(() => {
-        navigate("/investments");
+        navigate("/patrimoine?tab=crypto");
       }, 2000);
     } catch (error: any) {
       setBinanceConnectionStatus({

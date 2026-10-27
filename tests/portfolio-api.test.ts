@@ -508,4 +508,50 @@ describe("API patrimoine — connexions et marché", () => {
     const noQuery = await getJson("/portfolio/market/search");
     expect(noQuery.status).toBe(400);
   });
+
+  it("gère les comptes crypto, positions manuelles et synchronisation", async () => {
+    const user = testUser("crypto");
+
+    // Créer un compte crypto manuel avec positions
+    const created = await postJson("/portfolio/crypto/accounts", {
+      user_id: user,
+      name: "Cold Storage Ledger",
+      provider: "manual",
+      holdings: [
+        { ticker: "BTC", name: "Bitcoin", quantity: 0.5, price: 60000 },
+        { ticker: "ETH", name: "Ethereum", quantity: 2, price: 3000 },
+      ],
+    });
+    expect(created.status).toBe(201);
+    const body = created.body as { account: { id: string; balance: number; type: string }; holdings: Array<{ ticker: string; quantity: number }> };
+    expect(body.account.type).toBe("CRYPTO");
+    expect(body.account.balance).toBeGreaterThan(0);
+    expect(body.holdings).toHaveLength(2);
+
+    // Lister les comptes crypto
+    const listRes = await getJson(`/portfolio/crypto/accounts?user_id=${user}`);
+    expect(listRes.status).toBe(200);
+    const listBody = listRes.body as { accounts: Array<{ id: string; name: string; holdings: unknown[] }> };
+    expect(listBody.accounts).toHaveLength(1);
+    expect(listBody.accounts[0].name).toBe("Cold Storage Ledger");
+    expect(listBody.accounts[0].holdings).toHaveLength(2);
+
+    // Synchroniser le compte manuel
+    const syncRes = await postJson(`/portfolio/crypto/sync/${body.account.id}`, { user_id: user });
+    expect(syncRes.status).toBe(200);
+
+    // Synchroniser tous les comptes crypto
+    const syncAllRes = await postJson("/portfolio/crypto/sync-all", { user_id: user });
+    expect(syncAllRes.status).toBe(200);
+    const syncAllBody = syncAllRes.body as { total: number; synced: number };
+    expect(syncAllBody.total).toBe(1);
+    expect(syncAllBody.synced).toBe(1);
+
+    // Vérifier l'intégration dans l'overview patrimoine
+    const overviewRes = await getJson(`/portfolio/overview?user_id=${user}`);
+    expect(overviewRes.status).toBe(200);
+    const overviewBody = overviewRes.body as { totals: { assets: number; netWorth: number }; byType: Record<string, number> };
+    expect(overviewBody.totals.assets).toBe(body.account.balance);
+    expect(overviewBody.byType["CRYPTO"]).toBe(body.account.balance);
+  });
 });

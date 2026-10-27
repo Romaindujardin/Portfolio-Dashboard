@@ -43,6 +43,10 @@ import {
   todayIso,
 } from "../lib/validate.js";
 import { encryptJson } from "../lib/secrets.js";
+import {
+  syncCryptoAccount,
+  syncAllCryptoAccounts,
+} from "../services/cryptoService.js";
 
 const toBool = (value, fallback = false) => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -1085,6 +1089,105 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const result = await market.refreshHoldings(userId, {
         force: toBool(req.body?.force, true),
       });
+      res.json(result);
+    }),
+  );
+
+  // ─── Crypto (Wallets on-chain, CEX Binance, Manuel) ───────────────────────
+
+  router.get(
+    "/crypto/accounts",
+    asyncHandler(async (req, res) => {
+      const userId = queryUserId(req);
+      const accounts = repository
+        .listAccounts(userId)
+        .filter((a) => a.type === "CRYPTO");
+      const populated = accounts.map((account) => {
+        const holdings = repository.listHoldings(account.id, userId);
+        return {
+          ...account,
+          holdings,
+        };
+      });
+      res.json({ accounts: populated });
+    }),
+  );
+
+  router.post(
+    "/crypto/accounts",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const name = asString(req.body?.name, { max: 120 });
+      if (!name) throw new HttpError(400, "Le nom du compte crypto est requis");
+      const provider = asString(req.body?.provider, { max: 40, fallback: "manual" }).toLowerCase();
+      const metadata = req.body?.metadata || {};
+
+      if (provider === "binance") {
+        const apiKey = asString(req.body?.apiKey, { max: 200 });
+        const apiSecret = asString(req.body?.apiSecret, { max: 200 });
+        if (!apiKey || !apiSecret) {
+          throw new HttpError(400, "Clé API et Clé Secrète Binance requises");
+        }
+        metadata.credentialsEncrypted = encryptJson({ apiKey, apiSecret });
+        metadata.apiKeyMasked = `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`;
+      } else if (["evm", "bitcoin", "solana"].includes(provider)) {
+        const address = asString(req.body?.address, { max: 200 });
+        if (!address) throw new HttpError(400, "L'adresse du wallet est requise");
+        metadata.address = address;
+      }
+
+      const account = repository.createAccount(userId, {
+        provider,
+        name,
+        type: "CRYPTO",
+        currency: "EUR",
+        balance: 0,
+        cashBalance: 0,
+        color: asOptionalString(req.body?.color, 20) || "#f59e0b",
+        isManual: provider === "manual",
+        metadata,
+      });
+
+      if (provider === "manual" && Array.isArray(req.body?.holdings)) {
+        for (const h of req.body.holdings) {
+          if (h.ticker && Number(h.quantity) > 0) {
+            repository.upsertHolding(userId, account.id, {
+              ticker: h.ticker.toUpperCase(),
+              name: h.name || h.ticker.toUpperCase(),
+              quantity: Number(h.quantity),
+              price: Number(h.price) || 0,
+              currency: "EUR",
+              lastPriceAt: nowIso(),
+            });
+          }
+        }
+      }
+
+      let syncResult;
+      try {
+        syncResult = await syncCryptoAccount(repository, account.id, userId);
+      } catch (err) {
+        syncResult = { account, holdings: repository.listHoldings(account.id, userId) };
+      }
+
+      res.status(201).json(syncResult);
+    }),
+  );
+
+  router.post(
+    "/crypto/sync/:id",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const result = await syncCryptoAccount(repository, req.params.id, userId);
+      res.json(result);
+    }),
+  );
+
+  router.post(
+    "/crypto/sync-all",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const result = await syncAllCryptoAccounts(repository, userId);
       res.json(result);
     }),
   );

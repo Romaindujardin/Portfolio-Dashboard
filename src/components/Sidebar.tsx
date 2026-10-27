@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutGrid,
-  BarChart3,
   PiggyBank,
   Sparkles,
   ChevronDown,
@@ -37,11 +36,6 @@ const navItems: NavItem[] = [
     name: "Synthèse",
     path: "/",
     icon: LayoutGrid,
-  },
-  {
-    name: "Portefeuille",
-    path: "/investments",
-    icon: BarChart3,
   },
   {
     name: "Banque",

@@ -36,6 +36,8 @@ import {
   getBankCsvUploadById,
 } from "../utils/storage";
 import { Link } from "react-router-dom";
+import type { PortfolioAccount } from "../types/portfolio";
+import { getCryptoAccounts } from "../services/portfolioApi";
 import MarketClock from "../components/MarketClock";
 import CashflowSpaghetti from "../components/CashflowSpaghetti";
 import PortfolioBridgeCard from "../components/PortfolioBridgeCard";
@@ -105,6 +107,7 @@ type AccountSectionSummary = {
 
 const Dashboard: React.FC = () => {
   const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [cryptoAccounts, setCryptoAccounts] = useState<PortfolioAccount[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("all");
   const [showEnvelopeDetails, setShowEnvelopeDetails] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -242,24 +245,35 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const loadCryptoAccounts = async () => {
+    try {
+      const data = await getCryptoAccounts(currentUser);
+      setCryptoAccounts(data || []);
+    } catch {
+      setCryptoAccounts([]);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await loadWallets();
+      await Promise.allSettled([loadWallets(), loadCryptoAccounts()]);
       setLoading(false);
     };
 
     loadData();
 
-    // Écouter les mises à jour des wallets
+    // Écouter les mises à jour des wallets et crypto
     const handleWalletUpdate = async () => {
-      await loadWallets();
+      await Promise.allSettled([loadWallets(), loadCryptoAccounts()]);
     };
 
     window.addEventListener("walletsUpdated", handleWalletUpdate);
+    window.addEventListener("cryptoUpdated", handleWalletUpdate);
 
     return () => {
       window.removeEventListener("walletsUpdated", handleWalletUpdate);
+      window.removeEventListener("cryptoUpdated", handleWalletUpdate);
     };
   }, [currentUser]);
 
@@ -734,7 +748,7 @@ const Dashboard: React.FC = () => {
 
 
   // Calculs des statistiques
-  // ===== Crypto total (wallets + NFTs) =====
+  // ===== Crypto total (comptes patrimoine crypto + legacy wallets) =====
   const cryptoWalletsValue = wallets.reduce((sum, wallet) => {
     const assetsValue = (wallet.assets || [])
       .filter((a) => !a.isHidden)
@@ -744,7 +758,12 @@ const Dashboard: React.FC = () => {
       .reduce((s, n) => s + (n.value || 0), 0);
     return sum + assetsValue + nftsValue;
   }, 0);
-  const cryptoTotalValue = cryptoWalletsValue;
+  const cryptoAccountsValue = cryptoAccounts.reduce(
+    (sum, acc) => sum + (acc.balance || 0),
+    0,
+  );
+  const cryptoTotalValue =
+    cryptoAccounts.length > 0 ? cryptoAccountsValue : cryptoWalletsValue;
 
   // ===== Totaux incluant CSV (banque / investissement) + crypto =====
   const bankCash = cashSummary.balance ?? 0;
@@ -847,34 +866,76 @@ const Dashboard: React.FC = () => {
         });
       });
 
-    // 3. Wallets crypto
-    wallets.forEach((wallet) => {
-      (wallet.assets || [])
-        .filter((a) => !a.isHidden && (a.value || 0) > 0)
-        .forEach((asset, idx) => {
-          const val = asset.value || 0;
+    // 3. Wallets & comptes crypto
+    if (cryptoAccounts.length > 0) {
+      cryptoAccounts.forEach((account) => {
+        const provLabel =
+          account.provider === "binance"
+            ? "Binance"
+            : account.provider === "evm"
+              ? "EVM Multi-chain"
+              : account.provider === "bitcoin"
+                ? "Bitcoin"
+                : account.provider === "solana"
+                  ? "Solana"
+                  : account.name || "Crypto";
+        (account.holdings || []).forEach((holding, idx) => {
+          const val =
+            holding.value ??
+            (holding.quantity || 0) * (holding.price || 0);
+          const cost =
+            (holding.quantity || 0) *
+            (holding.costBasis ?? holding.price ?? 0);
+          const pnl = val - cost;
+          const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
           list.push({
-            id: `w-${wallet.id}-${asset.symbol}-${idx}`,
-            name: asset.name || asset.symbol,
-            symbol: asset.symbol,
+            id: `ca-${account.id}-${holding.ticker || holding.id}-${idx}`,
+            name: holding.name || holding.ticker || "Crypto",
+            symbol: holding.ticker || "",
             envelopeId: "crypto",
             envelopeLabel: "Crypto & Web3",
             type: "crypto",
-            quantity: asset.balance,
-            buyingPrice: asset.price || 0,
-            lastPrice: asset.price || 0,
+            quantity: holding.quantity,
+            buyingPrice: holding.costBasis ?? holding.price ?? 0,
+            lastPrice: holding.price || 0,
             totalValue: val,
-            investedValue: val,
-            pnl: 0,
-            pnlPercent: 0,
+            investedValue: cost || val,
+            pnl,
+            pnlPercent: pnlPct,
             allocationPercent: 0,
-            source:
-              wallet.walletType === "binance"
-                ? "Binance"
-                : `Wallet ${wallet.name}`,
+            source: `${provLabel} (${account.name})`,
           });
         });
-    });
+      });
+    } else {
+      wallets.forEach((wallet) => {
+        (wallet.assets || [])
+          .filter((a) => !a.isHidden && (a.value || 0) > 0)
+          .forEach((asset, idx) => {
+            const val = asset.value || 0;
+            list.push({
+              id: `w-${wallet.id}-${asset.symbol}-${idx}`,
+              name: asset.name || asset.symbol,
+              symbol: asset.symbol,
+              envelopeId: "crypto",
+              envelopeLabel: "Crypto & Web3",
+              type: "crypto",
+              quantity: asset.balance,
+              buyingPrice: asset.price || 0,
+              lastPrice: asset.price || 0,
+              totalValue: val,
+              investedValue: val,
+              pnl: 0,
+              pnlPercent: 0,
+              allocationPercent: 0,
+              source:
+                wallet.walletType === "binance"
+                  ? "Binance"
+                  : `Wallet ${wallet.name}`,
+            });
+          });
+      });
+    }
 
     // 4. Calculer l'allocation % par rapport au total
     const total = list.reduce((s, h) => s + h.totalValue, 0);
@@ -885,7 +946,7 @@ const Dashboard: React.FC = () => {
     }
 
     return list;
-  }, [accountSections, sectionHoldings, wallets]);
+  }, [accountSections, sectionHoldings, wallets, cryptoAccounts]);
 
   // ===== Enveloppes de portefeuilles disponibles =====
   const portfolioEnvelopes = useMemo(() => {
@@ -1031,18 +1092,20 @@ const Dashboard: React.FC = () => {
       const cryptoHoldings = unifiedHoldings.filter(
         (h) => h.envelopeId === "crypto",
       );
+      const cryptoInvested =
+        cryptoHoldings.reduce((s, h) => s + (h.investedValue || 0), 0) ||
+        cryptoWalletsValue;
+      const cryptoPnl = cryptoTotalValue - cryptoInvested;
+      const cryptoPnlPercent =
+        cryptoInvested > 0 ? (cryptoPnl / cryptoInvested) * 100 : 0;
       list.push({
         id: "crypto",
         label: "Crypto & Web3",
         kind: "crypto",
         totalValue: cryptoTotalValue,
-        investedValue: cryptoWalletsValue,
-        pnl: cryptoTotalValue - cryptoWalletsValue,
-        pnlPercent:
-          cryptoWalletsValue > 0
-            ? ((cryptoTotalValue - cryptoWalletsValue) / cryptoWalletsValue) *
-              100
-            : 0,
+        investedValue: cryptoInvested,
+        pnl: cryptoPnl,
+        pnlPercent: cryptoPnlPercent,
         positionsCount: cryptoHoldings.length,
         color: "#f97316",
         description: "Exchanges (Binance) et wallets blockchain",
@@ -1137,18 +1200,21 @@ const Dashboard: React.FC = () => {
     [filterHoldings, unifiedHoldings],
   );
 
-  // Répartition par type (à partir des wallets crypto)
+  // Répartition par type (à partir des comptes crypto ou wallets)
   const typeDistribution: Record<string, number> = {};
 
-  // Ajouter les wallets à la répartition par type
-  wallets.forEach((wallet) => {
-    (wallet.assets || [])
-      .filter((asset) => !asset.isHidden && asset.value && asset.value > 0)
-      .forEach((asset) => {
-        typeDistribution.crypto =
-          (typeDistribution.crypto || 0) + (asset.value || 0);
-      });
-  });
+  if (cryptoAccounts.length > 0) {
+    typeDistribution.crypto = cryptoTotalValue;
+  } else {
+    wallets.forEach((wallet) => {
+      (wallet.assets || [])
+        .filter((asset) => !asset.isHidden && asset.value && asset.value > 0)
+        .forEach((asset) => {
+          typeDistribution.crypto =
+            (typeDistribution.crypto || 0) + (asset.value || 0);
+        });
+    });
+  }
 
 
   const EmptyState = () => (
@@ -1304,7 +1370,7 @@ const Dashboard: React.FC = () => {
         <div className="card flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-base font-semibold text-[#f5f5f5]">Allocation</h3>
-            <Link to="/investments" className="text-xs text-[#c8a55e] hover:underline">
+            <Link to="/patrimoine" className="text-xs text-[#c8a55e] hover:underline">
               Voir tout
             </Link>
           </div>
@@ -3156,10 +3222,10 @@ const Dashboard: React.FC = () => {
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
                     <span className="text-xs text-[#8a8a8a] block mb-1">
-                      Wallets Blockchain
+                      Comptes & Wallets
                     </span>
                     <span className="text-2xl font-bold text-[#f97316]">
-                      {wallets.length}
+                      {cryptoAccounts.length > 0 ? cryptoAccounts.length : wallets.length}
                     </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
@@ -3341,7 +3407,7 @@ const Dashboard: React.FC = () => {
                     Tokens et Actifs Crypto
                   </h4>
                   <Link
-                    to="/crypto"
+                    to="/patrimoine?tab=crypto"
                     className="text-xs text-[#c8a55e] hover:underline inline-flex items-center gap-1"
                   >
                     <span>Gérer les wallets & Binance</span>
@@ -3376,7 +3442,7 @@ const Dashboard: React.FC = () => {
                             Aucun actif crypto synchronisé.
                             <div className="mt-3">
                               <Link
-                                to="/crypto"
+                                to="/patrimoine?tab=crypto"
                                 className="btn-secondary !py-1.5 !px-3 text-xs inline-flex items-center gap-1.5"
                               >
                                 <Coins className="h-3.5 w-3.5 text-[#f97316]" />

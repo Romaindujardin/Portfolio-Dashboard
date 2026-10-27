@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TopHeader from "./components/TopHeader";
 import Dashboard from "./pages/Dashboard";
-import Investments from "./pages/Investments";
 import BudgetTricount from "./pages/BudgetTricount";
 import Strategy from "./pages/Strategy";
 import Savings from "./pages/Savings";
@@ -68,7 +67,7 @@ function App() {
               <ErrorBoundary fallbackTitle="Erreur de chargement de la page">
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
-                  <Route path="/investments" element={<Investments />} />
+                  <Route path="/investments" element={<Navigate to="/patrimoine?tab=crypto" replace />} />
                   <Route path="/budget" element={<BudgetTricount />} />
                   <Route path="/strategy" element={<Strategy />} />
                   <Route path="/savings" element={<Savings />} />

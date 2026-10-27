@@ -121,7 +121,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
         {/* Add Asset Pill Button */}
         <button
           type="button"
-          onClick={() => navigate("/investments")}
+          onClick={() => navigate("/patrimoine?tab=crypto")}
           className="flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-semibold tracking-tight transition-all duration-200 shadow-sm"
           style={{
             background: "linear-gradient(135deg, #c8a55e 0%, #b8944e 100%)",

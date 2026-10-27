@@ -441,3 +441,40 @@ export const refreshPrices = (userId: string, force = true) =>
   }>("/market/refresh", {
     ...json({ user_id: userId, force }),
   });
+
+// ─── Crypto ─────────────────────────────────────────────────────────────────
+
+export const getCryptoAccounts = (userId: string) =>
+  request<{ accounts: PortfolioAccount[] }>("/crypto/accounts", {
+    query: { user_id: userId },
+  }).then((data) => data.accounts);
+
+export const createCryptoAccount = (
+  userId: string,
+  payload: {
+    name: string;
+    provider: "binance" | "evm" | "bitcoin" | "solana" | "manual";
+    address?: string;
+    apiKey?: string;
+    apiSecret?: string;
+    color?: string;
+    holdings?: Array<{ ticker: string; name?: string; quantity: number; price?: number }>;
+  },
+) =>
+  request<{ account: PortfolioAccount; holdings: Holding[] }>("/crypto/accounts", {
+    ...json({ user_id: userId, ...payload }),
+  });
+
+export const syncCryptoAccount = (accountId: string, userId: string) =>
+  request<{ account: PortfolioAccount; holdings: Holding[] }>(
+    `/crypto/sync/${accountId}`,
+    json({ user_id: userId }),
+  );
+
+export const syncAllCryptoAccounts = (userId: string) =>
+  request<{
+    total: number;
+    synced: number;
+    results: Array<{ accountId: string; success: boolean; balance?: number; error?: string }>;
+  }>("/crypto/sync-all", json({ user_id: userId }));
+

@@ -32,17 +32,20 @@ import {
   formatPercent,
 } from "../components/patrimoine/shared";
 import AccountsTab from "../components/patrimoine/AccountsTab";
+import CryptoTab from "../components/patrimoine/CryptoTab";
 import ConnectionsTab from "../components/patrimoine/ConnectionsTab";
 import RealEstateTab from "../components/patrimoine/RealEstateTab";
 import LoansTab from "../components/patrimoine/LoansTab";
 import MarketTab from "../components/patrimoine/MarketTab";
+import { Coins } from "lucide-react";
 
-type TabKey = "accounts" | "connections" | "realestate" | "loans" | "market";
+type TabKey = "accounts" | "crypto" | "connections" | "realestate" | "loans" | "market";
 
 type Notice = { kind: "success" | "error"; message: string } | null;
 
 const TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
   { key: "accounts", label: "Comptes", icon: <Wallet2 className="h-3.5 w-3.5" /> },
+  { key: "crypto", label: "Crypto", icon: <Coins className="h-3.5 w-3.5" /> },
   { key: "connections", label: "Connexions", icon: <Landmark className="h-3.5 w-3.5" /> },
   { key: "realestate", label: "Immobilier", icon: <Building2 className="h-3.5 w-3.5" /> },
   { key: "loans", label: "Prêts", icon: <CreditCard className="h-3.5 w-3.5" /> },
@@ -95,6 +98,10 @@ const Patrimoine: React.FC = () => {
   }, [loadAll]);
 
   useEffect(() => {
+    const tabParam = searchParams.get("tab") as TabKey | null;
+    if (tabParam && ["accounts", "crypto", "connections", "realestate", "loans", "market"].includes(tabParam)) {
+      setTab(tabParam);
+    }
     const connection = searchParams.get("connection");
     if (!connection) return;
     const message = searchParams.get("message");
@@ -149,8 +156,8 @@ const Patrimoine: React.FC = () => {
             </span>
           </div>
           <p className="mt-1 text-xs text-[#8a8a8a]">
-            Vue consolidée des comptes bancaires, de l'immobilier, des prêts et des marchés.
-            Les pages historiques (Budget, Épargne, Portefeuille) restent inchangées.
+            Vue consolidée des comptes bancaires, de la crypto, de l'immobilier, des prêts et des marchés.
+            Les pages historiques (Budget, Épargne) restent inchangées.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -303,14 +310,16 @@ const Patrimoine: React.FC = () => {
         {TABS.map((item) => {
           const count =
             item.key === "accounts"
-              ? overview?.counts.accounts
-              : item.key === "connections"
-                ? connections.length
-                : item.key === "realestate"
-                  ? overview?.counts.properties
-                  : item.key === "loans"
-                    ? overview?.counts.loans
-                    : overview?.counts.holdings;
+              ? overview?.accounts.filter((a) => a.type !== "CRYPTO").length
+              : item.key === "crypto"
+                ? overview?.accounts.filter((a) => a.type === "CRYPTO").length
+                : item.key === "connections"
+                  ? connections.length
+                  : item.key === "realestate"
+                    ? overview?.counts.properties
+                    : item.key === "loans"
+                      ? overview?.counts.loans
+                      : overview?.counts.holdings;
           return (
             <button
               key={item.key}
@@ -346,7 +355,14 @@ const Patrimoine: React.FC = () => {
         {tab === "accounts" && overview && (
           <AccountsTab
             userId={currentUser}
-            accounts={overview.accounts}
+            accounts={overview.accounts.filter((a) => a.type !== "CRYPTO")}
+            onReload={loadAll}
+            notify={notify}
+          />
+        )}
+        {tab === "crypto" && (
+          <CryptoTab
+            userId={currentUser}
             onReload={loadAll}
             notify={notify}
           />
