@@ -97,7 +97,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
           {currency === "EUR" ? (
             <Euro className="w-4 h-4 text-[#c8a55e] transition-transform duration-200 group-hover:scale-110" />
           ) : (
-            <DollarSign className="w-4 h-4 text-[#22c55e] transition-transform duration-200 group-hover:scale-110" />
+            <DollarSign className="w-4 h-4 text-[#c8a55e] transition-transform duration-200 group-hover:scale-110" />
           )}
         </button>
 

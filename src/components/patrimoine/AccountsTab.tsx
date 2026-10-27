@@ -4,10 +4,13 @@ import {
   ChevronDown,
   ChevronUp,
   CreditCard,
+  Download,
   Landmark,
   Pencil,
   Plus,
+  Receipt,
   RefreshCw,
+  Search,
   Trash2,
   Users,
   Wallet2,
@@ -18,6 +21,7 @@ import type {
   Ownership,
   PortfolioAccount,
   PortfolioAccountType,
+  Transaction,
 } from "../../types/portfolio";
 import {
   createAccount,
@@ -25,6 +29,7 @@ import {
   deleteAccount,
   deleteHolding,
   getHoldings,
+  getTransactions,
   refreshPrices,
   setOwnership,
   updateAccount,
@@ -91,6 +96,44 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
   const [error, setError] = useState("");
   const [ownershipAccount, setOwnershipAccount] = useState<PortfolioAccount | null>(null);
   const [holdingsAccount, setHoldingsAccount] = useState<PortfolioAccount | null>(null);
+  const [txAccount, setTxAccount] = useState<PortfolioAccount | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [txSearch, setTxSearch] = useState("");
+
+  const openTransactions = async (account: PortfolioAccount) => {
+    setTxAccount(account);
+    setTxLoading(true);
+    setTxSearch("");
+    try {
+      const data = await getTransactions(account.id, userId, { limit: 500 });
+      setTransactions(data || []);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Impossible de charger les transactions";
+      notify("error", message);
+      setTransactions([]);
+    } finally {
+      setTxLoading(false);
+    }
+  };
+
+  const exportTransactionsCsv = () => {
+    if (!txAccount || transactions.length === 0) return;
+    const header = "Date;Libellé;Montant;Devise;Catégorie\n";
+    const rows = transactions
+      .map(
+        (t) =>
+          `"${t.date}";"${(t.label || "").replace(/"/g, '""')}";"${t.amount}";"${t.currency || "EUR"}";"${(t.category || "").replace(/"/g, '""')}"`,
+      )
+      .join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `transactions_${(txAccount.name || "compte").replace(/\s+/g, "_")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const visibleAccounts = useMemo(() => {
     return accounts.filter((account) => {
@@ -346,6 +389,11 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                         )}
                       </div>
                       <div className="flex flex-wrap content-start gap-2">
+                        {!isLoan && !isRealEstate && (
+                          <Button size="sm" onClick={() => openTransactions(account)}>
+                            <Receipt className="h-3.5 w-3.5" /> Transactions
+                          </Button>
+                        )}
                         {!isManaged && (
                           <Button size="sm" onClick={() => startEdit(account)}>
                             <Pencil className="h-3.5 w-3.5" /> Modifier
@@ -544,6 +592,82 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         onChanged={onReload}
         notify={notify}
       />
+
+      {/* Modal Transactions */}
+      <Modal
+        open={Boolean(txAccount)}
+        title={txAccount ? `Transactions — ${txAccount.name}` : "Transactions"}
+        onClose={() => setTxAccount(null)}
+        footer={
+          <div className="flex w-full items-center justify-between">
+            <span className="text-xs text-[#8a8a8a]">
+              {transactions.length} transaction(s)
+            </span>
+            <div className="flex items-center gap-2">
+              {transactions.length > 0 && (
+                <Button size="sm" onClick={exportTransactionsCsv}>
+                  <Download className="h-3.5 w-3.5" /> Exporter CSV
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setTxAccount(null)}>
+                Fermer
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        {txLoading ? (
+          <div className="py-12 text-center text-sm text-[#8a8a8a]">
+            Chargement des transactions...
+          </div>
+        ) : transactions.length === 0 ? (
+          <EmptyState
+            title="Aucune transaction"
+            description="Aucune transaction n'a été trouvée pour ce compte."
+          />
+        ) : (
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-[#555555]" />
+              <input
+                type="text"
+                placeholder="Rechercher par libellé ou montant..."
+                value={txSearch}
+                onChange={(e) => setTxSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-[#141414] text-xs text-[#f5f5f5] rounded-lg border border-[rgba(255,255,255,0.06)] focus:border-[#c8a55e]/50 focus:outline-none"
+              />
+            </div>
+            <div className="max-h-[50vh] overflow-y-auto divide-y divide-[rgba(255,255,255,0.04)] pr-1">
+              {transactions
+                .filter(
+                  (t) =>
+                    !txSearch ||
+                    (t.label || "").toLowerCase().includes(txSearch.toLowerCase()) ||
+                    String(t.amount).includes(txSearch) ||
+                    (t.category || "").toLowerCase().includes(txSearch.toLowerCase()),
+                )
+                .map((t) => (
+                  <div key={t.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-[#f5f5f5]">{t.label}</p>
+                      <p className="text-[10px] text-[#6a6a6a]">
+                        {formatDate(t.date)} {t.category ? `· ${t.category}` : ""}
+                      </p>
+                    </div>
+                    <span
+                      className={cn(
+                        "font-semibold tabular-nums text-right flex-shrink-0",
+                        t.amount >= 0 ? "text-[#10b981]" : "text-[#f5f5f5]",
+                      )}
+                    >
+                      {formatEur(t.amount, { signed: true })}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
