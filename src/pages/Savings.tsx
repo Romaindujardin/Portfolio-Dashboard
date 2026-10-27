@@ -20,6 +20,7 @@ import {
   Legend,
 } from "recharts";
 import { useUser } from "../contexts/UserContext";
+import { useCurrency, formatMoney } from "../contexts/CurrencyContext";
 import {
   SavingsStrategy,
   PocketCategory,
@@ -42,13 +43,7 @@ import { getUserAccentColor } from "../utils/theme";
 import SavingsProjectionPanel from "../components/SavingsProjectionPanel";
 
 const formatEur = (val: number | null | undefined): string => {
-  if (val == null || isNaN(val)) return "0,00 €";
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(val);
+  return formatMoney(val, { fallback: "0,00 €" });
 };
 
 const COLOR_PALETTE = [
@@ -89,6 +84,7 @@ interface PocketStats {
 
 export const Savings: React.FC = () => {
   const { currentUser, availableUsers } = useUser();
+  useCurrency();
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Filtres d'affichage des poches et du journal

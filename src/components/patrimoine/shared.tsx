@@ -1,6 +1,10 @@
 import React from "react";
 import { AlertCircle, CheckCircle2, Loader2, X } from "lucide-react";
 import type { PortfolioAccountType } from "../../types/portfolio";
+import {
+  formatMoney as formatMoneyUtil,
+  formatPercent as formatPercentUtil,
+} from "../../contexts/CurrencyContext";
 
 export const INVESTMENT_ACCOUNT_TYPES = new Set<PortfolioAccountType>([
   "PEA",
@@ -11,26 +15,16 @@ export const INVESTMENT_ACCOUNT_TYPES = new Set<PortfolioAccountType>([
 
 export const formatEur = (
   value: number | null | undefined,
-  options: { compact?: boolean; signed?: boolean } = {},
+  options: { compact?: boolean; signed?: boolean; digits?: number; fallback?: string } = {},
 ): string => {
-  if (value == null || Number.isNaN(Number(value))) return "—";
-  const formatter = new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: options.compact ? 0 : 2,
-    minimumFractionDigits: options.compact ? 0 : 2,
-    notation: options.compact ? "compact" : "standard",
-    signDisplay: options.signed ? "exceptZero" : "auto",
-  });
-  return formatter.format(Number(value));
+  return formatMoneyUtil(value, options);
 };
 
-export const formatPercent = (value: number | null | undefined, digits = 2): string => {
-  if (value == null || Number.isNaN(Number(value))) return "—";
-  return `${new Intl.NumberFormat("fr-FR", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  }).format(Number(value))} %`;
+export const formatPercent = (
+  value: number | null | undefined,
+  digits = 2,
+): string => {
+  return formatPercentUtil(value, digits);
 };
 
 export const formatDate = (value: string | null | undefined): string => {

@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useUser } from "../contexts/UserContext";
+import { useCurrency } from "../contexts/CurrencyContext";
 import { getSavingsStrategy } from "../utils/savingsStorage";
 import { getPersonTheme, getUserAccentColor } from "../utils/theme";
 import {
@@ -311,14 +312,9 @@ const Banking: React.FC = () => {
   const p1Theme = useMemo(() => getPersonTheme(p1Color, p1Name), [p1Color, p1Name]);
   const p2Theme = useMemo(() => getPersonTheme(p2Color, p2Name), [p2Color, p2Name]);
 
+  const { formatMoney: formatMoneyFromContext } = useCurrency();
   const formatEur = (val: number | null | undefined): string => {
-    if (val == null || isNaN(val)) return "0,00 €";
-    return new Intl.NumberFormat("fr-FR", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(val);
+    return formatMoneyFromContext(val, { fallback: "0,00 €" });
   };
 
   const computeAutoSplit = (

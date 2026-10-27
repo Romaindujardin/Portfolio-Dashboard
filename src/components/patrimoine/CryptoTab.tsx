@@ -32,6 +32,7 @@ import {
   formatDate,
   cn,
 } from "./shared";
+import { useCurrency } from "../../contexts/CurrencyContext";
 
 type Notify = (kind: "success" | "error", message: string) => void;
 
@@ -59,6 +60,7 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
   onReload,
   notify,
 }) => {
+  const { currencySymbol } = useCurrency();
   const [accounts, setAccounts] = useState<PortfolioAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -487,8 +489,8 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
                         <tr className="border-b border-[rgba(255,255,255,0.04)] text-[#8a8a8a] uppercase tracking-wider text-[10px]">
                           <th className="py-2.5 px-4 font-medium">Actif</th>
                           <th className="py-2.5 px-4 font-medium text-right">Quantité</th>
-                          <th className="py-2.5 px-4 font-medium text-right">Cours (€)</th>
-                          <th className="py-2.5 px-4 font-medium text-right">Valeur (€)</th>
+                          <th className="py-2.5 px-4 font-medium text-right">Cours ({currencySymbol})</th>
+                          <th className="py-2.5 px-4 font-medium text-right">Valeur ({currencySymbol})</th>
                           <th className="py-2.5 px-4 font-medium text-right">Part</th>
                         </tr>
                       </thead>

@@ -10,6 +10,7 @@ import {
   Wallet2,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
+import { useCurrency } from "../contexts/CurrencyContext";
 import type {
   Connection,
   Holding,
@@ -54,6 +55,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
 
 const Patrimoine: React.FC = () => {
   const { currentUser } = useUser();
+  useCurrency();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<TabKey>("accounts");
   const [overview, setOverview] = useState<Overview | null>(null);

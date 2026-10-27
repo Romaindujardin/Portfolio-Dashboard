@@ -75,6 +75,7 @@ import {
   getUserAccentColor,
   getAccentColorDef,
 } from "../utils/theme";
+import { useCurrency, formatMoney } from "../contexts/CurrencyContext";
 
 const COLOR_PALETTE = [
   "#6366f1", // Indigo
@@ -135,12 +136,7 @@ const HORIZON_OPTIONS = [
 
 const formatEur = (val: number, decimals: number = 2) => {
   const normalized = Math.abs(val) < 0.005 ? 0 : val;
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(normalized);
+  return formatMoney(normalized, { digits: decimals, fallback: "0,00 €" });
 };
 
 export interface SavingsStrategyPageProps {
@@ -157,6 +153,7 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
   onStrategySaved,
 }) => {
   const { currentUser, availableUsers } = useUser();
+  useCurrency();
   const [activeMonth, setActiveMonth] = useState<string>(
     () => propMonthKey || getCurrentMonthKey(),
   );

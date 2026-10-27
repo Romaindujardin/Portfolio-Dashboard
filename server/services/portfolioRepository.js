@@ -1256,7 +1256,9 @@ export class PortfolioRepository {
         debts: round2(debts),
         netWorth: round2(assets - debts),
       },
-      byType,
+      byType: Object.fromEntries(
+        Object.entries(byType).map(([type, val]) => [type, round2(val)]),
+      ),
       perOwner: Object.fromEntries(
         Object.entries(perOwner).map(([name, value]) => [name, round2(value)]),
       ),

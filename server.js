@@ -1771,6 +1771,11 @@ app.put("/api/database/wallets/:id/nfts/:index/visibility", (req, res) => {
   }
 });
 
+// Taux de change (FX)
+app.get("/api/fx/rates", (req, res) => {
+  res.redirect(307, "/api/portfolio/fx/rates");
+});
+
 // ===== PATRIMOINE CONNECTÉ (connecteurs, immobilier, prêts, marché) =====
 app.use(
   "/api/portfolio",

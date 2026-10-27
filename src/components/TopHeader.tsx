@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Eye, EyeOff, Plus, Sun, Moon } from "lucide-react";
+import { Search, Eye, EyeOff, Plus, Sun, Moon, Euro, DollarSign } from "lucide-react";
 import { toggleThemeWithTransition } from "../utils/themeToggle";
+import { useCurrency } from "../contexts/CurrencyContext";
 
 interface TopHeaderProps {
   onSearch?: (query: string) => void;
@@ -10,46 +11,13 @@ interface TopHeaderProps {
 const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
+  const { isMasked, toggleMasked, currency, toggleCurrency, rateEurToUsd } = useCurrency();
   const [isDark, setIsDark] = useState(() => {
     if (typeof window === "undefined") return true;
     return document.documentElement.classList.contains("dark");
   });
-  const [isAnonymous, setIsAnonymous] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("dashboardAnonymous") === "1";
-  });
-
-  const toggleAnonymous = () => {
-    const next = !isAnonymous;
-    setIsAnonymous(next);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("dashboardAnonymous", next ? "1" : "0");
-      window.dispatchEvent(
-        new CustomEvent("dashboardAnonymousChanged", {
-          detail: { value: next },
-        })
-      );
-    }
-  };
 
   useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== "dashboardAnonymous") return;
-      setIsAnonymous(event.newValue === "1");
-    };
-    const handleCustom = (event: Event) => {
-      const detail = (event as CustomEvent | undefined)?.detail as
-        | { value?: boolean }
-        | undefined;
-      if (typeof detail?.value === "boolean") {
-        setIsAnonymous(detail.value);
-      }
-    };
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener(
-      "dashboardAnonymousChanged",
-      handleCustom as EventListener
-    );
     const handleThemeChange = (event: Event) => {
       const custom = event as CustomEvent;
       if (typeof custom.detail?.isDark === "boolean") {
@@ -61,11 +29,6 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
     window.addEventListener("themeChanged", handleThemeChange);
 
     return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener(
-        "dashboardAnonymousChanged",
-        handleCustom as EventListener
-      );
       window.removeEventListener("themeChanged", handleThemeChange);
     };
   }, []);
@@ -107,14 +70,34 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
         {/* Toggle Anonymous Eye */}
         <button
           type="button"
-          onClick={toggleAnonymous}
-          title={isAnonymous ? "Afficher les chiffres" : "Masquer les chiffres"}
+          onClick={toggleMasked}
+          title={isMasked ? "Afficher les chiffres" : "Masquer les chiffres"}
           className="p-2 rounded-full text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.06)] transition-all duration-200"
+          aria-label={isMasked ? "Afficher les chiffres" : "Masquer les chiffres"}
         >
-          {isAnonymous ? (
+          {isMasked ? (
             <EyeOff className="w-4 h-4 text-[#c8a55e]" />
           ) : (
             <Eye className="w-4 h-4" />
+          )}
+        </button>
+
+        {/* Currency Switcher (EUR / USD) */}
+        <button
+          type="button"
+          onClick={toggleCurrency}
+          title={
+            currency === "EUR"
+              ? `Devise actuelle : EUR (€). Cliquer pour convertir en USD ($) (taux : 1 € = ${rateEurToUsd.toFixed(4)} $)`
+              : `Devise actuelle : USD ($). Cliquer pour convertir en EUR (€) (taux : 1 € = ${rateEurToUsd.toFixed(4)} $)`
+          }
+          className="p-2 rounded-full text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.06)] transition-all duration-200 group flex items-center justify-center"
+          aria-label="Basculer entre Euro et Dollar"
+        >
+          {currency === "EUR" ? (
+            <Euro className="w-4 h-4 text-[#c8a55e] transition-transform duration-200 group-hover:scale-110" />
+          ) : (
+            <DollarSign className="w-4 h-4 text-[#22c55e] transition-transform duration-200 group-hover:scale-110" />
           )}
         </button>
 
@@ -138,3 +121,4 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
 };
 
 export default TopHeader;
+

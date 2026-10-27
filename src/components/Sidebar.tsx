@@ -10,8 +10,6 @@ import {
   Settings,
   Landmark,
   Building2,
-  Eye,
-  EyeOff,
   Receipt,
   Menu,
   Wallet2,
@@ -73,50 +71,6 @@ const Sidebar: React.FC = () => {
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState("");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [isAnonymous, setIsAnonymous] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("dashboardAnonymous") === "1";
-  });
-
-  const toggleAnonymous = () => {
-    const next = !isAnonymous;
-    setIsAnonymous(next);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("dashboardAnonymous", next ? "1" : "0");
-      window.dispatchEvent(
-        new CustomEvent("dashboardAnonymousChanged", {
-          detail: { value: next },
-        }),
-      );
-    }
-  };
-
-  React.useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== "dashboardAnonymous") return;
-      setIsAnonymous(event.newValue === "1");
-    };
-    const handleCustom = (event: Event) => {
-      const detail = (event as CustomEvent | undefined)?.detail as
-        | { value?: boolean }
-        | undefined;
-      if (typeof detail?.value === "boolean") {
-        setIsAnonymous(detail.value);
-      }
-    };
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener(
-      "dashboardAnonymousChanged",
-      handleCustom as EventListener,
-    );
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener(
-        "dashboardAnonymousChanged",
-        handleCustom as EventListener,
-      );
-    };
-  }, []);
 
   // Sous-page(s) dépliée(s) : « Budget › Stratégie » s'ouvre automatiquement sur sa route
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -266,27 +220,10 @@ const Sidebar: React.FC = () => {
         })}
       </nav>
 
-      {/* Bottom section: User + Controls */}
+      {/* Bottom section: User selector */}
       <div className="mt-auto border-t border-[rgba(255,255,255,0.06)]">
-        {/* Anonymous toggle */}
-        <div className="px-4 pt-3 pb-1">
-          <button
-            type="button"
-            onClick={toggleAnonymous}
-            className="flex items-center gap-2 w-full px-2 py-2 rounded-lg text-sm text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)] transition-all duration-200"
-            title={isAnonymous ? "Afficher les chiffres" : "Masquer les chiffres"}
-          >
-            {isAnonymous ? (
-              <EyeOff className="w-4 h-4" />
-            ) : (
-              <Eye className="w-4 h-4" />
-            )}
-            <span className="text-xs">{isAnonymous ? "Afficher" : "Masquer"}</span>
-          </button>
-        </div>
-
         {/* User selector */}
-        <div className="px-4 pb-4">
+        <div className="px-4 py-4">
           <div className="relative">
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}

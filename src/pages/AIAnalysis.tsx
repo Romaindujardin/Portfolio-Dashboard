@@ -18,11 +18,11 @@ import {
   X,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
+import { useCurrency, formatMoney } from "../contexts/CurrencyContext";
 import { getGeminiApiKey } from "../utils/userSettings";
 import {
   collectAiContext,
   DEFAULT_AI_CONTEXT_SELECTION,
-  formatEur,
   getAiContextPreview,
   type AiContextMeta,
   type AiContextPreview,
@@ -133,7 +133,7 @@ const summarizeContext = (meta: AiContextMeta): string => {
   if (meta.lines > 0) bits.push(`${meta.lines} ligne(s)`);
   if (meta.wallets > 0) bits.push(`${meta.wallets} wallet(s)`);
   if (meta.pockets > 0) bits.push(`${meta.pockets} poche(s)`);
-  if (meta.totalValue > 0) bits.push(formatEur(meta.totalValue));
+  if (meta.totalValue > 0) bits.push(formatMoney(meta.totalValue));
   return bits.length > 0 ? bits.join(" · ") : "aucune donnée disponible";
 };
 
@@ -184,6 +184,7 @@ const ContextCard: React.FC<ContextCardProps> = ({
 
 const AIAnalysis: React.FC = () => {
   const { currentUser } = useUser();
+  useCurrency();
 
   const [selection, setSelection] = useState<AiContextSelection>(() =>
     loadSelection(currentUser),

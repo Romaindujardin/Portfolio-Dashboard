@@ -40,6 +40,7 @@ import MarketClock from "../components/MarketClock";
 import CashflowSpaghetti from "../components/CashflowSpaghetti";
 import PortfolioBridgeCard from "../components/PortfolioBridgeCard";
 import { useUser } from "../contexts/UserContext";
+import { useCurrency } from "../contexts/CurrencyContext";
 import { getUserSettings } from "../utils/userSettings";
 import {
   TimeGranularity,
@@ -138,10 +139,6 @@ const Dashboard: React.FC = () => {
     Record<string, PeaHolding[]>
   >({});
   const [loading, setLoading] = useState(true);
-  const [isAnonymous, setIsAnonymous] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("dashboardAnonymous") === "1";
-  });
   const { currentUser } = useUser();
   const [userSettings, setUserSettings] = useState(() =>
     getUserSettings(currentUser),
@@ -192,43 +189,17 @@ const Dashboard: React.FC = () => {
     currentValue: 0,
   });
 
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== "dashboardAnonymous") return;
-      setIsAnonymous(event.newValue === "1");
-    };
-    const handleCustom = (event: Event) => {
-      const detail = (event as CustomEvent | undefined)?.detail as
-        | { value?: boolean }
-        | undefined;
-      if (typeof detail?.value === "boolean") {
-        setIsAnonymous(detail.value);
-      }
-    };
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener(
-      "dashboardAnonymousChanged",
-      handleCustom as EventListener,
-    );
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener(
-        "dashboardAnonymousChanged",
-        handleCustom as EventListener,
-      );
-    };
-  }, []);
+  const {
+    isMasked: isAnonymous,
+    formatMoney,
+    maskDigits,
+    convertAmount,
+  } = useCurrency();
 
-  const maskDigits = (text: string) =>
-    isAnonymous ? text.replace(/[0-9]/g, "*") : text;
+  const formatCurrency = (value: number) =>
+    formatMoney(value);
   const formatNumber = (value: number, locale: string = "fr-FR") =>
-    maskDigits(Number(value || 0).toLocaleString(locale));
-  const formatCurrency = (value: number, locale: string = "fr-FR") =>
-    `${maskDigits(
-      Number(value || 0).toLocaleString(locale, {
-        maximumFractionDigits: 2,
-      }),
-    )}€`;
+    maskDigits(Number(convertAmount(value) || 0).toLocaleString(locale, { maximumFractionDigits: 2 }));
   const formatPercent = (value: number, digits: number = 2) =>
     `${maskDigits(Number(value || 0).toFixed(digits).replace(".", ","))}%`;
 

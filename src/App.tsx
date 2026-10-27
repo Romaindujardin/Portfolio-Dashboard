@@ -12,6 +12,7 @@ import Banking from "./pages/Banking";
 import Patrimoine from "./pages/Patrimoine";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { UserProvider } from "./contexts/UserContext";
+import { CurrencyProvider } from "./contexts/CurrencyContext";
 import { initializeCryptoDatabase } from "./utils/cryptoDatabase";
 
 function App() {
@@ -59,27 +60,29 @@ function App() {
   return (
     <Router>
       <UserProvider>
-        <div className="min-h-screen bg-[#0a0a0a]">
-          <Sidebar />
-          <main className="main-content">
-            <TopHeader />
-            <div className="max-w-[1400px] mx-auto px-6 py-8">
-              <ErrorBoundary fallbackTitle="Erreur de chargement de la page">
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/investments" element={<Navigate to="/patrimoine?tab=crypto" replace />} />
-                  <Route path="/budget" element={<BudgetTricount />} />
-                  <Route path="/strategy" element={<Strategy />} />
-                  <Route path="/savings" element={<Savings />} />
-                  <Route path="/ai-analysis" element={<AIAnalysis />} />
-                  <Route path="/banking" element={<Banking />} />
-                  <Route path="/patrimoine" element={<Patrimoine />} />
-                  <Route path="/settings/:username" element={<Settings />} />
-                </Routes>
-              </ErrorBoundary>
-            </div>
-          </main>
-        </div>
+        <CurrencyProvider>
+          <div className="min-h-screen bg-[#0a0a0a]">
+            <Sidebar />
+            <main className="main-content">
+              <TopHeader />
+              <div className="max-w-[1400px] mx-auto px-6 py-8">
+                <ErrorBoundary fallbackTitle="Erreur de chargement de la page">
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/investments" element={<Navigate to="/patrimoine?tab=crypto" replace />} />
+                    <Route path="/budget" element={<BudgetTricount />} />
+                    <Route path="/strategy" element={<Strategy />} />
+                    <Route path="/savings" element={<Savings />} />
+                    <Route path="/ai-analysis" element={<AIAnalysis />} />
+                    <Route path="/banking" element={<Banking />} />
+                    <Route path="/patrimoine" element={<Patrimoine />} />
+                    <Route path="/settings/:username" element={<Settings />} />
+                  </Routes>
+                </ErrorBoundary>
+              </div>
+            </main>
+          </div>
+        </CurrencyProvider>
       </UserProvider>
     </Router>
   );

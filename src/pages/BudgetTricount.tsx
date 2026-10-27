@@ -44,20 +44,16 @@ import {
   getTotalMonthlyIncome,
 } from "../utils/savingsStorage";
 import { useUser } from "../contexts/UserContext";
+import { useCurrency, formatMoney } from "../contexts/CurrencyContext";
 import { getPersonTheme, getUserAccentColor } from "../utils/theme";
 
 const formatEur = (val: number | null | undefined): string => {
-  if (val == null || isNaN(val)) return "0,00 €";
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(val);
+  return formatMoney(val, { fallback: "0,00 €" });
 };
 
 const BudgetTricount: React.FC = () => {
   const { currentUser, availableUsers } = useUser();
+  useCurrency();
   const navigate = useNavigate();
   const [selectedMonth, setSelectedMonth] =
     useState<string>(getCurrentMonthKey);

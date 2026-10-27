@@ -1192,6 +1192,49 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     }),
   );
 
+  // ─── Taux de change (FX) ───────────────────────────────────────────────────
+
+  router.get(
+    "/fx/rates",
+    asyncHandler(async (req, res) => {
+      let eur_usd = 1.08;
+      let source = "fallback";
+      try {
+        const resp = await fetch("https://api.frankfurter.app/latest?from=EUR&to=USD", {
+          signal: AbortSignal.timeout(4000),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data?.rates?.USD && Number.isFinite(Number(data.rates.USD))) {
+            eur_usd = Number(data.rates.USD);
+            source = "ecb_frankfurter";
+          }
+        }
+      } catch (err) {
+        try {
+          const bResp = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT", {
+            signal: AbortSignal.timeout(4000),
+          });
+          if (bResp.ok) {
+            const bData = await bResp.json();
+            if (bData?.price && Number.isFinite(Number(bData.price))) {
+              eur_usd = Number(bData.price);
+              source = "binance_eurusdt";
+            }
+          }
+        } catch (_) {}
+      }
+      res.json({
+        base: "EUR",
+        target: "USD",
+        eur_usd,
+        usd_eur: round2(1 / eur_usd),
+        source,
+        timestamp: Date.now(),
+      });
+    }),
+  );
+
   // ─── Gestion d'erreurs du routeur ─────────────────────────────────────────
 
   router.use((error, req, res, next) => {
