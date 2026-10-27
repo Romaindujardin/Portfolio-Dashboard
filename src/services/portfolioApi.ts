@@ -537,4 +537,30 @@ export const deleteBoursoSidecarCredentials = () =>
     method: "DELETE",
   });
 
+export const importAccountCsv = (
+  userId: string,
+  payload: {
+    accountId?: string;
+    newAccount?: {
+      name: string;
+      type: string;
+      currency?: string;
+      color?: string;
+      logo?: string;
+    };
+    mode: "HOLDINGS" | "TRANSACTIONS";
+    items: unknown[];
+  },
+) =>
+  request<{
+    success: boolean;
+    mode: "HOLDINGS" | "TRANSACTIONS";
+    accountId: string;
+    account: PortfolioAccount;
+    importedCount: number;
+    totalValue: number;
+  }>("/accounts/import-csv", {
+    ...json({ user_id: userId, ...payload }),
+  });
+
 

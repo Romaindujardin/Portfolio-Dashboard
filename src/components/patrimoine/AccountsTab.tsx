@@ -6,6 +6,7 @@ import {
   ChevronUp,
   CreditCard,
   Download,
+  FileSpreadsheet,
   Landmark,
   Pencil,
   Plus,
@@ -18,6 +19,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { CsvImportModal } from "./CsvImportModal";
 import type {
   Holding,
   Ownership,
@@ -119,6 +121,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [txLoading, setTxLoading] = useState(false);
   const [txSearch, setTxSearch] = useState("");
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [csvTargetAccountId, setCsvTargetAccountId] = useState<string | null>(null);
 
   // ===== Intégration Tricount dans le modal de transactions =====
   const [tricountExpenses, setTricountExpenses] = useState<TricountExpense[]>([]);
@@ -482,9 +486,20 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                 </button>
               ))}
             </div>
-            <Button variant="primary" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> Compte
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setCsvTargetAccountId(null);
+                  setCsvImportOpen(true);
+                }}
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" /> Importer CSV
+              </Button>
+              <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                <Plus className="h-3.5 w-3.5" /> Compte
+              </Button>
+            </div>
           </div>
         }
       />
@@ -523,21 +538,35 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
               <Card key={account.id} className="overflow-hidden">
                 <div className="flex flex-wrap items-center gap-3 px-4 py-3">
                   <div
-                    className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg"
+                    className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg overflow-hidden border border-white/5"
                     style={{
-                      backgroundColor: `${account.color || "#c8a55e"}15`,
+                      backgroundColor: account.logo ? "#ffffff" : `${account.color || "#c8a55e"}15`,
                       color: account.color || "#c8a55e",
                     }}
                   >
-                    {isRealEstate ? (
-                      <Building2 className="h-4 w-4" />
-                    ) : isLoan ? (
-                      <CreditCard className="h-4 w-4" />
-                    ) : account.type === "CHECKING" ? (
-                      <Landmark className="h-4 w-4" />
-                    ) : (
-                      <Wallet2 className="h-4 w-4" />
-                    )}
+                    {account.logo ? (
+                      <img
+                        src={account.logo}
+                        alt=""
+                        className="h-6 w-6 object-contain"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                          const fallback = e.currentTarget.parentElement?.querySelector(".fallback-icon");
+                          if (fallback) fallback.classList.remove("hidden");
+                        }}
+                      />
+                    ) : null}
+                    <div className={cn("flex items-center justify-center", account.logo && "fallback-icon hidden")}>
+                      {isRealEstate ? (
+                        <Building2 className="h-4 w-4" />
+                      ) : isLoan ? (
+                        <CreditCard className="h-4 w-4" />
+                      ) : account.type === "CHECKING" ? (
+                        <Landmark className="h-4 w-4" />
+                      ) : (
+                        <Wallet2 className="h-4 w-4" />
+                      )}
+                    </div>
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -638,6 +667,18 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                         {!isManaged && INVESTMENT_ACCOUNT_TYPES.has(account.type) && (
                           <Button size="sm" onClick={() => setHoldingsAccount(account)}>
                             <RefreshCw className="h-3.5 w-3.5" /> Positions
+                          </Button>
+                        )}
+                        {!isManaged && (
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setCsvTargetAccountId(account.id);
+                              setCsvImportOpen(true);
+                            }}
+                            title="Importer des positions ou transactions via CSV"
+                          >
+                            <FileSpreadsheet className="h-3.5 w-3.5" /> Importer CSV
                           </Button>
                         )}
                         {!isManaged && (
@@ -829,7 +870,20 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
       {/* Modal Transactions */}
       <Modal
         open={Boolean(txAccount)}
-        title={txAccount ? `Transactions — ${txAccount.name}` : "Transactions"}
+        title={
+          txAccount ? (
+            <div className="flex items-center gap-2.5">
+              {txAccount.logo && (
+                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-white p-0.5 overflow-hidden border border-white/10 flex-shrink-0">
+                  <img src={txAccount.logo} alt="" className="h-5 w-5 object-contain" />
+                </div>
+              )}
+              <span>Transactions — {txAccount.name}</span>
+            </div>
+          ) : (
+            "Transactions"
+          )
+        }
         onClose={() => setTxAccount(null)}
         footer={
           <div className="flex w-full items-center justify-between">
@@ -1149,6 +1203,21 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
           )}
         </form>
       </Modal>
+
+      <CsvImportModal
+        open={csvImportOpen}
+        onClose={() => {
+          setCsvImportOpen(false);
+          setCsvTargetAccountId(null);
+        }}
+        userId={userId}
+        accounts={accounts}
+        preselectedAccountId={csvTargetAccountId}
+        onSuccess={async () => {
+          await onReload();
+          notify("success", "Importation CSV effectuée avec succès.");
+        }}
+      />
     </div>
   );
 };
@@ -1389,7 +1458,16 @@ const HoldingsModal: React.FC<{
     <Modal
       open
       wide
-      title={`Positions — ${account.name}`}
+      title={
+        <div className="flex items-center gap-2.5">
+          {account.logo && (
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-white p-0.5 overflow-hidden border border-white/10 flex-shrink-0">
+              <img src={account.logo} alt="" className="h-5 w-5 object-contain" />
+            </div>
+          )}
+          <span>Positions — {account.name}</span>
+        </div>
+      }
       onClose={onClose}
       footer={
         <>

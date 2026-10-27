@@ -238,7 +238,7 @@ export const SuccessBanner: React.FC<{ message: string; onClose?: () => void }> 
 
 export const Modal: React.FC<{
   open: boolean;
-  title: string;
+  title: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;

@@ -21,6 +21,7 @@ import { OwnershipError, normalizeShares } from "../services/ownership.js";
 import {
   transactionDedupKey,
 } from "../services/transactions.js";
+import { executeCsvImport } from "../services/csvImportService.js";
 import {
   ACCOUNT_TYPES,
   ConnectorError,
@@ -132,15 +133,79 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
 
   // ─── Comptes ───────────────────────────────────────────────────────────────
 
+  /** Résout le logo officiel d'un compte (issu de sa connexion bancaire Enable Banking / Sidecar ou de son établissement). */
+  const resolveAccountLogo = (account, connectorsMap = null) => {
+    if (account?.metadata?.logo) return account.metadata.logo;
+    if (account?.connectionId && connectorsMap) {
+      const conn = connectorsMap.get(account.connectionId);
+      if (conn?.metadata?.logo) return conn.metadata.logo;
+      if (conn?.aspspName) {
+        const country = conn.aspspCountry || "FR";
+        return `https://enablebanking.com/brands/${encodeURIComponent(country)}/${encodeURIComponent(conn.aspspName)}/`;
+      }
+    }
+    const nameLower = (account?.name || "").toLowerCase();
+    const providerLower = (account?.provider || "").toLowerCase();
+    if (providerLower.includes("bourso") || nameLower.includes("bourso")) {
+      return "https://enablebanking.com/brands/FR/Boursorama%20Banque/";
+    }
+    if (nameLower.includes("natixis")) {
+      return "https://www.google.com/s2/favicons?domain=natixis.com&sz=128";
+    }
+    if (nameLower.includes("gresham")) {
+      return "https://www.google.com/s2/favicons?domain=gresham.fr&sz=128";
+    }
+    if (nameLower.includes("amundi")) {
+      return "https://www.google.com/s2/favicons?domain=amundi.com&sz=128";
+    }
+    if (nameLower.includes("bnp")) {
+      return "https://enablebanking.com/brands/FR/BNP%20Paribas/";
+    }
+    if (nameLower.includes("société générale") || nameLower.includes("societe generale")) {
+      return "https://enablebanking.com/brands/FR/Soci%C3%A9t%C3%A9%20G%C3%A9n%C3%A9rale/";
+    }
+    if (nameLower.includes("credit agricole") || nameLower.includes("crédit agricole")) {
+      return "https://enablebanking.com/brands/FR/Cr%C3%A9dit%20Agricole/";
+    }
+    if (nameLower.includes("credit mutuel") || nameLower.includes("crédit mutuel")) {
+      return "https://enablebanking.com/brands/FR/Cr%C3%A9dit%20Mutuel/";
+    }
+    if (nameLower.includes("cic")) {
+      return "https://enablebanking.com/brands/FR/CIC/";
+    }
+    if (nameLower.includes("fortuneo")) {
+      return "https://enablebanking.com/brands/FR/Fortuneo/";
+    }
+    if (nameLower.includes("revolut")) {
+      return "https://enablebanking.com/brands/FR/Revolut/";
+    }
+    if (nameLower.includes("n26")) {
+      return "https://enablebanking.com/brands/FR/N26/";
+    }
+    if (nameLower.includes("monabanq")) {
+      return "https://enablebanking.com/brands/FR/Monabanq/";
+    }
+    if (nameLower.includes("qonto")) {
+      return "https://enablebanking.com/brands/FR/Qonto/";
+    }
+    return null;
+  };
+
   router.get(
     "/accounts",
     asyncHandler(async (req, res) => {
       const userId = queryUserId(req);
-      res.json({
-        accounts: repository.listAccounts(userId, {
-          includeArchived: toBool(req.query.include_archived),
-        }),
+      const rawAccounts = repository.listAccounts(userId, {
+        includeArchived: toBool(req.query.include_archived),
       });
+      const connectors = new Map(
+        repository.listConnectors(userId).map((c) => [c.id, c]),
+      );
+      const accounts = rawAccounts.map((account) => ({
+        ...account,
+        logo: resolveAccountLogo(account, connectors),
+      }));
+      res.json({ accounts });
     }),
   );
 
@@ -150,8 +215,14 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const userId = queryUserId(req);
       const account = repository.getAccount(req.params.id, userId);
       if (!account) throw new HttpError(404, "Compte introuvable");
+      const connectors = new Map(
+        repository.listConnectors(userId).map((c) => [c.id, c]),
+      );
       res.json({
-        account,
+        account: {
+          ...account,
+          logo: resolveAccountLogo(account, connectors),
+        },
         holdings: repository.listHoldings(account.id, userId),
         ownerships: repository.listOwnerships(account.id, userId),
         snapshots: repository.listSnapshots(account.id, userId),
@@ -180,6 +251,8 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const cashBalance = isInvestment
         ? round2(asNumber(req.body?.cash_balance, { fallback: 0 }))
         : asOptionalNumber(req.body?.cash_balance);
+      const rawLogo = asOptionalString(req.body?.logo, 500);
+      const logo = rawLogo || resolveAccountLogo({ name, provider: PROVIDERS.MANUAL }, null);
       const account = repository.createAccount(userId, {
         provider: PROVIDERS.MANUAL,
         externalId: asOptionalString(req.body?.external_id, 120),
@@ -190,10 +263,56 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         cashBalance,
         color: asOptionalString(req.body?.color, 20),
         isManual: true,
-        metadata: req.body?.metadata || {},
+        metadata: {
+          ...(req.body?.metadata || {}),
+          ...(logo ? { logo } : {}),
+        },
       });
       repository.saveSnapshot(userId, account.id, todayIso(), balance, account.currency, "manual");
-      res.status(201).json({ account });
+      res.status(201).json({
+        account: {
+          ...account,
+          logo: resolveAccountLogo(account, null),
+        },
+      });
+    }),
+  );
+
+  router.post(
+    "/accounts/import-csv",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const accountId = asOptionalString(req.body?.accountId || req.body?.account_id);
+      const newAccount = req.body?.newAccount || null;
+      const mode = oneOf(req.body?.mode, ["HOLDINGS", "TRANSACTIONS"], "HOLDINGS");
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+
+      if (!accountId && !newAccount) {
+        throw new HttpError(400, "Un identifiant de compte ou les paramètres du nouveau compte sont requis.");
+      }
+      if (items.length === 0) {
+        throw new HttpError(400, "Aucune ligne à importer.");
+      }
+
+      const connectors = new Map(
+        repository.listConnectors(userId).map((c) => [c.id, c]),
+      );
+      const result = await executeCsvImport({
+        userId,
+        repository,
+        market,
+        accountId,
+        newAccount,
+        mode,
+        items,
+        resolveLogo: (acc) => resolveAccountLogo(acc, connectors),
+      });
+
+      if (result.account) {
+        result.account.logo = resolveAccountLogo(result.account, connectors);
+      }
+
+      res.status(201).json(result);
     }),
   );
 

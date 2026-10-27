@@ -29,6 +29,7 @@ export interface PortfolioAccount {
   isManual: boolean;
   isArchived: boolean;
   color: string | null;
+  logo?: string | null;
   metadata: Record<string, unknown>;
   lastSyncAt: string | null;
   createdAt: string;
