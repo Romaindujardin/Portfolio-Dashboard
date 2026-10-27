@@ -267,25 +267,28 @@ const normalizeHeaderKey = (h: string): string =>
 // Dictionnaires d'alias de colonnes (France / International)
 const HOLDINGS_ALIASES: Record<string, string[]> = {
   name: [
-    "nom", "nom du fonds", "fonds", "nom du support", "support", "designation", "libelle",
-    "libelle du support", "titre", "nom du titre", "valeur", "description", "nom valeur",
+    "nom du support", "libelle du support", "libelle support", "nom du fonds", "fonds",
+    "nom du titre", "titre", "designation", "libelle", "description", "nom valeur",
+    "nom", "support",
   ],
   isin: ["isin", "code isin", "code", "code valeur", "ticker", "symbole", "symbol", "mnemo"],
   quantity: [
-    "quantite", "nb parts", "nombre de parts", "parts", "nb de parts", "quantite de parts",
-    "nombre", "qty", "quantity", "solde parts", "avoir en parts",
-  ],
-  price: [
-    "cours", "vl", "valeur liquidative", "prix", "prix unitaire", "pu", "dernier cours",
-    "cours du jour", "valeur de la part",
+    "nb de parts", "nombre de parts", "quantite de parts", "nb parts", "quantite",
+    "solde parts", "avoir en parts", "parts", "nombre", "qty", "quantity",
   ],
   amount: [
-    "montant", "valorisation", "valeur", "montant total", "montant brut", "montant net",
-    "avoir", "avoir en euros", "solde", "total", "evaluation",
+    "encours", "encours total", "encours valorise", "valeur marchande", "valeur atteinte",
+    "avoir en euros", "montant total", "montant brut", "montant net", "valorisation",
+    "evaluation", "montant", "solde", "avoir", "total",
+  ],
+  price: [
+    "val actuelle", "valeur actuelle", "valeur liquidative", "dernier cours", "cours du jour",
+    "cours de cloture", "valeur de la part", "valeur part", "prix unitaire", "cours", "vl",
+    "prix", "pu",
   ],
   costBasis: [
-    "prix de revient", "pru", "montant investi", "prix d achat", "prix achat", "versements",
-    "cumul versements",
+    "prix de revient", "prix de revient unitaire", "pru", "montant investi", "prix d achat",
+    "prix achat", "versements", "cumul versements",
   ],
 };
 
@@ -305,6 +308,20 @@ const TRANSACTIONS_ALIASES: Record<string, string[]> = {
 };
 
 /**
+ * Compare une clé normalisée à un alias sans faux positifs (ex: "encours" ne doit pas matcher "cours").
+ */
+const matchAlias = (key: string, alias: string): boolean => {
+  if (key === alias) return true;
+  const keyWords = key.split(/\s+/);
+  const aliasWords = alias.split(/\s+/);
+
+  if (aliasWords.length === 1) {
+    return keyWords.includes(aliasWords[0]);
+  }
+  return key.includes(alias);
+};
+
+/**
  * Détecte si le fichier ressemble à des positions (Holdings) ou des transactions bancaires.
  */
 export function detectCsvMode(headers: string[]): CsvMode {
@@ -313,15 +330,16 @@ export function detectCsvMode(headers: string[]): CsvMode {
   let txScore = 0;
 
   for (const h of normalized) {
-    if (HOLDINGS_ALIASES.quantity.some((k) => h.includes(k))) holdingsScore += 3;
-    if (HOLDINGS_ALIASES.price.some((k) => h.includes(k))) holdingsScore += 3;
-    if (HOLDINGS_ALIASES.isin.some((k) => h.includes(k))) holdingsScore += 2;
-    if (HOLDINGS_ALIASES.name.some((k) => h.includes(k))) holdingsScore += 2;
+    if (HOLDINGS_ALIASES.quantity.some((k) => matchAlias(h, k))) holdingsScore += 3;
+    if (HOLDINGS_ALIASES.price.some((k) => matchAlias(h, k))) holdingsScore += 3;
+    if (HOLDINGS_ALIASES.amount.some((k) => matchAlias(h, k))) holdingsScore += 2;
+    if (HOLDINGS_ALIASES.isin.some((k) => matchAlias(h, k))) holdingsScore += 2;
+    if (HOLDINGS_ALIASES.name.some((k) => matchAlias(h, k))) holdingsScore += 2;
 
-    if (TRANSACTIONS_ALIASES.date.some((k) => h.includes(k))) txScore += 2;
-    if (TRANSACTIONS_ALIASES.debit.some((k) => h.includes(k))) txScore += 3;
-    if (TRANSACTIONS_ALIASES.credit.some((k) => h.includes(k))) txScore += 3;
-    if (TRANSACTIONS_ALIASES.label.some((k) => h.includes(k))) txScore += 1;
+    if (TRANSACTIONS_ALIASES.date.some((k) => matchAlias(h, k))) txScore += 2;
+    if (TRANSACTIONS_ALIASES.debit.some((k) => matchAlias(h, k))) txScore += 3;
+    if (TRANSACTIONS_ALIASES.credit.some((k) => matchAlias(h, k))) txScore += 3;
+    if (TRANSACTIONS_ALIASES.label.some((k) => matchAlias(h, k))) txScore += 1;
   }
 
   return holdingsScore > txScore ? "HOLDINGS" : "TRANSACTIONS";
@@ -338,8 +356,8 @@ export function suggestColumnMapping(
   const aliases = mode === "HOLDINGS" ? HOLDINGS_ALIASES : TRANSACTIONS_ALIASES;
   const assigned = new Set<string>();
 
+  // 1. Recherche exacte
   for (const [field, fieldAliases] of Object.entries(aliases)) {
-    // 1. Recherche exacte
     for (const header of headers) {
       if (assigned.has(header)) continue;
       const key = normalizeHeaderKey(header);
@@ -349,16 +367,18 @@ export function suggestColumnMapping(
         break;
       }
     }
-    // 2. Recherche partielle (si non trouvé)
-    if (!mapping[field]) {
-      for (const header of headers) {
-        if (assigned.has(header)) continue;
-        const key = normalizeHeaderKey(header);
-        if (fieldAliases.some((alias) => key.includes(alias))) {
-          mapping[field] = header;
-          assigned.add(header);
-          break;
-        }
+  }
+
+  // 2. Recherche par mot-clé intelligent (sans faux positifs)
+  for (const [field, fieldAliases] of Object.entries(aliases)) {
+    if (mapping[field]) continue;
+    for (const header of headers) {
+      if (assigned.has(header)) continue;
+      const key = normalizeHeaderKey(header);
+      if (fieldAliases.some((alias) => matchAlias(key, alias))) {
+        mapping[field] = header;
+        assigned.add(header);
+        break;
       }
     }
   }
@@ -397,19 +417,38 @@ export function convertMappedRows(
 
       if (!name && !isin) continue;
 
-      const quantity = parseNumericValue(qtyStr, dialect.decimalStyle);
-      const price = parseNumericValue(priceStr, dialect.decimalStyle);
-      const value = amountStr ? parseNumericValue(amountStr, dialect.decimalStyle) : quantity * price;
+      const rawQty = parseNumericValue(qtyStr, dialect.decimalStyle);
+      const rawPrice = parseNumericValue(priceStr, dialect.decimalStyle);
+      const rawAmount = amountStr ? parseNumericValue(amountStr, dialect.decimalStyle) : 0;
       const costBasis = costBasisStr ? parseNumericValue(costBasisStr, dialect.decimalStyle) : null;
 
-      if (quantity <= 0 && value <= 0 && price <= 0) continue;
+      if (rawQty <= 0 && rawPrice <= 0 && rawAmount <= 0) continue;
+
+      let quantity = rawQty;
+      let price = rawPrice;
+      let value = rawAmount > 0 ? rawAmount : quantity * price;
+
+      // Résolution cohérente pour fonds en euros ou lignes avec valorisation seule
+      if (rawAmount > 0) {
+        if (quantity <= 0 && price <= 0) {
+          quantity = 1;
+          price = rawAmount;
+          value = rawAmount;
+        } else if (quantity > 0 && price <= 0) {
+          price = Math.round((rawAmount / quantity) * 100) / 100;
+          value = rawAmount;
+        } else if (price > 0 && quantity <= 0) {
+          quantity = Math.round((rawAmount / price) * 10000) / 10000;
+          value = rawAmount;
+        }
+      }
 
       holdings.push({
         name: name || isin || "Titre",
         isin: isin ? isin.trim().toUpperCase() : null,
         ticker: isin ? isin.trim().toUpperCase() : null,
-        quantity: quantity || (price > 0 && value > 0 ? value / price : 1),
-        price: price || (quantity > 0 && value > 0 ? value / quantity : 0),
+        quantity,
+        price,
         value,
         costBasis,
       });

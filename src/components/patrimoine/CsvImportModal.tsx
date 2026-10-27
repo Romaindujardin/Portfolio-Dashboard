@@ -129,12 +129,21 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = String(e.target?.result || "");
+      if (text.includes("\uFFFD")) {
+        // Encodage non-UTF8 détecté (courant sur les exports banques/assurances privées comme Gresham ou Natixis)
+        const latinReader = new FileReader();
+        latinReader.onload = (ev) => {
+          handleFileContent(String(ev.target?.result || ""), file.name);
+        };
+        latinReader.readAsText(file, "ISO-8859-1");
+        return;
+      }
       handleFileContent(text, file.name);
     };
     reader.onerror = () => {
       setError("Impossible de lire ce fichier.");
     };
-    reader.readAsText(file);
+    reader.readAsText(file, "UTF-8");
   };
 
   // Tableau brut découpe

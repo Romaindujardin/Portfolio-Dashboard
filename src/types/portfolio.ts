@@ -103,6 +103,7 @@ export interface Connection {
   lastError: string | null;
   metadata: Record<string, unknown>;
   accountCount?: number;
+  logo?: string | null;
   createdAt: string;
 }
 

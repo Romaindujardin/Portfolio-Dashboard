@@ -79,19 +79,34 @@ export const executeCsvImport = async ({
       const name = String(item.name || item.label || "Titre").trim();
       const rawCode = item.isin || item.ticker || null;
       const { isin, ticker } = cleanIsinOrTicker(rawCode);
-      const quantity = Math.max(0, Number(item.quantity) || 0);
-      const price = Math.max(0, Number(item.price) || 0);
+      const rawQuantity = Math.max(0, Number(item.quantity) || 0);
+      const rawPrice = Math.max(0, Number(item.price) || 0);
       const costBasis = item.costBasis != null && item.costBasis !== "" ? Number(item.costBasis) : null;
-      const val = item.value != null && item.value !== "" ? Number(item.value) : quantity * price;
+      const rawVal = item.value != null && item.value !== "" ? Number(item.value) : 0;
 
       if (!name && !ticker && !isin) continue;
+
+      let quantity = rawQuantity;
+      let price = rawPrice;
+      const val = rawVal > 0 ? rawVal : quantity * price;
+
+      if (rawVal > 0) {
+        if (quantity <= 0 && price <= 0) {
+          quantity = 1;
+          price = rawVal;
+        } else if (quantity > 0 && price <= 0) {
+          price = round2(rawVal / quantity);
+        } else if (price > 0 && quantity <= 0) {
+          quantity = round2(rawVal / price);
+        }
+      }
 
       repository.upsertHolding(userId, targetAccountId, {
         name,
         isin,
         ticker: ticker || (isin ? null : name),
-        quantity: quantity || (price > 0 && val > 0 ? round2(val / price) : 1),
-        price: price || (quantity > 0 && val > 0 ? round2(val / quantity) : 0),
+        quantity,
+        price,
         costBasis,
         currency: account.currency || "EUR",
         lastPriceAt: nowIso(),

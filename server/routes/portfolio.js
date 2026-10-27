@@ -191,6 +191,45 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     return null;
   };
 
+  /** Résout le logo officiel d'une connexion bancaire (Enable Banking, Sidecar ou autre). */
+  const resolveConnectionLogo = (conn) => {
+    if (conn?.metadata?.logo) return conn.metadata.logo;
+    const nameLower = (conn?.aspspName || conn?.label || "").toLowerCase();
+    const providerLower = (conn?.provider || "").toLowerCase();
+    if (providerLower.includes("bourso") || nameLower.includes("bourso")) {
+      return "https://enablebanking.com/brands/FR/Boursorama%20Banque/";
+    }
+    if (conn?.aspspName) {
+      const country = conn.aspspCountry || "FR";
+      return `https://enablebanking.com/brands/${encodeURIComponent(country)}/${encodeURIComponent(conn.aspspName)}/`;
+    }
+    if (nameLower.includes("natixis")) {
+      return "https://www.google.com/s2/favicons?domain=natixis.com&sz=128";
+    }
+    if (nameLower.includes("gresham")) {
+      return "https://www.google.com/s2/favicons?domain=gresham.fr&sz=128";
+    }
+    if (nameLower.includes("bnp")) {
+      return "https://enablebanking.com/brands/FR/BNP%20Paribas/";
+    }
+    if (nameLower.includes("société générale") || nameLower.includes("societe generale")) {
+      return "https://enablebanking.com/brands/FR/Soci%C3%A9t%C3%A9%20G%C3%A9n%C3%A9rale/";
+    }
+    if (nameLower.includes("credit agricole") || nameLower.includes("crédit agricole")) {
+      return "https://enablebanking.com/brands/FR/Cr%C3%A9dit%20Agricole/";
+    }
+    if (nameLower.includes("credit mutuel") || nameLower.includes("crédit mutuel")) {
+      return "https://enablebanking.com/brands/FR/Cr%C3%A9dit%20Mutuel/";
+    }
+    if (nameLower.includes("cic")) {
+      return "https://enablebanking.com/brands/FR/CIC/";
+    }
+    if (nameLower.includes("fortuneo")) {
+      return "https://enablebanking.com/brands/FR/Fortuneo/";
+    }
+    return null;
+  };
+
   router.get(
     "/accounts",
     asyncHandler(async (req, res) => {
@@ -600,6 +639,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const userId = queryUserId(req);
       const connections = repository.listConnectors(userId).map((connection) => ({
         ...connection,
+        logo: resolveConnectionLogo(connection),
         accountCount: repository
           .listAccounts(userId)
           .filter((account) => account.connectionId === connection.id).length,

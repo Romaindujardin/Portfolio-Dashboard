@@ -70,6 +70,46 @@ const statusTone = (status: string) => {
 
 const defaultCallbackUrl = getDefaultEnableBankingCallbackUrl();
 
+const ConnectionLogo: React.FC<{ connection: Connection }> = ({ connection }) => {
+  const [logoError, setLogoError] = useState(false);
+  const isSidecar = connection.provider === "bourso-sidecar";
+  const isBourso =
+    isSidecar ||
+    (connection.aspspName || "").toLowerCase().includes("bourso") ||
+    (connection.label || "").toLowerCase().includes("bourso");
+
+  const logoUrl =
+    connection.logo ||
+    (isBourso
+      ? "https://enablebanking.com/brands/FR/Boursorama%20Banque/"
+      : connection.aspspName
+      ? `https://enablebanking.com/brands/${encodeURIComponent(connection.aspspCountry || "FR")}/${encodeURIComponent(connection.aspspName)}/`
+      : null);
+
+  if (logoUrl && !logoError) {
+    return (
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/95 p-1 shadow-sm">
+        <img
+          src={logoUrl}
+          alt={connection.label || connection.aspspName || "Banque"}
+          className="h-7 w-7 object-contain"
+          onError={() => setLogoError(true)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[rgba(200,165,94,0.08)]">
+      {isSidecar ? (
+        <Zap className="h-4 w-4 text-[#c8a55e]" />
+      ) : (
+        <Landmark className="h-4 w-4 text-[#c8a55e]" />
+      )}
+    </div>
+  );
+};
+
 const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   userId,
   connections,
@@ -632,13 +672,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   className="rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#0d0d0d] p-3"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgba(200,165,94,0.08)]">
-                      {isSidecar ? (
-                        <Zap className="h-4 w-4 text-[#c8a55e]" />
-                      ) : (
-                        <Landmark className="h-4 w-4 text-[#c8a55e]" />
-                      )}
-                    </div>
+                    <ConnectionLogo connection={connection} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-medium text-[#f5f5f5]">

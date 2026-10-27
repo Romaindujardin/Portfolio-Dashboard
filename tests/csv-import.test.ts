@@ -105,4 +105,51 @@ Natixis Actions Euro;FR0010123456;5,000;240,00;1 200,00`;
       amount: -45.2,
     });
   });
+
+  it("gère fidèlement les exports Gresham (Encours, Val. actuelle, NB de parts, Fonds en euros)", () => {
+    const csv = `Libellé Support;ISIN;%;Encours (€);NB de parts;Val. actuelle (€);Prix de revient (€);Performance
+TALENCE SELECTION PME;FR0011859180;2,48;1638,63;8,9440;183,21;174,13;5,21
+EURO GARANTIE LONG TERME;EURGRE000GLT;73,99;48917,22;;;;`;
+
+    const dialect = detectCsvDialect(csv);
+    const rows = parseRawCsv(csv, dialect.delimiter);
+    const headers = rows[0];
+    const dataRows = rows.slice(1);
+
+    const mode = detectCsvMode(headers);
+    expect(mode).toBe("HOLDINGS");
+
+    const mapping = suggestColumnMapping(headers, mode);
+    expect(mapping.name).toBe("Libellé Support");
+    expect(mapping.isin).toBe("ISIN");
+    expect(mapping.amount).toBe("Encours (€)");
+    expect(mapping.quantity).toBe("NB de parts");
+    expect(mapping.price).toBe("Val. actuelle (€)");
+    expect(mapping.costBasis).toBe("Prix de revient (€)");
+
+    const holdings = convertMappedRows(dataRows, headers, mapping, dialect, mode) as any[];
+    expect(holdings).toHaveLength(2);
+
+    // Titre classique en unités de compte
+    expect(holdings[0]).toMatchObject({
+      name: "TALENCE SELECTION PME",
+      isin: "FR0011859180",
+      quantity: 8.944,
+      price: 183.21,
+      value: 1638.63,
+      costBasis: 174.13,
+    });
+
+    // Fonds en euros sans parts ni cours explicite
+    expect(holdings[1]).toMatchObject({
+      name: "EURO GARANTIE LONG TERME",
+      isin: "EURGRE000GLT",
+      quantity: 1,
+      price: 48917.22,
+      value: 48917.22,
+    });
+
+    const total = holdings.reduce((sum, h) => sum + (h.value ?? (h.quantity * h.price)), 0);
+    expect(Math.round(total * 100) / 100).toBe(50555.85);
+  });
 });
