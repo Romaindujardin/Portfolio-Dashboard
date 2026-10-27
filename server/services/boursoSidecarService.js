@@ -112,6 +112,20 @@ export const runBoursoCli = ({ args, customerId, password }) => {
     });
 };
 
+export const decodeHtmlEntities = (str) => {
+  if (!str) return "";
+  return String(str)
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\u00a0/g, " ")
+    .trim();
+};
+
 export const parseAccountsFromOutput = (stdout) => {
   const accounts = [];
   const matches = (stdout || "").matchAll(/Account\s*\{([\s\S]*?)\}/g);
@@ -126,11 +140,20 @@ export const parseAccountsFromOutput = (stdout) => {
     if (!idMatch || !nameMatch || !balanceMatch || !bankMatch || !kindMatch) {
       continue;
     }
+
+    const rawBalStr = balanceMatch[1];
+    let balanceEuros = Number(rawBalStr) || 0;
+    // In bourso-api, `Account.balance: isize` is an integer count of cents (centimes).
+    // If output is an integer without decimal point, divide by 100 to convert to euros.
+    if (!rawBalStr.includes(".")) {
+      balanceEuros = round2(balanceEuros / 100);
+    }
+
     accounts.push({
       id: idMatch[1],
-      name: nameMatch[1],
-      balance: Number(balanceMatch[1]),
-      bankName: bankMatch[1],
+      name: decodeHtmlEntities(nameMatch[1]),
+      balance: balanceEuros,
+      bankName: decodeHtmlEntities(bankMatch[1]),
       kind: kindMatch[1],
     });
   }
@@ -332,27 +355,45 @@ export const syncBoursoSidecar = async ({
 
         if (kind === "banking") {
           accountType = "CHECKING";
-        } else if (kind === "saving") {
+        } else if (kind === "savings" || kind === "saving") {
           accountType = "SAVINGS";
         } else if (kind === "trading") {
           if (nameUpper.includes("PEA")) {
             accountType = "PEA";
-          } else if (nameUpper.includes("ASSURANCE") || nameUpper.includes("VIE") || nameUpper.includes("PER")) {
-            accountType = "SECURITIES";
           } else {
             accountType = "SECURITIES";
           }
-        } else if (kind === "loan") {
+        } else if (kind === "loans" || kind === "loan") {
           accountType = "LOAN";
         } else {
-          accountType = "OTHER";
+          if (
+            nameUpper.includes("LIVRET") ||
+            nameUpper.includes("LDDS") ||
+            nameUpper.includes("EPARGNE") ||
+            nameUpper.includes("ÉPARGNE") ||
+            nameUpper.includes("CSL")
+          ) {
+            accountType = "SAVINGS";
+          } else if (nameUpper.includes("PEA")) {
+            accountType = "PEA";
+          } else if (
+            nameUpper.includes("ASSURANCE") ||
+            nameUpper.includes("VIE") ||
+            nameUpper.includes("PER") ||
+            nameUpper.includes("CTO") ||
+            nameUpper.includes("TITRES")
+          ) {
+            accountType = "SECURITIES";
+          } else {
+            accountType = "CHECKING";
+          }
         }
 
         const syncedAccount = repository.upsertSyncedAccount(userId, {
           provider: BOURSO_PROVIDER,
           externalId: `bourso-${rawAcc.id}`,
           connectionId: connection.id,
-          name: rawAcc.name,
+          name: decodeHtmlEntities(rawAcc.name),
           type: accountType,
           currency: "EUR",
           balance: rawAcc.balance,
@@ -378,6 +419,7 @@ export const syncBoursoSidecar = async ({
             const posCsv = extractCsvFromOutput(posStdout, "symbol,");
             const parsedPos = parseCsvText(posCsv);
 
+            let totalHoldingsValue = 0;
             for (const row of parsedPos.rows) {
               const qty = Number(row.quantity) || 0;
               const lastPrice = Number(row.last) || 0;
@@ -388,7 +430,7 @@ export const syncBoursoSidecar = async ({
               repository.upsertHolding(userId, syncedAccount.id, {
                 isin: row.symbol || null,
                 ticker: row.symbol || null,
-                name: row.label || row.symbol,
+                name: decodeHtmlEntities(row.label || row.symbol),
                 quantity: qty,
                 costBasis,
                 price: lastPrice,
@@ -396,6 +438,15 @@ export const syncBoursoSidecar = async ({
                 assetClass: "EQUITY",
               });
               holdingsSynced++;
+              totalHoldingsValue += amount;
+            }
+
+            // Mettre à jour la poche liquidités (espèces) du PEA / compte titres
+            if (holdingsSynced > 0) {
+              const cashPart = Math.max(0, round2(rawAcc.balance - totalHoldingsValue));
+              repository.updateAccount(syncedAccount.id, userId, {
+                cashBalance: cashPart,
+              });
             }
           } catch (posErr) {
             console.warn(`Positions non extraites pour le compte ${rawAcc.name}:`, posErr.message);
@@ -422,34 +473,75 @@ export const syncBoursoSidecar = async ({
             const parsedTx = parseCsvText(txCsv);
 
             const items = parsedTx.rows.map((row) => {
-              let dateOp = row.date || row.date_op || "";
-              let dateVal = row.value_date || row.valueDate || "";
-              const ref = row.reference || "";
+              let dateOp = (row.date || row.date_op || "").trim();
+              let dateVal = (row.value_date || row.valueDate || "").trim();
+              const ref = (row.reference || "").trim();
+              const label = decodeHtmlEntities(row.label || "");
 
-              // Fallback MongoDB ObjectId
+              // 1. Extraire la date réelle encodée dans l'ObjectId MongoDB de BoursoBank
+              let refIso = null;
+              let refTimestamp = null;
               if (ref && /^[0-9a-f]{24}$/i.test(ref)) {
-                const ts = parseInt(ref.substring(0, 8), 16) * 1000;
-                const refDate = new Date(ts);
-                if (!isNaN(refDate.getTime())) {
-                  const refIso = refDate.toISOString().split("T")[0];
-                  if (!dateOp) {
-                    dateOp = refIso;
-                    if (!dateVal) dateVal = refIso;
-                  }
+                refTimestamp = parseInt(ref.substring(0, 8), 16) * 1000;
+                const refDate = new Date(refTimestamp);
+                if (
+                  !isNaN(refDate.getTime()) &&
+                  refDate.getFullYear() >= 2010 &&
+                  refDate.getFullYear() <= 2040
+                ) {
+                  refIso = refDate.toISOString().split("T")[0];
                 }
+              }
+
+              // 2. Extraire la date de carte bancaire si présente dans le libellé
+              let labelDateIso = null;
+              const cardDateMatch = label.match(
+                /(?:CARTE|Carte|Avoir|AVOIR|Retrait|RETRAIT)\s+(\d{2})\/(\d{2})\/(\d{2,4})/,
+              );
+              if (cardDateMatch) {
+                const day = cardDateMatch[1];
+                const month = cardDateMatch[2];
+                let year = cardDateMatch[3];
+                if (year.length === 2) year = `20${year}`;
+                labelDateIso = `${year}-${month}-${day}`;
+              }
+
+              // 3. bourso-cli attribue par défaut la date du jour (chrono::Utc::now())
+              // si l'en-tête de section n'a pas pu être lu.
+              // Si la date opération est absente, ou si elle est égale à aujourd'hui alors que
+              // l'opération date d'avant, ou si l'écart dépasse 30 jours, on utilise refIso.
+              const todayIso = new Date().toISOString().split("T")[0];
+              if (!dateOp || (dateOp === todayIso && refIso && refIso !== todayIso)) {
+                if (refIso) {
+                  dateOp = refIso;
+                } else if (labelDateIso) {
+                  dateOp = labelDateIso;
+                }
+              } else if (refIso && refTimestamp) {
+                const opTimestamp = new Date(dateOp).getTime();
+                const diffDays = Math.abs(opTimestamp - refTimestamp) / (24 * 3600 * 1000);
+                if (diffDays > 30) {
+                  dateOp = refIso;
+                }
+              }
+
+              if (!dateVal && labelDateIso) {
+                dateVal = labelDateIso;
+              } else if (!dateVal && refIso) {
+                dateVal = refIso;
               }
 
               return {
                 externalId: ref || null,
                 dedupKey: ref
                   ? `bourso:${ref}`
-                  : `bourso:${rawAcc.id}:${dateOp}:${row.label}:${row.amount}:${row.balance}`,
+                  : `bourso:${rawAcc.id}:${dateOp}:${label}:${row.amount}:${row.balance}`,
                 date: dateOp,
                 valueDate: dateVal || null,
                 amount: Number(row.amount) || 0,
                 currency: row.currency || "EUR",
-                label: row.label || "",
-                category: row.category || null,
+                label,
+                category: decodeHtmlEntities(row.category || "") || null,
               };
             });
 

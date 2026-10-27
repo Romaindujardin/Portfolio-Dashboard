@@ -76,6 +76,43 @@ Account {
     });
   });
 
+  it("parseAccountsFromOutput convertit les soldes réels en centimes de bourso-cli (isize) en euros et décode les entités HTML", () => {
+    const rawCliOutput = `
+Account {
+    id: "acc_1",
+    name: "BoursoBank",
+    balance: 494628,
+    bank_name: "BoursoBank",
+    kind: Banking,
+}
+Account {
+    id: "acc_2",
+    name: "PEA DUJARDIN",
+    balance: 71706,
+    bank_name: "BoursoBank",
+    kind: Trading,
+}
+Account {
+    id: "acc_3",
+    name: "Plan d&#039;Épargne Entreprise",
+    balance: 1133082,
+    bank_name: "BoursoBank",
+    kind: Trading,
+}
+`;
+    const accounts = parseAccountsFromOutput(rawCliOutput);
+    expect(accounts).toHaveLength(3);
+
+    expect(accounts[0].name).toBe("BoursoBank");
+    expect(accounts[0].balance).toBe(4946.28);
+
+    expect(accounts[1].name).toBe("PEA DUJARDIN");
+    expect(accounts[1].balance).toBe(717.06);
+
+    expect(accounts[2].name).toBe("Plan d'Épargne Entreprise");
+    expect(accounts[2].balance).toBe(11330.82);
+  });
+
   it("parseCsvText découpe proprement les en-têtes et les lignes", () => {
     const csv = `date;label;amount;currency;category
 2026-10-15;Supermarché Carrefour;-45.20;EUR;Alimentation
