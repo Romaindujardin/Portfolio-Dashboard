@@ -312,3 +312,74 @@ export interface SyncResult {
   connection?: Connection;
   lastSyncAt?: string;
 }
+
+export interface EtfSectorWeight {
+  sector: string;
+  weight: number;
+  value: number;
+  color: string;
+}
+
+export interface EtfCountryWeight {
+  country: string;
+  weight: number;
+  value: number;
+  flag: string;
+}
+
+export interface EtfTopHolding {
+  name: string;
+  ticker: string | null;
+  sector: string;
+  value: number;
+  weight: number;
+}
+
+export interface EtfProfile {
+  id: string;
+  name: string;
+  symbols?: string[];
+  type?: string;
+  description?: string;
+  benchmark?: string;
+  sectors: Record<string, number>;
+  countries: Record<string, number>;
+  topHoldings: Array<{
+    name: string;
+    ticker: string | null;
+    weight: number;
+    sector: string;
+  }>;
+  identified?: boolean;
+}
+
+export interface EtfAssetBreakdown {
+  holdingId: string;
+  accountId: string;
+  accountName: string | null;
+  name: string;
+  ticker: string | null;
+  isin: string | null;
+  value: number;
+  category: string;
+  identified: boolean;
+  profileName: string;
+  sectors: Record<string, number>;
+  countries: Record<string, number>;
+}
+
+export interface PortfolioEtfBreakdown {
+  totalValue: number;
+  assetCount: number;
+  summary: {
+    techWeight: number;
+    usWeight: number;
+    top10Concentration: number;
+    uniqueCompaniesCount: number;
+  };
+  sectors: EtfSectorWeight[];
+  countries: EtfCountryWeight[];
+  topHoldings: EtfTopHolding[];
+  assets: EtfAssetBreakdown[];
+}
+

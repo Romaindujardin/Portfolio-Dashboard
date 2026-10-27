@@ -48,8 +48,10 @@ export const cn = (...classes: Array<string | false | null | undefined>): string
 export const Card: React.FC<{
   children: React.ReactNode;
   className?: string;
-}> = ({ children, className }) => (
+  onClick?: () => void;
+}> = ({ children, className, onClick }) => (
   <div
+    onClick={onClick}
     className={cn(
       "rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#111111]",
       className,

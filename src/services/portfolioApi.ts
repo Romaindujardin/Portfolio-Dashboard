@@ -19,6 +19,8 @@ import type {
   Snapshot,
   SyncResult,
   Transaction,
+  EtfProfile,
+  PortfolioEtfBreakdown,
 } from "../types/portfolio";
 import { API_BASE } from "../utils/apiBase";
 
@@ -463,6 +465,21 @@ export const refreshPrices = (userId: string, force = true, accountId?: string) 
   }>("/market/refresh", {
     ...json({ user_id: userId, force, account_id: accountId }),
   });
+
+export const getEtfBreakdown = (userId: string) =>
+  request<PortfolioEtfBreakdown>("/market/etf-breakdown", {
+    query: { user_id: userId },
+  });
+
+export const getEtfCatalog = () =>
+  request<{ catalog: EtfProfile[] }>("/market/etf-catalog").then(
+    (data) => data.catalog,
+  );
+
+export const getEtfProfile = (query: string) =>
+  request<{ profile: EtfProfile }>("/market/etf-profile", {
+    query: { query },
+  }).then((data) => data.profile);
 
 // ─── Crypto ─────────────────────────────────────────────────────────────────
 

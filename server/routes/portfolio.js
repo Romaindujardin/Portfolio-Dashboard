@@ -53,6 +53,11 @@ import {
   getBoursoStatus,
   syncBoursoSidecar,
 } from "../services/boursoSidecarService.js";
+import {
+  computePortfolioEtfBreakdown,
+  ETF_CATALOG,
+  resolveHoldingProfile,
+} from "../services/etfService.js";
 
 const toBool = (value, fallback = false) => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -1375,6 +1380,43 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
           value: round2((holding.quantity || 0) * (holding.price || 0)),
         }));
       res.json({ holdings });
+    }),
+  );
+
+  router.get(
+    "/market/etf-breakdown",
+    asyncHandler(async (req, res) => {
+      const userId = queryUserId(req);
+      const accounts = new Map(
+        repository.listAccounts(userId).map((account) => [account.id, account]),
+      );
+      const holdings = repository
+        .listAllHoldings(userId)
+        .filter((holding) => accounts.has(holding.accountId))
+        .map((holding) => ({
+          ...holding,
+          accountName: accounts.get(holding.accountId)?.name || null,
+          accountType: accounts.get(holding.accountId)?.type || null,
+          value: round2((holding.quantity || 0) * (holding.price || 0)),
+        }));
+      const breakdown = computePortfolioEtfBreakdown(holdings);
+      res.json(breakdown);
+    }),
+  );
+
+  router.get(
+    "/market/etf-catalog",
+    asyncHandler(async (_req, res) => {
+      res.json({ catalog: Object.values(ETF_CATALOG) });
+    }),
+  );
+
+  router.get(
+    "/market/etf-profile",
+    asyncHandler(async (req, res) => {
+      const query = asString(req.query.query, { max: 120 });
+      const profile = resolveHoldingProfile({ isin: query, ticker: query, name: query });
+      res.json({ profile });
     }),
   );
 

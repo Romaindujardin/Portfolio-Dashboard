@@ -9,6 +9,7 @@ import Savings from "./pages/Savings";
 import AIAnalysis from "./pages/AIAnalysis";
 import Settings from "./pages/Settings";
 import Patrimoine from "./pages/Patrimoine";
+import Market from "./pages/Market";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { UserProvider } from "./contexts/UserContext";
 import { CurrencyProvider } from "./contexts/CurrencyContext";
@@ -75,6 +76,8 @@ function App() {
                     <Route path="/ai-analysis" element={<AIAnalysis />} />
                     <Route path="/banking" element={<Navigate to="/patrimoine" replace />} />
                     <Route path="/patrimoine" element={<Patrimoine />} />
+                    <Route path="/market" element={<Market />} />
+                    <Route path="/marche" element={<Navigate to="/market" replace />} />
                     <Route path="/settings/:username" element={<Settings />} />
                   </Routes>
                 </ErrorBoundary>

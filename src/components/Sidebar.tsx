@@ -12,6 +12,7 @@ import {
   Receipt,
   Menu,
   Wallet2,
+  TrendingUp,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import type { LucideIcon } from "lucide-react";
@@ -38,6 +39,11 @@ const navItems: NavItem[] = [
     name: "Patrimoine",
     path: "/patrimoine",
     icon: Building2,
+  },
+  {
+    name: "Marché",
+    path: "/market",
+    icon: TrendingUp,
   },
   {
     name: "Budget",

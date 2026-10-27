@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Building2,
   CreditCard,
   Landmark,
-  LineChart,
   RefreshCw,
   ShieldCheck,
   Wallet2,
@@ -37,10 +36,9 @@ import CryptoTab from "../components/patrimoine/CryptoTab";
 import ConnectionsTab from "../components/patrimoine/ConnectionsTab";
 import RealEstateTab from "../components/patrimoine/RealEstateTab";
 import LoansTab from "../components/patrimoine/LoansTab";
-import MarketTab from "../components/patrimoine/MarketTab";
 import { Coins } from "lucide-react";
 
-type TabKey = "accounts" | "crypto" | "connections" | "realestate" | "loans" | "market";
+type TabKey = "accounts" | "crypto" | "connections" | "realestate" | "loans";
 
 type Notice = { kind: "success" | "error"; message: string } | null;
 
@@ -50,7 +48,6 @@ const TABS: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
   { key: "connections", label: "Connexions", icon: <Landmark className="h-3.5 w-3.5" /> },
   { key: "realestate", label: "Immobilier", icon: <Building2 className="h-3.5 w-3.5" /> },
   { key: "loans", label: "Prêts", icon: <CreditCard className="h-3.5 w-3.5" /> },
-  { key: "market", label: "Marché", icon: <LineChart className="h-3.5 w-3.5" /> },
 ];
 
 const Patrimoine: React.FC = () => {
@@ -99,9 +96,16 @@ const Patrimoine: React.FC = () => {
     void loadAll();
   }, [loadAll]);
 
+  const navigate = useNavigate();
+
   useEffect(() => {
-    const tabParam = searchParams.get("tab") as TabKey | null;
-    if (tabParam && ["accounts", "crypto", "connections", "realestate", "loans", "market"].includes(tabParam)) {
+    const rawTab = searchParams.get("tab");
+    if (rawTab === "market") {
+      navigate("/market", { replace: true });
+      return;
+    }
+    const tabParam = rawTab as TabKey | null;
+    if (tabParam && ["accounts", "crypto", "connections", "realestate", "loans"].includes(tabParam)) {
       setTab(tabParam);
     }
     const connection = searchParams.get("connection");
@@ -392,15 +396,6 @@ const Patrimoine: React.FC = () => {
             userId={currentUser}
             loans={overview.loans}
             properties={overview.properties}
-            onReload={loadAll}
-            notify={notify}
-          />
-        )}
-        {tab === "market" && overview && (
-          <MarketTab
-            userId={currentUser}
-            holdings={holdings}
-            accounts={overview.accounts}
             onReload={loadAll}
             notify={notify}
           />
