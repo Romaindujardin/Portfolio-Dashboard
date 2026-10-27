@@ -259,6 +259,14 @@ export interface Quote {
   exchange?: string;
   instrumentType?: string | null;
   marketState?: string | null;
+  change?: number | null;
+  changePercent?: number | null;
+  previousClose?: number | null;
+  dayHigh?: number | null;
+  dayLow?: number | null;
+  fiftyTwoWeekHigh?: number | null;
+  fiftyTwoWeekLow?: number | null;
+  volume?: number | null;
   fetchedAt?: string;
   source?: string;
   cached?: boolean;

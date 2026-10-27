@@ -1279,6 +1279,31 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
   // ─── Marché ───────────────────────────────────────────────────────────────
 
   router.get(
+    "/market/indices",
+    asyncHandler(async (req, res) => {
+      const defaultTickers = [
+        "^FCHI", // CAC 40
+        "^GSPC", // S&P 500
+        "^IXIC", // Nasdaq Composite
+        "^STOXX50E", // Euro Stoxx 50
+        "BTC-EUR", // Bitcoin
+        "ETH-EUR", // Ethereum
+        "GC=F", // Or (Gold)
+        "BZ=F", // Pétrole Brent
+      ];
+      const customParam = req.query.tickers;
+      const tickers = customParam
+        ? String(customParam).split(",").map((t) => t.trim()).filter(Boolean)
+        : defaultTickers;
+      const quotes = await market.getQuotes(tickers, {
+        force: toBool(req.query.force),
+        concurrency: 4,
+      });
+      res.json({ quotes });
+    }),
+  );
+
+  router.get(
     "/market/quote",
     asyncHandler(async (req, res) => {
       const ticker = asString(req.query.ticker, { max: 30 });

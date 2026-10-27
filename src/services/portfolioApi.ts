@@ -417,6 +417,14 @@ export const getLoanSchedule = (
 
 // ─── Marché ─────────────────────────────────────────────────────────────────
 
+export const getMarketIndices = (tickers?: string[], force = false) =>
+  request<{ quotes: Quote[] }>("/market/indices", {
+    query: {
+      tickers: tickers && tickers.length > 0 ? tickers.join(",") : undefined,
+      force: force ? 1 : undefined,
+    },
+  }).then((data) => data.quotes);
+
 export const getQuote = (ticker: string, force = false) =>
   request<{ quote: Quote }>("/market/quote", {
     query: { ticker, force: force ? 1 : undefined },

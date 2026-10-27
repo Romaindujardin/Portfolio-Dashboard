@@ -8,6 +8,7 @@ import {
   Download,
   FileSpreadsheet,
   Landmark,
+  Layers,
   Pencil,
   Plus,
   Receipt,
@@ -79,6 +80,7 @@ type Notify = (kind: "success" | "error", message: string) => void;
 interface AccountsTabProps {
   userId: string;
   accounts: PortfolioAccount[];
+  holdings?: Holding[];
   onReload: () => Promise<void>;
   notify: Notify;
 }
@@ -104,9 +106,19 @@ const defaultAccountForm = {
 const AccountsTab: React.FC<AccountsTabProps> = ({
   userId,
   accounts,
+  holdings = [],
   onReload,
   notify,
 }) => {
+  const holdingsByAccountId = useMemo(() => {
+    const map = new Map<string, Holding[]>();
+    for (const h of holdings) {
+      if (!map.has(h.accountId)) map.set(h.accountId, []);
+      map.get(h.accountId)!.push(h);
+    }
+    return map;
+  }, [holdings]);
+
   const [filter, setFilter] = useState<"all" | "manual" | "connected">("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -534,6 +546,11 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
             const isLoan = account.type === "LOAN";
             const isRealEstate = account.type === "REAL_ESTATE";
             const isManaged = isLoan || isRealEstate;
+            const accountHoldings = holdingsByAccountId.get(account.id) || [];
+            const hasHoldings = accountHoldings.length > 0;
+            const isInvestment = INVESTMENT_ACCOUNT_TYPES.has(account.type) || hasHoldings;
+            const isBankChecking = account.type === "CHECKING";
+            const isSavings = account.type === "SAVINGS";
             return (
               <Card key={account.id} className="overflow-hidden">
                 <div className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -642,9 +659,29 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                         )}
                       </div>
                       <div className="flex flex-wrap content-start gap-2">
-                        {!isLoan && !isRealEstate && (
+                        {/* 1. Bouton Positions : pour comptes d'investissement (PEA, CTO, PEE, Crypto) ou tout compte détenant des positions (ex: Assurance-vie Gresham) */}
+                        {isInvestment && (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => setHoldingsAccount(account)}
+                            title="Consulter et gérer les positions du compte"
+                          >
+                            <Layers className="h-3.5 w-3.5" /> Positions {hasHoldings ? `(${accountHoldings.length})` : ""}
+                          </Button>
+                        )}
+
+                        {/* 2. Bouton Transactions : pour les comptes courants/bancaires */}
+                        {isBankChecking && (
                           <Button size="sm" onClick={() => openTransactions(account)}>
                             <Receipt className="h-3.5 w-3.5" /> Transactions
+                          </Button>
+                        )}
+
+                        {/* 3. Bouton Mouvements : pour les comptes d'investissement avec historique bancaire/liquidités */}
+                        {!isBankChecking && !isSavings && !isLoan && !isRealEstate && (account.connectionId || account.provider === "bourso-sidecar") && (
+                          <Button size="sm" variant="ghost" onClick={() => openTransactions(account)}>
+                            <Receipt className="h-3.5 w-3.5" /> Mouvements
                           </Button>
                         )}
                         {(account.connectionId || account.provider === "bourso-sidecar") && !isManaged && (
@@ -664,23 +701,6 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                         <Button size="sm" onClick={() => setOwnershipAccount(account)}>
                           <Users className="h-3.5 w-3.5" /> Parts
                         </Button>
-                        {!isManaged && INVESTMENT_ACCOUNT_TYPES.has(account.type) && (
-                          <Button size="sm" onClick={() => setHoldingsAccount(account)}>
-                            <RefreshCw className="h-3.5 w-3.5" /> Positions
-                          </Button>
-                        )}
-                        {!isManaged && (
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setCsvTargetAccountId(account.id);
-                              setCsvImportOpen(true);
-                            }}
-                            title="Importer des positions ou transactions via CSV"
-                          >
-                            <FileSpreadsheet className="h-3.5 w-3.5" /> Importer CSV
-                          </Button>
-                        )}
                         {!isManaged && (
                           <Button size="sm" variant="danger" onClick={() => handleDelete(account)}>
                             <Trash2 className="h-3.5 w-3.5" /> Supprimer

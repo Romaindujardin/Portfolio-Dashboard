@@ -133,6 +133,18 @@ export const fetchYahooQuote = async (ticker) => {
   }
   const currency = meta.currency || "EUR";
   const fxRate = await getFxRateToEur(currency);
+  const prevClose = Number(meta.chartPreviousClose ?? meta.previousClose ?? nativePrice);
+  const change =
+    Number.isFinite(nativePrice) && Number.isFinite(prevClose)
+      ? round2((nativePrice - prevClose) * fxRate)
+      : 0;
+  const changePercent =
+    meta.regularMarketChangePercent != null
+      ? round2(Number(meta.regularMarketChangePercent))
+      : prevClose > 0
+      ? round2(((nativePrice - prevClose) / prevClose) * 100)
+      : 0;
+
   return {
     ticker: symbol,
     price: round2(nativePrice * fxRate),
@@ -143,6 +155,14 @@ export const fetchYahooQuote = async (ticker) => {
     exchange: meta.exchangeName || meta.fullExchangeName || null,
     instrumentType: meta.instrumentType || null,
     marketState: meta.marketState || null,
+    change,
+    changePercent,
+    previousClose: round2(prevClose * fxRate),
+    dayHigh: meta.regularMarketDayHigh != null ? round2(Number(meta.regularMarketDayHigh) * fxRate) : null,
+    dayLow: meta.regularMarketDayLow != null ? round2(Number(meta.regularMarketDayLow) * fxRate) : null,
+    fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh != null ? round2(Number(meta.fiftyTwoWeekHigh) * fxRate) : null,
+    fiftyTwoWeekLow: meta.fiftyTwoWeekLow != null ? round2(Number(meta.fiftyTwoWeekLow) * fxRate) : null,
+    volume: meta.regularMarketVolume != null ? Number(meta.regularMarketVolume) : null,
     fetchedAt: new Date().toISOString(),
     source: "yahoo",
   };
@@ -340,6 +360,14 @@ export class MarketDataService {
           name: quote.name,
           exchange: quote.exchange,
           instrumentType: quote.instrumentType,
+          change: quote.change,
+          changePercent: quote.changePercent,
+          previousClose: quote.previousClose,
+          dayHigh: quote.dayHigh,
+          dayLow: quote.dayLow,
+          fiftyTwoWeekHigh: quote.fiftyTwoWeekHigh,
+          fiftyTwoWeekLow: quote.fiftyTwoWeekLow,
+          volume: quote.volume,
         },
       });
     }

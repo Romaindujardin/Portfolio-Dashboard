@@ -358,6 +358,7 @@ const Patrimoine: React.FC = () => {
           <AccountsTab
             userId={currentUser}
             accounts={overview.accounts.filter((a) => a.type !== "CRYPTO")}
+            holdings={holdings}
             onReload={loadAll}
             notify={notify}
           />

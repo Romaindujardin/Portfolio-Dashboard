@@ -1,17 +1,22 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  BarChart3,
-  LineChart,
-  Plus,
+  Activity,
+  ArrowDownRight,
+  ArrowUpRight,
+  BarChart2,
+  Coins,
+  Compass,
+  Flame,
+  Globe,
   RefreshCw,
   Search,
-  Trash2,
+  Sparkles,
+  TrendingDown,
   TrendingUp,
 } from "lucide-react";
 import type { Holding, PortfolioAccount, Quote } from "../../types/portfolio";
 import {
-  createHolding,
-  deleteHolding,
+  getMarketIndices,
   getQuote,
   refreshPrices,
   searchSymbols,
@@ -20,14 +25,11 @@ import {
   Badge,
   Button,
   Card,
-  EmptyState,
   ErrorBanner,
   Field,
-  INVESTMENT_ACCOUNT_TYPES,
   Input,
-  Modal,
   SectionHeader,
-  Select,
+  cn,
   formatDate,
   formatEur,
   formatPercent,
@@ -43,58 +45,119 @@ interface MarketTabProps {
   notify: Notify;
 }
 
+// Catégories des instruments de référence
+const INDEX_CATEGORIES: Record<string, { label: string; icon: React.ReactNode; tone: "blue" | "gold" | "green" | "gray" }> = {
+  "^FCHI": { label: "Indice Paris", icon: <Globe className="h-3 w-3" />, tone: "blue" },
+  "^GSPC": { label: "Indice US", icon: <Globe className="h-3 w-3" />, tone: "blue" },
+  "^IXIC": { label: "Tech US", icon: <Globe className="h-3 w-3" />, tone: "blue" },
+  "^STOXX50E": { label: "Zone Euro", icon: <Globe className="h-3 w-3" />, tone: "blue" },
+  "BTC-EUR": { label: "Crypto", icon: <Coins className="h-3 w-3" />, tone: "gold" },
+  "ETH-EUR": { label: "Crypto", icon: <Coins className="h-3 w-3" />, tone: "gold" },
+  "GC=F": { label: "Matière 1ère", icon: <Flame className="h-3 w-3" />, tone: "gold" },
+  "BZ=F": { label: "Énergie", icon: <Flame className="h-3 w-3" />, tone: "gray" },
+};
+
+// Raccourcis populaires pour recherche rapide
+const POPULAR_TICKERS = [
+  { ticker: "MC.PA", name: "LVMH" },
+  { ticker: "TTE.PA", name: "TotalEnergies" },
+  { ticker: "AI.PA", name: "Air Liquide" },
+  { ticker: "CW8.PA", name: "Amundi MSCI World" },
+  { ticker: "ESE.PA", name: "BNP Easy S&P 500" },
+  { ticker: "AAPL", name: "Apple" },
+  { ticker: "NVDA", name: "Nvidia" },
+  { ticker: "MSFT", name: "Microsoft" },
+  { ticker: "BNP.PA", name: "BNP Paribas" },
+];
+
 const MarketTab: React.FC<MarketTabProps> = ({
   userId,
   holdings,
-  accounts,
   onReload,
   notify,
 }) => {
-  const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({
-    account_id: "",
-    isin: "",
-    ticker: "",
-    name: "",
-    quantity: "",
-    cost_basis: "",
-    price: "",
-    cash_balance: "",
-  });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  // ─── État des indices de marché ───────────────────────────────────────────
+  const [indices, setIndices] = useState<Quote[]>([]);
+  const [indicesLoading, setIndicesLoading] = useState(true);
+  const [indicesFilter, setIndicesFilter] = useState<"ALL" | "INDICES" | "CRYPTO" | "COMMODITIES">("ALL");
+
+  // ─── État du rafraîchissement global du portefeuille ──────────────────────
   const [refreshing, setRefreshing] = useState(false);
 
-  const [quoteTicker, setQuoteTicker] = useState("");
-  const [quote, setQuote] = useState<Quote | null>(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState("");
-
+  // ─── État de la recherche et fiche détaillée ──────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<
     Array<{ ticker: string; name: string; exchange: string | null }>
   >([]);
-  const [searching, setSearching] = useState(false);
 
-  const eligibleAccounts = useMemo(
-    () => accounts.filter((account) => INVESTMENT_ACCOUNT_TYPES.has(account.type)),
-    [accounts],
-  );
+  // Instrument inspecté (par défaut CAC 40)
+  const [inspectedTicker, setInspectedTicker] = useState<string>("^FCHI");
+  const [inspectedQuote, setInspectedQuote] = useState<Quote | null>(null);
+  const [inspectedLoading, setInspectedLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState("");
 
-  const totals = useMemo(() => {
-    const value = holdings.reduce(
-      (sum, holding) => sum + (holding.quantity || 0) * (holding.price || 0),
-      0,
-    );
-    const cost = holdings.reduce((sum, holding) => sum + (holding.costBasis || 0), 0);
-    return { value, cost, pnl: value - cost };
-  }, [holdings]);
+  // Chargement initial des grands indices
+  const loadIndices = async (force = false) => {
+    setIndicesLoading(true);
+    try {
+      const data = await getMarketIndices(undefined, force);
+      setIndices(data || []);
+    } catch {
+      // Tolérance : ne bloque pas la page si hors-ligne
+    } finally {
+      setIndicesLoading(false);
+    }
+  };
 
-  const refresh = async () => {
+  useEffect(() => {
+    void loadIndices(false);
+  }, []);
+
+  // Chargement de la fiche de cotation détaillée
+  const inspectInstrument = async (ticker: string, force = false) => {
+    const sym = ticker.trim().toUpperCase();
+    if (!sym) return;
+    setInspectedTicker(sym);
+    setInspectedLoading(true);
+    setQuoteError("");
+    try {
+      const q = await getQuote(sym, force);
+      setInspectedQuote(q);
+    } catch (err) {
+      setInspectedQuote(null);
+      setQuoteError(err instanceof Error ? err.message : "Cotation indisponible.");
+    } finally {
+      setInspectedLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void inspectInstrument("^FCHI", false);
+  }, []);
+
+  // Recherche dynamique de symboles
+  const handleSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearching(true);
+    try {
+      const results = await searchSymbols(q);
+      setSearchResults(results || []);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // Rafraîchissement des cours des actifs du portefeuille
+  const refreshPortfolio = async () => {
     setRefreshing(true);
     try {
       const result = await refreshPrices(userId, true);
       await onReload();
+      await loadIndices(true);
       notify(
         result.failed.length > 0 ? "error" : "success",
         `${result.updated} cours mis à jour${
@@ -108,413 +171,387 @@ const MarketTab: React.FC<MarketTabProps> = ({
     }
   };
 
-  const add = async () => {
-    if (!form.account_id) {
-      setError("Choisissez un compte d'investissement.");
-      return;
+  // Filtrage des indices selon la catégorie
+  const filteredIndices = useMemo(() => {
+    if (indicesFilter === "INDICES") {
+      return indices.filter((q) => q.ticker.startsWith("^"));
     }
-    if (!form.isin.trim() && !form.ticker.trim()) {
-      setError("Renseignez un ISIN ou un ticker.");
-      return;
+    if (indicesFilter === "CRYPTO") {
+      return indices.filter((q) => q.ticker.includes("BTC") || q.ticker.includes("ETH"));
     }
-    setBusy(true);
-    setError("");
-    try {
-      await createHolding(form.account_id, userId, {
-        isin: form.isin.trim() || undefined,
-        ticker: form.ticker.trim() || undefined,
-        name: form.name.trim() || undefined,
-        quantity: Number(form.quantity.replace(",", ".")) || 0,
-        cost_basis: form.cost_basis ? Number(form.cost_basis.replace(",", ".")) : undefined,
-        price: form.price ? Number(form.price.replace(",", ".")) : undefined,
-        cash_balance:
-          form.cash_balance === ""
-            ? undefined
-            : Number(form.cash_balance.replace(",", ".")) || 0,
-      });
-      setAddOpen(false);
-      setForm({
-        account_id: "",
-        isin: "",
-        ticker: "",
-        name: "",
-        quantity: "",
-        cost_basis: "",
-        price: "",
-        cash_balance: "",
-      });
-      await onReload();
-      notify("success", "Position ajoutée.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ajout impossible.");
-    } finally {
-      setBusy(false);
+    if (indicesFilter === "COMMODITIES") {
+      return indices.filter((q) => q.ticker.includes("GC=") || q.ticker.includes("BZ="));
     }
-  };
-
-  const remove = async (holding: Holding) => {
-    if (!window.confirm(`Supprimer la position ${holding.name || holding.ticker} ?`)) return;
-    try {
-      await deleteHolding(holding.accountId, holding.id, userId);
-      await onReload();
-      notify("success", "Position supprimée.");
-    } catch (err) {
-      notify("error", err instanceof Error ? err.message : "Suppression impossible.");
-    }
-  };
-
-  const checkQuote = async (ticker?: string) => {
-    const symbol = (ticker ?? quoteTicker).trim();
-    if (!symbol) return;
-    setQuoteLoading(true);
-    setQuoteError("");
-    try {
-      setQuote(await getQuote(symbol));
-      setQuoteTicker(symbol.toUpperCase());
-    } catch (err) {
-      setQuote(null);
-      setQuoteError(err instanceof Error ? err.message : "Cours indisponible.");
-    } finally {
-      setQuoteLoading(false);
-    }
-  };
-
-  const runSearch = async () => {
-    if (!searchQuery.trim()) return;
-    setSearching(true);
-    try {
-      setSearchResults(await searchSymbols(searchQuery.trim()));
-    } catch (err) {
-      setSearchResults([]);
-      setQuoteError(err instanceof Error ? err.message : "Recherche impossible.");
-    } finally {
-      setSearching(false);
-    }
-  };
+    return indices;
+  }, [indices, indicesFilter]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* ─── En-tête de la page Marchés ────────────────────────────────────── */}
       <SectionHeader
-        title="Marché"
-        subtitle="Cours des actions, ETF et crypto via Yahoo Finance (convertis en EUR), positions par compte et plus-values latentes."
+        title="Marchés Financiers"
+        subtitle="Baromètres en temps réel, indices boursiers internationaux, recherche de titres et cours en direct."
         action={
-          <Button onClick={refresh} loading={refreshing} disabled={holdings.length === 0}>
-            <RefreshCw className="h-3.5 w-3.5" /> Rafraîchir les cours
+          <Button onClick={refreshPortfolio} loading={refreshing}>
+            <RefreshCw className="h-3.5 w-3.5" /> Actualiser les cours
           </Button>
         }
       />
 
-      <Card className="grid gap-3 px-4 py-3 sm:grid-cols-3">
-        <div>
-          <p className="text-[11px] text-[#6a6a6a]">Valeur des positions</p>
-          <p className="text-base font-semibold tabular-nums text-[#d4b56e]">
-            {formatEur(totals.value)}
-          </p>
-        </div>
-        <div>
-          <p className="text-[11px] text-[#6a6a6a]">Prix de revient</p>
-          <p className="text-base font-semibold tabular-nums text-[#f5f5f5]">
-            {formatEur(totals.cost)}
-          </p>
-        </div>
-        <div>
-          <p className="text-[11px] text-[#6a6a6a]">Plus-value latente</p>
-          <p
-            className={`text-base font-semibold tabular-nums ${
-              totals.pnl >= 0 ? "text-[#34d399]" : "text-[#f87171]"
-            }`}
-          >
-            {formatEur(totals.pnl, { signed: true })}
-            {totals.cost > 0 && (
-              <span className="ml-1 text-[10px] text-[#6a6a6a]">
-                {formatPercent((totals.pnl / totals.cost) * 100, 1)}
-              </span>
-            )}
-          </p>
-        </div>
-      </Card>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-[#8a8a8a]">
-          {holdings.length} position{holdings.length > 1 ? "s" : ""}
-        </p>
-        <Button variant="primary" onClick={() => setAddOpen(true)}>
-          <Plus className="h-3.5 w-3.5" /> Ajouter une position
-        </Button>
-      </div>
-
-      {holdings.length === 0 ? (
-        <EmptyState
-          icon={<LineChart className="h-7 w-7" />}
-          title="Aucune position"
-          description="Ajoutez un ISIN ou un ticker à un compte d'investissement (PEA, compte-titres, crypto). Les cours sont récupérés automatiquement et convertis en euros."
-          action={
-            <Button variant="primary" onClick={() => setAddOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> Ajouter une position
-            </Button>
-          }
-        />
-      ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-[#6a6a6a]">
-                <tr className="border-b border-[rgba(255,255,255,0.07)]">
-                  <th className="px-4 py-2.5 font-medium">Instrument</th>
-                  <th className="px-2 py-2.5 font-medium">Compte</th>
-                  <th className="px-2 py-2.5 text-right font-medium">Quantité</th>
-                  <th className="px-2 py-2.5 text-right font-medium">Prix</th>
-                  <th className="px-2 py-2.5 text-right font-medium">Valeur</th>
-                  <th className="px-2 py-2.5 text-right font-medium">P&L</th>
-                  <th className="px-4 py-2.5 text-right font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {holdings.map((holding) => {
-                  const value = (holding.quantity || 0) * (holding.price || 0);
-                  const pnl = holding.costBasis != null ? value - holding.costBasis : null;
-                  return (
-                    <tr
-                      key={holding.id}
-                      className="border-b border-[rgba(255,255,255,0.04)] last:border-0"
-                    >
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[rgba(200,165,94,0.08)]">
-                            <BarChart3 className="h-3.5 w-3.5 text-[#c8a55e]" />
-                          </div>
-                          <div>
-                            <p className="text-[#f5f5f5]">{holding.name || holding.ticker}</p>
-                            <p className="text-[10px] text-[#6a6a6a]">
-                              {holding.ticker}
-                              {holding.isin ? ` · ${holding.isin}` : ""}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-2 py-2.5 text-[#8a8a8a]">
-                        {holding.accountName || "—"}
-                        {holding.lastPriceAt && (
-                          <span className="block text-[10px] text-[#555555]">
-                            {formatDate(holding.lastPriceAt)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#d4d4d4]">
-                        {holding.quantity}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#d4d4d4]">
-                        {formatEur(holding.price)}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#f5f5f5]">
-                        {formatEur(value)}
-                      </td>
-                      <td
-                        className={`px-2 py-2.5 text-right tabular-nums ${
-                          pnl == null
-                            ? "text-[#6a6a6a]"
-                            : pnl >= 0
-                              ? "text-[#34d399]"
-                              : "text-[#f87171]"
-                        }`}
-                      >
-                        {pnl == null ? "—" : formatEur(pnl, { signed: true })}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <Button size="sm" variant="ghost" onClick={() => remove(holding)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      {/* ─── Section 1 : Baromètres & Grands Indices Mondiaux ───────────────── */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-[#c8a55e]" />
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[#d4d4d4]">
+              Baromètres & Grands Indices Mondiaux
+            </h3>
           </div>
-        </Card>
-      )}
-
-      {/* Vérificateur de cours */}
-      <Card className="p-4">
-        <SectionHeader
-          title="Vérifier un cours"
-          subtitle="Recherchez un ticker (MC.PA, AAPL, CW8.PA…) ou un nom d'entreprise."
-        />
-        <div className="mt-3 flex flex-wrap items-end gap-2">
-          <Field label="Ticker" className="w-40">
-            <Input
-              value={quoteTicker}
-              onChange={(event) => setQuoteTicker(event.target.value.toUpperCase())}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void checkQuote();
-              }}
-              placeholder="MC.PA"
-            />
-          </Field>
-          <Button variant="primary" onClick={() => checkQuote()} loading={quoteLoading}>
-            <TrendingUp className="h-3.5 w-3.5" /> Cours
-          </Button>
-          <Field label="Rechercher" className="min-w-[220px] flex-1">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#6a6a6a]" />
-              <Input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void runSearch();
-                }}
-                placeholder="LVMH, Apple, MSCI World…"
-                className="pl-9"
-              />
-            </div>
-          </Field>
-          <Button onClick={runSearch} loading={searching}>
-            <Search className="h-3.5 w-3.5" /> Chercher
-          </Button>
-        </div>
-
-        {quoteError && (
-          <div className="mt-3">
-            <ErrorBanner message={quoteError} onClose={() => setQuoteError("")} />
-          </div>
-        )}
-
-        {quote && (
-          <div className="mt-3 flex flex-wrap items-center gap-4 rounded-lg border border-[rgba(200,165,94,0.2)] bg-[rgba(200,165,94,0.04)] px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <Badge tone="gold">{quote.ticker}</Badge>
-              <span className="text-sm font-medium text-[#f5f5f5]">{quote.name}</span>
-            </div>
-            <div className="ml-auto flex items-center gap-4 text-xs">
-              <span className="text-base font-semibold tabular-nums text-[#d4b56e]">
-                {formatEur(quote.price)}
-              </span>
-              {quote.currency !== "EUR" && quote.nativePrice != null && (
-                <span className="text-[10px] text-[#6a6a6a]">
-                  {quote.nativePrice} {quote.currency} · FX {quote.fxRate}
-                </span>
-              )}
-              {quote.marketState === "CLOSED" ? (
-                <Badge tone="gray">Clôturé</Badge>
-              ) : (
-                <Badge tone="green">Cours</Badge>
-              )}
-            </div>
-          </div>
-        )}
-
-        {searchResults.length > 0 && (
-          <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
-            {searchResults.map((result) => (
+          <div className="flex items-center gap-1 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#111111] p-0.5 text-xs">
+            {(
+              [
+                ["ALL", "Tous"],
+                ["INDICES", "Indices"],
+                ["CRYPTO", "Crypto"],
+                ["COMMODITIES", "Matières 1ères"],
+              ] as const
+            ).map(([key, label]) => (
               <button
-                key={result.ticker}
+                key={key}
                 type="button"
-                onClick={() => {
-                  setQuoteTicker(result.ticker);
-                  void checkQuote(result.ticker);
-                }}
-                className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#0d0d0d] px-3 py-2 text-left hover:border-[rgba(200,165,94,0.3)]"
+                onClick={() => setIndicesFilter(key)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  indicesFilter === key
+                    ? "bg-[rgba(200,165,94,0.18)] text-[#d4b56e]"
+                    : "text-[#8a8a8a] hover:text-[#f5f5f5]",
+                )}
               >
-                <div className="min-w-0">
-                  <p className="truncate text-xs text-[#f5f5f5]">{result.name}</p>
-                  <p className="text-[10px] text-[#6a6a6a]">
-                    {result.ticker} · {result.exchange || "—"}
-                  </p>
-                </div>
-                <TrendingUp className="h-3.5 w-3.5 flex-shrink-0 text-[#c8a55e]" />
+                {label}
               </button>
             ))}
           </div>
+        </div>
+
+        {indicesLoading && indices.length === 0 ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="p-4 animate-pulse">
+                <div className="h-3 w-16 bg-white/5 rounded mb-2" />
+                <div className="h-6 w-24 bg-white/10 rounded mb-1" />
+                <div className="h-3 w-12 bg-white/5 rounded" />
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {filteredIndices.map((idx) => {
+              const meta = INDEX_CATEGORIES[idx.ticker] || {
+                label: "Marché",
+                icon: <BarChart2 className="h-3 w-3" />,
+                tone: "gray",
+              };
+              const isSelected = inspectedTicker === idx.ticker;
+              const isPositive = (idx.changePercent ?? 0) >= 0;
+
+              return (
+                <button
+                  key={idx.ticker}
+                  type="button"
+                  onClick={() => inspectInstrument(idx.ticker)}
+                  className={cn(
+                    "rounded-xl border p-3.5 text-left transition-all duration-150 flex flex-col justify-between",
+                    isSelected
+                      ? "border-[#c8a55e] bg-[rgba(200,165,94,0.08)] shadow-lg shadow-[#c8a55e]/5"
+                      : "border-[rgba(255,255,255,0.07)] bg-[#111111] hover:border-[rgba(255,255,255,0.15)] hover:bg-[#141414]",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-1 w-full mb-2">
+                    <span className="truncate text-xs font-semibold text-[#f5f5f5]">
+                      {idx.name || idx.ticker}
+                    </span>
+                    <Badge tone={meta.tone}>
+                      {meta.icon}
+                      <span className="ml-1">{meta.label}</span>
+                    </Badge>
+                  </div>
+
+                  <div>
+                    <p className="text-base font-semibold tabular-nums text-[#f5f5f5]">
+                      {formatEur(idx.price)}
+                    </p>
+
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-[10px] text-[#6a6a6a]">{idx.ticker}</span>
+                      {idx.changePercent != null ? (
+                        <div
+                          className={cn(
+                            "flex items-center gap-0.5 text-[11px] font-medium tabular-nums",
+                            isPositive ? "text-[#10b981]" : "text-[#ef4444]",
+                          )}
+                        >
+                          {isPositive ? (
+                            <ArrowUpRight className="h-3 w-3" />
+                          ) : (
+                            <ArrowDownRight className="h-3 w-3" />
+                          )}
+                          <span>{formatPercent(idx.changePercent, 2)}</span>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-[#6a6a6a]">—</span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ─── Section 2 : Recherche & Fiche Cotation Interactive ──────────────── */}
+      <Card className="p-5 space-y-5">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Search className="h-4 w-4 text-[#c8a55e]" />
+            <h3 className="text-sm font-semibold text-[#f5f5f5]">
+              Rechercher & Analyser un Instrument
+            </h3>
+          </div>
+          <p className="text-xs text-[#8a8a8a]">
+            Tapez un symbole ou nom (ex: <em>MC.PA</em>, <em>AAPL</em>, <em>CW8.PA</em>, <em>TotalEnergies</em>) ou choisissez un actif ci-dessous.
+          </p>
+        </div>
+
+        {/* Barre de recherche */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[240px]">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-[#6a6a6a]" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  if (searchQuery.trim().includes(".")) {
+                    void inspectInstrument(searchQuery.trim());
+                  } else {
+                    void handleSearch();
+                  }
+                }
+              }}
+              placeholder="Rechercher ticker ou nom (ex: CW8.PA, MC.PA, NVDA, Air Liquide)..."
+              className="pl-9"
+            />
+          </div>
+          <Button variant="secondary" onClick={handleSearch} loading={searching}>
+            <Search className="h-3.5 w-3.5" /> Rechercher
+          </Button>
+          {searchQuery && (
+            <Button
+              variant="primary"
+              onClick={() => inspectInstrument(searchQuery.trim())}
+              loading={inspectedLoading}
+            >
+              Afficher le cours
+            </Button>
+          )}
+        </div>
+
+        {/* Raccourcis populaires */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          <span className="text-[11px] text-[#6a6a6a] mr-1">Populaires :</span>
+          {POPULAR_TICKERS.map((item) => (
+            <button
+              key={item.ticker}
+              type="button"
+              onClick={() => inspectInstrument(item.ticker)}
+              className={cn(
+                "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                inspectedTicker === item.ticker
+                  ? "border-[#c8a55e] bg-[rgba(200,165,94,0.15)] text-[#f5f5f5]"
+                  : "border-[rgba(255,255,255,0.06)] bg-[#141414] text-[#8a8a8a] hover:border-white/10 hover:text-[#f5f5f5]",
+              )}
+            >
+              <strong className="text-[#f5f5f5] mr-1">{item.name}</strong>
+              <span className="text-[10px] text-[#6a6a6a]">{item.ticker}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Résultats de recherche */}
+        {searchResults.length > 0 && (
+          <div className="rounded-lg border border-[rgba(255,255,255,0.07)] bg-[#0d0d0d] p-2 space-y-1">
+            <p className="text-[10px] uppercase font-semibold text-[#6a6a6a] px-2 py-1">
+              Résultats de recherche ({searchResults.length})
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+              {searchResults.map((res) => (
+                <button
+                  key={res.ticker}
+                  type="button"
+                  onClick={() => {
+                    inspectInstrument(res.ticker);
+                    setSearchResults([]);
+                    setSearchQuery(res.name);
+                  }}
+                  className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/[0.04]"
+                >
+                  <div className="truncate mr-2">
+                    <p className="font-medium text-[#f5f5f5] truncate">{res.name}</p>
+                    <p className="text-[10px] text-[#6a6a6a]">{res.exchange || "Marché"}</p>
+                  </div>
+                  <Badge tone="gray">{res.ticker}</Badge>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Fiche Instrument Inspecté */}
+        {quoteError && <ErrorBanner message={quoteError} onClose={() => setQuoteError("")} />}
+
+        {inspectedQuote && (
+          <div className="rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#0f0f0f] p-4 space-y-4">
+            {/* Haut de la fiche : Nom, Ticker, Exchange & Cours */}
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] pb-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-lg font-bold text-[#f5f5f5]">
+                    {inspectedQuote.name || inspectedQuote.ticker}
+                  </h4>
+                  <Badge tone="gold">{inspectedQuote.ticker}</Badge>
+                  {inspectedQuote.exchange && (
+                    <Badge tone="gray">{inspectedQuote.exchange}</Badge>
+                  )}
+                  {inspectedQuote.instrumentType && (
+                    <Badge tone="blue">{inspectedQuote.instrumentType}</Badge>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-[#6a6a6a]">
+                  Dernière cotation relevée {formatDate(inspectedQuote.fetchedAt || new Date().toISOString())}
+                  {inspectedQuote.currency !== "EUR" && inspectedQuote.nativePrice != null && (
+                    <span>
+                      {" "}· Cours d'origine : {inspectedQuote.nativePrice} {inspectedQuote.currency} (tx EUR: {inspectedQuote.fxRate})
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-2xl font-bold tabular-nums text-[#d4b56e]">
+                  {formatEur(inspectedQuote.price)}
+                </p>
+                {inspectedQuote.changePercent != null && (
+                  <div
+                    className={cn(
+                      "flex items-center justify-end gap-1 text-xs font-semibold tabular-nums mt-0.5",
+                      inspectedQuote.changePercent >= 0 ? "text-[#10b981]" : "text-[#ef4444]",
+                    )}
+                  >
+                    {inspectedQuote.changePercent >= 0 ? (
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                    ) : (
+                      <ArrowDownRight className="h-3.5 w-3.5" />
+                    )}
+                    <span>{formatPercent(inspectedQuote.changePercent, 2)}</span>
+                    {inspectedQuote.change != null && (
+                      <span className="text-[11px] text-[#8a8a8a]">
+                        ({inspectedQuote.change >= 0 ? "+" : ""}{formatEur(inspectedQuote.change)})
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Statistiques clés de l'actif */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-lg border border-[rgba(255,255,255,0.04)] bg-[#141414] p-3">
+                <span className="text-[11px] text-[#6a6a6a]">Clôture précédente</span>
+                <p className="mt-0.5 font-semibold text-[#f5f5f5] tabular-nums">
+                  {inspectedQuote.previousClose != null ? formatEur(inspectedQuote.previousClose) : "—"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-[rgba(255,255,255,0.04)] bg-[#141414] p-3">
+                <span className="text-[11px] text-[#6a6a6a]">Jour (Bas / Haut)</span>
+                <p className="mt-0.5 font-semibold text-[#f5f5f5] tabular-nums">
+                  {inspectedQuote.dayLow != null && inspectedQuote.dayHigh != null
+                    ? `${formatEur(inspectedQuote.dayLow)} — ${formatEur(inspectedQuote.dayHigh)}`
+                    : "—"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-[rgba(255,255,255,0.04)] bg-[#141414] p-3">
+                <span className="text-[11px] text-[#6a6a6a]">52 Semaines (Bas / Haut)</span>
+                <p className="mt-0.5 font-semibold text-[#f5f5f5] tabular-nums">
+                  {inspectedQuote.fiftyTwoWeekLow != null && inspectedQuote.fiftyTwoWeekHigh != null
+                    ? `${formatEur(inspectedQuote.fiftyTwoWeekLow)} — ${formatEur(inspectedQuote.fiftyTwoWeekHigh)}`
+                    : "—"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-[rgba(255,255,255,0.04)] bg-[#141414] p-3">
+                <span className="text-[11px] text-[#6a6a6a]">Volume journalier</span>
+                <p className="mt-0.5 font-semibold text-[#f5f5f5] tabular-nums">
+                  {inspectedQuote.volume != null
+                    ? inspectedQuote.volume.toLocaleString("fr-FR")
+                    : "—"}
+                </p>
+              </div>
+            </div>
+
+            {/* Jauge visuelle 52 semaines */}
+            {inspectedQuote.fiftyTwoWeekLow != null &&
+              inspectedQuote.fiftyTwoWeekHigh != null &&
+              inspectedQuote.fiftyTwoWeekHigh > inspectedQuote.fiftyTwoWeekLow && (
+                <div className="pt-2">
+                  <div className="flex items-center justify-between text-[11px] text-[#8a8a8a] mb-1">
+                    <span>Plus bas 52s : {formatEur(inspectedQuote.fiftyTwoWeekLow)}</span>
+                    <span className="text-[10px] uppercase font-semibold text-[#c8a55e]">
+                      Fourchette annuelle 52 semaines
+                    </span>
+                    <span>Plus haut 52s : {formatEur(inspectedQuote.fiftyTwoWeekHigh)}</span>
+                  </div>
+                  <div className="relative h-2 w-full rounded-full bg-white/5 overflow-hidden">
+                    {(() => {
+                      const low = inspectedQuote.fiftyTwoWeekLow;
+                      const high = inspectedQuote.fiftyTwoWeekHigh;
+                      const current = inspectedQuote.price;
+                      const percent = Math.min(Math.max(((current - low) / (high - low)) * 100, 2), 98);
+                      return (
+                        <div
+                          className="h-full bg-gradient-to-r from-red-500 via-amber-400 to-emerald-500 rounded-full"
+                          style={{ width: `${percent}%` }}
+                        />
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+          </div>
         )}
       </Card>
 
-      {/* Ajout */}
-      <Modal
-        open={addOpen}
-        title="Ajouter une position"
-        onClose={() => setAddOpen(false)}
-        footer={
-          <>
-            <Button onClick={() => setAddOpen(false)}>Annuler</Button>
-            <Button variant="primary" onClick={add} loading={busy}>
-              Ajouter
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          {error && <ErrorBanner message={error} onClose={() => setError("")} />}
-          {eligibleAccounts.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-[rgba(255,255,255,0.08)] px-3 py-4 text-center text-xs text-[#8a8a8a]">
-              Créez d'abord un compte d'investissement dans l'onglet Comptes.
+      {/* ─── Section 3 : Bandeau d'information Portefeuille ────────────────── */}
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gradient-to-r from-[#141414] to-[#1a1711] border-[rgba(200,165,94,0.15)]">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[rgba(200,165,94,0.12)] text-[#c8a55e]">
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-[#f5f5f5]">
+              Gestion de vos positions & enveloppes
             </p>
-          ) : (
-            <Field label="Compte" required>
-              <Select
-                value={form.account_id}
-                onChange={(event) => setForm({ ...form, account_id: event.target.value })}
-              >
-                <option value="">Choisir un compte…</option>
-                {eligibleAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name} — {formatEur(account.balance)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="ISIN" hint="Résolution automatique du ticker Yahoo.">
-              <Input
-                value={form.isin}
-                onChange={(event) => setForm({ ...form, isin: event.target.value.toUpperCase() })}
-                placeholder="FR0000121014"
-              />
-            </Field>
-            <Field label="Ticker" hint="Si vous le connaissez déjà.">
-              <Input
-                value={form.ticker}
-                onChange={(event) => setForm({ ...form, ticker: event.target.value.toUpperCase() })}
-                placeholder="MC.PA"
-              />
-            </Field>
-            <Field label="Nom (optionnel)">
-              <Input
-                value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-              />
-            </Field>
-            <Field label="Quantité" required>
-              <Input
-                inputMode="decimal"
-                value={form.quantity}
-                onChange={(event) => setForm({ ...form, quantity: event.target.value })}
-              />
-            </Field>
-            <Field label="Prix de revient total (€)">
-              <Input
-                inputMode="decimal"
-                value={form.cost_basis}
-                onChange={(event) => setForm({ ...form, cost_basis: event.target.value })}
-              />
-            </Field>
-            <Field label="Prix actuel (€)" hint="Laissez vide pour récupérer le cours automatiquement.">
-              <Input
-                inputMode="decimal"
-                value={form.price}
-                onChange={(event) => setForm({ ...form, price: event.target.value })}
-              />
-            </Field>
-            <Field label="Liquidités du compte (€)" hint="Optionnel.">
-              <Input
-                inputMode="decimal"
-                value={form.cash_balance}
-                onChange={(event) => setForm({ ...form, cash_balance: event.target.value })}
-              />
-            </Field>
+            <p className="text-[11px] text-[#8a8a8a]">
+              Vos titres individuels (PEA, CTO, PEE, Assurance-vie...) se consultent et s'administrent directement depuis l'onglet <strong>Comptes</strong> via le bouton <strong>Positions</strong>.
+            </p>
           </div>
         </div>
-      </Modal>
+        <Button onClick={refreshPortfolio} loading={refreshing} size="sm">
+          <RefreshCw className="h-3.5 w-3.5" /> Synchroniser les cours
+        </Button>
+      </Card>
     </div>
   );
 };
