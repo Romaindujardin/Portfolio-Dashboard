@@ -478,3 +478,62 @@ export const syncAllCryptoAccounts = (userId: string) =>
     results: Array<{ accountId: string; success: boolean; balance?: number; error?: string }>;
   }>("/crypto/sync-all", json({ user_id: userId }));
 
+// ─── Synchronisation de compte individuel ───────────────────────────────────
+
+export const syncAccount = (accountId: string, userId: string) =>
+  request<{ result: unknown; account: PortfolioAccount }>(`/accounts/${accountId}/sync`, {
+    ...json({ user_id: userId }),
+  });
+
+// ─── Sidecar BoursoBank ─────────────────────────────────────────────────────
+
+export interface BoursoSidecarStatus {
+  available: boolean;
+  configured: boolean;
+  customerId: string | null;
+}
+
+export const getBoursoSidecarStatus = () =>
+  request<BoursoSidecarStatus>("/sidecar/bourso/status");
+
+export const connectBoursoSidecar = (
+  userId: string,
+  payload: {
+    customerId?: string;
+    password?: string;
+    saveCredentials?: boolean;
+    pages?: number;
+  },
+) =>
+  request<{
+    status: string;
+    accountsSynced: number;
+    transactionsImported: number;
+    holdingsSynced: number;
+    connection: Connection;
+    errors?: unknown[];
+  }>("/sidecar/bourso/connect", {
+    ...json({ user_id: userId, ...payload }),
+  });
+
+export const syncBoursoSidecar = (
+  userId: string,
+  payload?: { connectionId?: string; pages?: number },
+) =>
+  request<{
+    status: string;
+    accountsSynced: number;
+    transactionsImported: number;
+    holdingsSynced: number;
+    connection: Connection;
+    errors?: unknown[];
+  }>("/sidecar/bourso/sync", {
+    ...json({ user_id: userId, ...(payload || {}) }),
+  });
+
+export const deleteBoursoSidecarCredentials = () =>
+  request<{ deleted: boolean }>("/sidecar/bourso/credentials", {
+    method: "DELETE",
+  });
+
+

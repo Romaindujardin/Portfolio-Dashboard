@@ -42,6 +42,7 @@ export interface Transaction {
   accountId: string;
   provider: string;
   externalId: string | null;
+  dedupKey?: string | null;
   date: string;
   valueDate: string | null;
   amount: number;

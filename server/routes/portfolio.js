@@ -47,6 +47,11 @@ import {
   syncCryptoAccount,
   syncAllCryptoAccounts,
 } from "../services/cryptoService.js";
+import {
+  deleteBoursoCredentials,
+  getBoursoStatus,
+  syncBoursoSidecar,
+} from "../services/boursoSidecarService.js";
 
 const toBool = (value, fallback = false) => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -262,6 +267,28 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const deleted = repository.deleteAccount(req.params.id, userId);
       if (!deleted) throw new HttpError(404, "Compte introuvable");
       res.json({ deleted: true });
+    }),
+  );
+
+  router.post(
+    "/accounts/:id/sync",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const account = repository.getAccount(req.params.id, userId);
+      if (!account) throw new HttpError(404, "Compte introuvable");
+      if (account.connectionId) {
+        const result = await syncService.syncConnection(account.connectionId, userId, { force: true });
+        return res.json({ result, account: repository.getAccount(account.id, userId) });
+      }
+      if (account.provider === "bourso-sidecar" || account.provider === "bourso") {
+        const result = await syncBoursoSidecar({ repository, userId });
+        return res.json({ result, account: repository.getAccount(account.id, userId) });
+      }
+      if (account.provider === "crypto" || account.type === "CRYPTO") {
+        const result = await syncCryptoAccount(repository, account, userId);
+        return res.json({ result, account: repository.getAccount(account.id, userId) });
+      }
+      throw new HttpError(400, "Ce compte ne supporte pas la synchronisation directe.");
     }),
   );
 
@@ -652,6 +679,64 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       await syncService.disconnect(req.params.id, userId, {
         archiveAccounts: toBool(req.query.archive_accounts),
       });
+      res.json({ deleted: true });
+    }),
+  );
+
+  // ─── Sidecar BoursoBank ───────────────────────────────────────────────────
+
+  router.get(
+    "/sidecar/bourso/status",
+    asyncHandler(async (req, res) => {
+      const status = getBoursoStatus(repository);
+      res.json(status);
+    }),
+  );
+
+  router.post(
+    "/sidecar/bourso/connect",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const customerId = asOptionalString(req.body?.customerId || req.body?.customer_id);
+      const password = asOptionalString(req.body?.password);
+      const saveCredentials = toBool(req.body?.saveCredentials ?? req.body?.save_credentials, true);
+      const pages = asOptionalInteger(req.body?.pages, 10);
+
+      const result = await syncBoursoSidecar({
+        repository,
+        userId,
+        customerId,
+        password,
+        pages,
+        saveCredentials,
+      });
+
+      res.json(result);
+    }),
+  );
+
+  router.post(
+    "/sidecar/bourso/sync",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const pages = asOptionalInteger(req.body?.pages, 10);
+      const connectionId = asOptionalString(req.body?.connectionId || req.body?.connection_id);
+
+      const result = await syncBoursoSidecar({
+        repository,
+        userId,
+        connectionId,
+        pages,
+      });
+
+      res.json(result);
+    }),
+  );
+
+  router.delete(
+    "/sidecar/bourso/credentials",
+    asyncHandler(async (req, res) => {
+      deleteBoursoCredentials(repository);
       res.json({ deleted: true });
     }),
   );

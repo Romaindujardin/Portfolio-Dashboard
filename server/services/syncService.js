@@ -14,6 +14,7 @@ import {
   selectNewTransactions,
 } from "./transactions.js";
 import { todayIso } from "../lib/validate.js";
+import { syncBoursoSidecar } from "./boursoSidecarService.js";
 
 const SYNC_COOLDOWN_MS = 4 * 3600 * 1000;
 
@@ -134,6 +135,15 @@ export class SyncService {
     if (!connection) {
       throw new ConnectorError("Connexion introuvable", { status: 404, code: "NOT_FOUND" });
     }
+
+    if (connection.provider === PROVIDERS.BOURSO_SIDECAR || connection.provider === "bourso-sidecar") {
+      return syncBoursoSidecar({
+        repository: this.repository,
+        userId,
+        connectionId: connection.id,
+      });
+    }
+
     if (!connection.sessionId) {
       throw new ConnectorError(
         "Cette connexion n'a pas encore de session bancaire. Terminez l'autorisation.",

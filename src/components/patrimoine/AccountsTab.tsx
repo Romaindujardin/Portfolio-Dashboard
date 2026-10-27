@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   Building2,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   CreditCard,
@@ -15,6 +16,7 @@ import {
   Users,
   Wallet2,
   X,
+  Zap,
 } from "lucide-react";
 import type {
   Holding,
@@ -23,6 +25,13 @@ import type {
   PortfolioAccountType,
   Transaction,
 } from "../../types/portfolio";
+import type {
+  TricountExpense,
+  TricountIncome,
+  TricountPayer,
+  TricountBeneficiary,
+  TricountSplitMethod,
+} from "../../types";
 import {
   createAccount,
   createHolding,
@@ -32,8 +41,18 @@ import {
   getTransactions,
   refreshPrices,
   setOwnership,
+  syncAccount,
   updateAccount,
 } from "../../services/portfolioApi";
+import {
+  addOrUpdateExpense,
+  addOrUpdateIncome,
+  deleteExpense,
+  deleteIncome,
+  getStoredExpenses,
+  getStoredIncomes,
+} from "../../utils/tricountStorage";
+import { getSavingsStrategy } from "../../utils/savingsStorage";
 import {
   Badge,
   Button,
@@ -100,6 +119,206 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [txLoading, setTxLoading] = useState(false);
   const [txSearch, setTxSearch] = useState("");
+
+  // ===== Intégration Tricount dans le modal de transactions =====
+  const [tricountExpenses, setTricountExpenses] = useState<TricountExpense[]>([]);
+  const [tricountIncomes, setTricountIncomes] = useState<TricountIncome[]>([]);
+  const [selectedTxForTricount, setSelectedTxForTricount] = useState<Transaction | null>(null);
+  const [matchedTricountItem, setMatchedTricountItem] = useState<TricountExpense | TricountIncome | null>(null);
+  const [tricountModalOpen, setTricountModalOpen] = useState(false);
+  const [tricountForm, setTricountForm] = useState({
+    type: "expense" as "expense" | "income" | "placement",
+    month: "",
+    date: "",
+    label: "",
+    amount: "",
+    payer: "person1" as TricountPayer,
+    beneficiary: "person1" as TricountBeneficiary,
+    splitMethod: "50_50" as TricountSplitMethod,
+    pocketId: "unallocated",
+    subPocketId: "",
+  });
+  const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const loadTricount = () => {
+      setTricountExpenses(getStoredExpenses());
+      setTricountIncomes(getStoredIncomes());
+    };
+    loadTricount();
+    window.addEventListener("tricount_data_updated", loadTricount);
+    window.addEventListener("storage", loadTricount);
+    return () => {
+      window.removeEventListener("tricount_data_updated", loadTricount);
+      window.removeEventListener("storage", loadTricount);
+    };
+  }, []);
+
+  const findTricountItem = (t: Transaction): TricountExpense | TricountIncome | null => {
+    const expense = tricountExpenses.find(
+      (e) =>
+        e.bankRowId === t.id ||
+        (t.externalId && e.bankReference === t.externalId) ||
+        (t.dedupKey && e.bankReference === t.dedupKey),
+    );
+    if (expense) return expense;
+
+    const income = tricountIncomes.find(
+      (i) =>
+        i.bankRowId === t.id ||
+        (t.externalId && i.bankReference === t.externalId) ||
+        (t.dedupKey && i.bankReference === t.dedupKey),
+    );
+    return income || null;
+  };
+
+  const openTricountForTx = (t: Transaction) => {
+    const matched = findTricountItem(t);
+    setSelectedTxForTricount(t);
+    setMatchedTricountItem(matched);
+
+    const isIncome = t.amount > 0;
+    const defaultMonth = (t.date || "").slice(0, 7) || new Date().toISOString().slice(0, 7);
+
+    if (matched) {
+      const isExp = "payerPersonId" in matched;
+      setTricountForm({
+        type: isExp ? (matched.nature === "placement" ? "placement" : "expense") : "income",
+        month: matched.month || defaultMonth,
+        date: matched.date || t.date,
+        label: matched.label || t.label || "",
+        amount: String(matched.amount || Math.abs(t.amount)),
+        payer: isExp ? matched.payerPersonId : "person1",
+        beneficiary: !isExp ? matched.beneficiaryPersonId : "person1",
+        splitMethod: isExp ? matched.splitMethod : "50_50",
+        pocketId: isExp ? matched.pocketId || "unallocated" : "unallocated",
+        subPocketId: isExp ? matched.subPocketId || "" : "",
+      });
+    } else {
+      setTricountForm({
+        type: isIncome ? "income" : "expense",
+        month: defaultMonth,
+        date: t.date,
+        label: t.label || "",
+        amount: String(Math.abs(t.amount)),
+        payer: "person1",
+        beneficiary: "person1",
+        splitMethod: "50_50",
+        pocketId: "unallocated",
+        subPocketId: "",
+      });
+    }
+    setTricountModalOpen(true);
+  };
+
+  const handleSaveTricount = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTxForTricount) return;
+    const t = selectedTxForTricount;
+    const amt = Number(tricountForm.amount);
+    if (!amt || amt <= 0) {
+      notify("error", "Veuillez saisir un montant valide.");
+      return;
+    }
+
+    const m = tricountForm.month.trim() || t.date.slice(0, 7);
+    const strategy = getSavingsStrategy(userId);
+    const pocket = strategy.pockets.find((p) => p.id === tricountForm.pocketId);
+    const subItem = pocket?.subItems?.find((s) => s.id === tricountForm.subPocketId);
+
+    if (tricountForm.type === "income") {
+      const incomeId =
+        matchedTricountItem && !("payerPersonId" in matchedTricountItem)
+          ? matchedTricountItem.id
+          : `inc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      if (matchedTricountItem && "payerPersonId" in matchedTricountItem) {
+        deleteExpense(matchedTricountItem.id);
+      }
+
+      const income: TricountIncome = {
+        id: incomeId,
+        month: m,
+        date: tricountForm.date || t.date,
+        label: tricountForm.label.trim() || t.label || "Revenu",
+        amount: Math.round(amt * 100) / 100,
+        beneficiaryPersonId: tricountForm.beneficiary,
+        source: "bank_import",
+        bankAccount: txAccount?.name || undefined,
+        bankReference: t.externalId || t.dedupKey || undefined,
+        bankRowId: t.id,
+        createdAt: matchedTricountItem?.createdAt || Date.now(),
+      };
+
+      addOrUpdateIncome(income);
+      notify("success", `Revenu de ${formatEur(amt)} enregistré dans le Budget (${m}) !`);
+    } else {
+      const expenseId =
+        matchedTricountItem && "payerPersonId" in matchedTricountItem
+          ? matchedTricountItem.id
+          : `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      if (matchedTricountItem && !("payerPersonId" in matchedTricountItem)) {
+        deleteIncome(matchedTricountItem.id);
+      }
+
+      const expense: TricountExpense = {
+        id: expenseId,
+        month: m,
+        date: tricountForm.date || t.date,
+        label: tricountForm.label.trim() || t.label || "Dépense",
+        amount: Math.round(amt * 100) / 100,
+        payerPersonId: tricountForm.payer,
+        pocketId: tricountForm.pocketId,
+        pocketName: pocket?.name,
+        subPocketId: tricountForm.subPocketId || undefined,
+        subPocketName: subItem?.name,
+        splitMethod: tricountForm.splitMethod,
+        nature: tricountForm.type === "placement" ? "placement" : "expense",
+        source: "bank_import",
+        bankAccount: txAccount?.name || undefined,
+        bankReference: t.externalId || t.dedupKey || undefined,
+        bankRowId: t.id,
+        createdAt: matchedTricountItem?.createdAt || Date.now(),
+      };
+
+      addOrUpdateExpense(expense);
+      notify(
+        "success",
+        `${tricountForm.type === "placement" ? "Placement" : "Dépense"} de ${formatEur(amt)} ajouté(e) au Tricount (${m}) !`,
+      );
+    }
+
+    setTricountExpenses(getStoredExpenses());
+    setTricountIncomes(getStoredIncomes());
+    setTricountModalOpen(false);
+  };
+
+  const handleDeleteTricountItem = () => {
+    if (!matchedTricountItem) return;
+    if ("payerPersonId" in matchedTricountItem) {
+      deleteExpense(matchedTricountItem.id);
+    } else {
+      deleteIncome(matchedTricountItem.id);
+    }
+    setTricountExpenses(getStoredExpenses());
+    setTricountIncomes(getStoredIncomes());
+    setTricountModalOpen(false);
+    notify("success", "Opération retirée du Tricount.");
+  };
+
+  const handleSyncAccount = async (account: PortfolioAccount) => {
+    setSyncingAccountId(account.id);
+    try {
+      await syncAccount(account.id, userId);
+      await onReload();
+      notify("success", `Compte ${account.name} synchronisé avec succès.`);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "Synchronisation impossible.");
+    } finally {
+      setSyncingAccountId(null);
+    }
+  };
 
   const openTransactions = async (account: PortfolioAccount) => {
     setTxAccount(account);
@@ -325,6 +544,11 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                       <span className="truncate text-sm font-medium text-[#f5f5f5]">
                         {account.name}
                       </span>
+                      {account.provider === "bourso-sidecar" && (
+                        <Badge tone="gold">
+                          <Zap className="h-2.5 w-2.5 mr-0.5" /> Sidecar BoursoBank
+                        </Badge>
+                      )}
                       <Badge tone={account.isManual || !account.connectionId ? "gray" : "gold"}>
                         {account.isManual
                           ? "Manuel"
@@ -392,6 +616,15 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                         {!isLoan && !isRealEstate && (
                           <Button size="sm" onClick={() => openTransactions(account)}>
                             <Receipt className="h-3.5 w-3.5" /> Transactions
+                          </Button>
+                        )}
+                        {(account.connectionId || account.provider === "bourso-sidecar") && !isManaged && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleSyncAccount(account)}
+                            loading={syncingAccountId === account.id}
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" /> Actualiser
                           </Button>
                         )}
                         {!isManaged && (
@@ -646,27 +879,275 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                     String(t.amount).includes(txSearch) ||
                     (t.category || "").toLowerCase().includes(txSearch.toLowerCase()),
                 )
-                .map((t) => (
-                  <div key={t.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-[#f5f5f5]">{t.label}</p>
-                      <p className="text-[10px] text-[#6a6a6a]">
-                        {formatDate(t.date)} {t.category ? `· ${t.category}` : ""}
-                      </p>
+                .map((t) => {
+                  const matched = findTricountItem(t);
+                  return (
+                    <div key={t.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="truncate font-medium text-[#f5f5f5]">{t.label}</p>
+                          {matched && (
+                            <span
+                              onClick={() => openTricountForTx(t)}
+                              className="inline-flex cursor-pointer items-center gap-1 rounded bg-[#10b981]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#34d399] border border-[#10b981]/25 hover:bg-[#10b981]/25 transition-colors"
+                              title="Déjà ajouté au Tricount & Budget (cliquer pour modifier)"
+                            >
+                              <CheckCircle2 className="h-2.5 w-2.5" />
+                              {"payerPersonId" in matched
+                                ? matched.nature === "placement"
+                                  ? "Placement Tricount"
+                                  : "Dépense Tricount"
+                                : "Revenu Tricount"}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-[#6a6a6a]">
+                          {formatDate(t.date)} {t.category ? `· ${t.category}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span
+                          className={cn(
+                            "font-semibold tabular-nums text-right",
+                            t.amount >= 0 ? "text-[#10b981]" : "text-[#f5f5f5]",
+                          )}
+                        >
+                          {formatEur(t.amount, { signed: true })}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className={cn(
+                            "h-7 px-2 text-[11px] border transition-colors",
+                            matched
+                              ? "border-[rgba(255,255,255,0.1)] text-[#a0a0a0] hover:text-[#f5f5f5]"
+                              : "border-[rgba(200,165,94,0.3)] text-[#c8a55e] hover:bg-[rgba(200,165,94,0.1)]",
+                          )}
+                          onClick={() => openTricountForTx(t)}
+                          title={matched ? "Modifier dans le Tricount" : "Ajouter au Tricount & Budget"}
+                        >
+                          {matched ? (
+                            <Pencil className="h-3 w-3" />
+                          ) : (
+                            <>
+                              <Plus className="h-3 w-3 mr-1" />
+                              Tricount
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </div>
-                    <span
-                      className={cn(
-                        "font-semibold tabular-nums text-right flex-shrink-0",
-                        t.amount >= 0 ? "text-[#10b981]" : "text-[#f5f5f5]",
-                      )}
-                    >
-                      {formatEur(t.amount, { signed: true })}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Modal Ajout / Modification Tricount */}
+      <Modal
+        open={tricountModalOpen}
+        title={matchedTricountItem ? "Modifier dans le Budget & Tricount" : "Ajouter au Budget & Tricount"}
+        onClose={() => setTricountModalOpen(false)}
+        footer={
+          <div className="flex w-full items-center justify-between">
+            {matchedTricountItem ? (
+              <Button size="sm" variant="danger" onClick={handleDeleteTricountItem}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" /> Retirer du Tricount
+              </Button>
+            ) : (
+              <div />
+            )}
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => setTricountModalOpen(false)}>
+                Annuler
+              </Button>
+              <Button size="sm" variant="primary" onClick={handleSaveTricount}>
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                {matchedTricountItem ? "Mettre à jour" : "Enregistrer dans le Budget"}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <form onSubmit={handleSaveTricount} className="space-y-3">
+          <div className="flex items-center gap-1 rounded-lg bg-[#141414] p-1 border border-[rgba(255,255,255,0.06)]">
+            <button
+              type="button"
+              className={cn(
+                "flex-1 py-1.5 text-xs font-medium rounded-md transition-colors",
+                tricountForm.type === "expense"
+                  ? "bg-[#c8a55e] text-[#0a0a0a]"
+                  : "text-[#a0a0a0] hover:text-[#f5f5f5]",
+              )}
+              onClick={() => setTricountForm({ ...tricountForm, type: "expense" })}
+            >
+              Dépense
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex-1 py-1.5 text-xs font-medium rounded-md transition-colors",
+                tricountForm.type === "placement"
+                  ? "bg-[#c8a55e] text-[#0a0a0a]"
+                  : "text-[#a0a0a0] hover:text-[#f5f5f5]",
+              )}
+              onClick={() => setTricountForm({ ...tricountForm, type: "placement" })}
+            >
+              Placement / Épargne
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex-1 py-1.5 text-xs font-medium rounded-md transition-colors",
+                tricountForm.type === "income"
+                  ? "bg-[#c8a55e] text-[#0a0a0a]"
+                  : "text-[#a0a0a0] hover:text-[#f5f5f5]",
+              )}
+              onClick={() => setTricountForm({ ...tricountForm, type: "income" })}
+            >
+              Revenu
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Mois budgétaire (YYYY-MM)" required>
+              <Input
+                value={tricountForm.month}
+                onChange={(e) => setTricountForm({ ...tricountForm, month: e.target.value })}
+                placeholder="2026-10"
+              />
+            </Field>
+            <Field label="Date de l'opération" required>
+              <Input
+                type="date"
+                value={tricountForm.date}
+                onChange={(e) => setTricountForm({ ...tricountForm, date: e.target.value })}
+              />
+            </Field>
+          </div>
+
+          <Field label="Libellé" required>
+            <Input
+              value={tricountForm.label}
+              onChange={(e) => setTricountForm({ ...tricountForm, label: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Montant (€)" required>
+            <Input
+              type="number"
+              step="0.01"
+              value={tricountForm.amount}
+              onChange={(e) => setTricountForm({ ...tricountForm, amount: e.target.value })}
+            />
+          </Field>
+
+          {tricountForm.type === "income" ? (
+            <Field label="Bénéficiaire du revenu" required>
+              <select
+                value={tricountForm.beneficiary}
+                onChange={(e) =>
+                  setTricountForm({
+                    ...tricountForm,
+                    beneficiary: e.target.value as TricountBeneficiary,
+                  })
+                }
+                className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
+              >
+                <option value="person1">Romain</option>
+                <option value="person2">Sophie</option>
+                <option value="shared">Commun</option>
+              </select>
+            </Field>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Payeur de la dépense" required>
+                  <select
+                    value={tricountForm.payer}
+                    onChange={(e) =>
+                      setTricountForm({
+                        ...tricountForm,
+                        payer: e.target.value as TricountPayer,
+                      })
+                    }
+                    className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
+                  >
+                    <option value="person1">Romain</option>
+                    <option value="person2">Sophie</option>
+                  </select>
+                </Field>
+
+                <Field label="Répartition" required>
+                  <select
+                    value={tricountForm.splitMethod}
+                    onChange={(e) =>
+                      setTricountForm({
+                        ...tricountForm,
+                        splitMethod: e.target.value as TricountSplitMethod,
+                      })
+                    }
+                    className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
+                  >
+                    <option value="50_50">50 / 50 (Équitable)</option>
+                    <option value="proportional">Au prorata des revenus</option>
+                    <option value="100_person1">100% Romain (Perso)</option>
+                    <option value="100_person2">100% Sophie (Perso)</option>
+                  </select>
+                </Field>
+              </div>
+
+              <Field label="Poche de budget associée">
+                <select
+                  value={tricountForm.pocketId}
+                  onChange={(e) =>
+                    setTricountForm({
+                      ...tricountForm,
+                      pocketId: e.target.value,
+                      subPocketId: "",
+                    })
+                  }
+                  className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
+                >
+                  <option value="unallocated">Non alloué / Autre</option>
+                  {getSavingsStrategy(userId).pockets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              {(() => {
+                const selectedPocket = getSavingsStrategy(userId).pockets.find(
+                  (p) => p.id === tricountForm.pocketId,
+                );
+                if (selectedPocket?.subItems && selectedPocket.subItems.length > 0) {
+                  return (
+                    <Field label="Sous-poste / Sous-poche">
+                      <select
+                        value={tricountForm.subPocketId}
+                        onChange={(e) =>
+                          setTricountForm({ ...tricountForm, subPocketId: e.target.value })
+                        }
+                        className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
+                      >
+                        <option value="">Aucun sous-poste</option>
+                        {selectedPocket.subItems.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  );
+                }
+                return null;
+              })()}
+            </>
+          )}
+        </form>
       </Modal>
     </div>
   );

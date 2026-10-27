@@ -35,6 +35,7 @@ export const PROVIDERS = {
   MANUAL: "manual",
   CSV: "csv",
   BOURSO: "bourso",
+  BOURSO_SIDECAR: "bourso-sidecar",
 };
 
 export const ACCOUNT_TYPES = [
