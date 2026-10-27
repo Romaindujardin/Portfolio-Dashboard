@@ -103,6 +103,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   // ===== Sidecar BoursoBank =====
   const [boursoStatus, setBoursoStatus] = useState<BoursoSidecarStatus | null>(null);
   const [boursoModalOpen, setBoursoModalOpen] = useState(false);
+  const [targetConnectionId, setTargetConnectionId] = useState<string | null>(null);
   const [boursoForm, setBoursoForm] = useState({
     customerId: "",
     password: "",
@@ -127,15 +128,6 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     reloadBoursoStatus();
   }, []);
 
-  const boursoConnection = useMemo(() => {
-    return connections.find(
-      (c) =>
-        c.provider === "bourso-sidecar" ||
-        (c.aspspName || "").toLowerCase().includes("bourso") ||
-        (c.label || "").toLowerCase().includes("bourso"),
-    );
-  }, [connections]);
-
   const isBoursoInstitution = (inst: Institution) => {
     const name = (inst.name || "").toLowerCase();
     const id = (inst.id || "").toLowerCase();
@@ -155,9 +147,11 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         password: boursoForm.password,
         saveCredentials: boursoForm.saveCredentials,
         pages: Number(boursoForm.pages) || 10,
+        connectionId: targetConnectionId || undefined,
       });
       setBoursoModalOpen(false);
       setBoursoForm((prev) => ({ ...prev, password: "" }));
+      setTargetConnectionId(null);
       reloadBoursoStatus();
       await onReload();
       notify(
@@ -463,52 +457,26 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         )}
       </Card>
 
-      {/* Connecteur Sidecar dédié BoursoBank */}
-      <Card className="p-4 border-[#c8a55e]/30 bg-gradient-to-r from-[rgba(200,165,94,0.07)] via-[rgba(200,165,94,0.02)] to-transparent">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#c8a55e]/15 border border-[#c8a55e]/30">
-              <Zap className="h-5 w-5 text-[#c8a55e]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-semibold text-[#f5f5f5]">
-                  Sidecar BoursoBank
-                </h3>
-                <Badge tone="gold">Recommandé · Sans DSP2</Badge>
-                {boursoConnection && (
-                  <Badge tone="green">
-                    <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" /> Actif
-                  </Badge>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-[#a0a0a0] max-w-2xl">
-                Extrait directement vos comptes <span className="text-[#f5f5f5] font-medium">Courants, Livrets, PEA, CTO, Assurance-Vie</span> et votre historique complet de transactions via le sidecar local sans restriction DSP2.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="primary"
-              onClick={() => setBoursoModalOpen(true)}
-              className="gap-1.5"
-            >
-              <Zap className="h-3.5 w-3.5" />
-              {boursoConnection ? "Synchroniser le Sidecar" : "Lier BoursoBank (Sidecar)"}
-            </Button>
-          </div>
-        </div>
-      </Card>
-
       {/* Ajouter une banque */}
       <Card className="p-4">
         <SectionHeader
           title="Ajouter une banque"
           subtitle="La banque vous redirige vers son propre écran de connexion. Aucun mot de passe bancaire n'est stocké ici."
           action={
-            <Button size="sm" onClick={() => setManualOpen(true)}>
-              <Link2 className="h-3.5 w-3.5" /> J'ai déjà l'URL de retour
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setTargetConnectionId(null);
+                  setBoursoModalOpen(true);
+                }}
+              >
+                <Zap className="h-3.5 w-3.5 text-[#c8a55e]" /> Sidecar BoursoBank
+              </Button>
+              <Button size="sm" onClick={() => setManualOpen(true)}>
+                <Link2 className="h-3.5 w-3.5" /> J'ai déjà l'URL de retour
+              </Button>
+            </div>
           }
         />
         <div className="mt-3 flex flex-wrap items-end gap-2">
@@ -654,6 +622,10 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           <div className="mt-3 space-y-2">
             {connections.map((connection) => {
               const isSidecar = connection.provider === "bourso-sidecar";
+              const isBourso =
+                isSidecar ||
+                (connection.aspspName || "").toLowerCase().includes("bourso") ||
+                (connection.label || "").toLowerCase().includes("bourso");
               return (
                 <div
                   key={connection.id}
@@ -677,6 +649,11 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                             <Zap className="h-2.5 w-2.5 mr-0.5" /> Sidecar natif
                           </Badge>
                         )}
+                        {Boolean(connection.metadata?.sidecarLinked) && !isSidecar && (
+                          <Badge tone="gold">
+                            <Zap className="h-2.5 w-2.5 mr-0.5" /> Sidecar lié
+                          </Badge>
+                        )}
                         <Badge tone={statusTone(connection.status)}>
                           {connectionStatusLabel[connection.status] || connection.status}
                         </Badge>
@@ -692,6 +669,25 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
+                      {isBourso && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => {
+                            setTargetConnectionId(connection.id);
+                            if (connection.metadata?.customerId) {
+                              setBoursoForm((prev) => ({
+                                ...prev,
+                                customerId: String(connection.metadata?.customerId || prev.customerId),
+                              }));
+                            }
+                            setBoursoModalOpen(true);
+                          }}
+                          title="Extraire comptes, PEA & historique complet via le Sidecar"
+                        >
+                          <Zap className="h-3.5 w-3.5" /> Sidecar
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         onClick={() => syncOne(connection)}

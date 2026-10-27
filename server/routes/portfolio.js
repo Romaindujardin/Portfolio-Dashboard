@@ -701,10 +701,12 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const password = asOptionalString(req.body?.password);
       const saveCredentials = toBool(req.body?.saveCredentials ?? req.body?.save_credentials, true);
       const pages = asOptionalInteger(req.body?.pages, 10);
+      const connectionId = asOptionalString(req.body?.connectionId || req.body?.connection_id);
 
       const result = await syncBoursoSidecar({
         repository,
         userId,
+        connectionId,
         customerId,
         password,
         pages,

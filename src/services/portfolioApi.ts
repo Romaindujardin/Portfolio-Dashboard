@@ -499,6 +499,7 @@ export const getBoursoSidecarStatus = () =>
 export const connectBoursoSidecar = (
   userId: string,
   payload: {
+    connectionId?: string;
     customerId?: string;
     password?: string;
     saveCredentials?: boolean;
