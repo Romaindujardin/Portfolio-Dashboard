@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint . --ext js,jsx,ts,tsx",
     "type-check": "tsc --noEmit",
-    "server": "node server.js",
+    "server": "node --watch server.js",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
     "start:prod": "NODE_ENV=production node server.js",
     "test": "vitest run",
