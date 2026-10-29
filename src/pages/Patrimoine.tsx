@@ -152,21 +152,17 @@ const Patrimoine: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      {/* En-tête */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      {/* En-tête Principal */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] pb-5">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-[#f5f5f5]">Patrimoine</h1>
-            <span className="rounded-full border border-[rgba(200,165,94,0.3)] bg-[rgba(200,165,94,0.08)] px-2 py-0.5 text-[10px] font-medium text-[#d4b56e]">
-              Multi-banques
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-[#8a8a8a]">
-            Vue consolidée des comptes bancaires, de la crypto, de l'immobilier, des prêts et des marchés.
-            Les pages historiques (Budget, Épargne) restent inchangées.
+          <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
+            Patrimoine
+          </h1>
+          <p className="text-sm text-[#8a8a8a] mt-1">
+            Vue consolidée de vos comptes bancaires, investissements, crypto, biens immobiliers et emprunts.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-start sm:self-center">
           <Button onClick={() => void loadAll()} loading={loading}>
             <RefreshCw className="h-3.5 w-3.5" /> Actualiser
           </Button>

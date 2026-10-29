@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Search,
   Sparkles,
-  TrendingUp,
 } from "lucide-react";
 import {
   Cell,
@@ -259,24 +258,17 @@ const Market: React.FC = () => {
       )}
 
       {/* ─── En-tête principal de la page ───────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] pb-5">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#c8a55e]/15 border border-[#c8a55e]/30 text-[#c8a55e]">
-              <TrendingUp className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-[#f5f5f5]">
-                Marchés & Répartition des ETF
-              </h1>
-              <p className="text-xs text-[#8a8a8a] mt-0.5">
-                Décomposition sectorielle & géographique (méthode Picsou), transparence des sous-jacents et cotations mondiales.
-              </p>
-            </div>
-          </div>
+          <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
+            Marché
+          </h1>
+          <p className="text-sm text-[#8a8a8a] mt-1">
+            Décomposition sectorielle & géographique des ETF (méthode Picsou), transparence des sous-jacents et cotations mondiales.
+          </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 self-start sm:self-center">
           <Button onClick={handleRefreshAll} loading={refreshing}>
             <RefreshCw className="h-3.5 w-3.5" />
             Actualiser les cours
