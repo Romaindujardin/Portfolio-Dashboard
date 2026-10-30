@@ -128,12 +128,18 @@ export const AuthModal: React.FC = () => {
           </div>
 
           <h2 className="text-xl font-bold text-[#f5f5f5]">
-            {isSetup ? "Sécuriser votre profil" : "Profil Verrouillé"}
+            {isSetup
+              ? "Sécuriser votre profil"
+              : authTargetUser && authTargetUser !== currentUser
+                ? `Accès au profil de ${targetUser}`
+                : "Profil Verrouillé"}
           </h2>
           <p className="text-sm text-[#8a8a8a] mt-1">
             {isSetup
               ? `Définissez un mot de passe pour le profil de ${targetUser}`
-              : `Saisissez votre mot de passe pour accéder à ${targetUser}`}
+              : authTargetUser && authTargetUser !== currentUser
+                ? `Ce compte est protégé. Saisissez le mot de passe de ${targetUser} pour y accéder.`
+                : `Saisissez votre mot de passe pour accéder à ${targetUser}`}
           </p>
         </div>
 
@@ -245,7 +251,13 @@ export const AuthModal: React.FC = () => {
                   <span>{isSetup ? "Enregistrement..." : "Vérification..."}</span>
                 </>
               ) : (
-                <span>{isSetup ? "Définir mon mot de passe" : "Déverrouiller"}</span>
+                <span>
+                  {isSetup
+                    ? "Définir mon mot de passe"
+                    : authTargetUser && authTargetUser !== currentUser
+                      ? `Déverrouiller et accéder à ${targetUser}`
+                      : "Déverrouiller"}
+                </span>
               )}
             </button>
 

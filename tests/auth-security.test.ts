@@ -136,4 +136,38 @@ describe("API HTTP /api/portfolio/auth", () => {
     });
     expect(verifyNew.status).toBe(200);
   });
+
+  it("garantit un cloisonnement strict : le mot de passe d'un utilisateur ne déverrouille jamais un autre utilisateur", async () => {
+    const userA = `UserA_${Date.now()}`;
+    const userB = `UserB_${Date.now()}`;
+
+    // Créer userA avec mot de passe A
+    await postJson("/portfolio/auth/setup", {
+      username: userA,
+      password: "PasswordUserA123!",
+    });
+
+    // Créer userB avec mot de passe B
+    await postJson("/portfolio/auth/setup", {
+      username: userB,
+      password: "PasswordUserB456!",
+    });
+
+    // Tenter de déverrouiller userB avec le mot de passe de userA -> doit être rejeté (401)
+    const crossVerify = await postJson("/portfolio/auth/verify", {
+      username: userB,
+      password: "PasswordUserA123!",
+    });
+    expect(crossVerify.status).toBe(401);
+
+    // Déverrouiller userB avec le bon mot de passe -> 200
+    const correctVerify = await postJson("/portfolio/auth/verify", {
+      username: userB,
+      password: "PasswordUserB456!",
+    });
+    expect(correctVerify.status).toBe(200);
+    const body = await correctVerify.json();
+    expect(body.success).toBe(true);
+    expect(body.username).toBe(userB);
+  });
 });

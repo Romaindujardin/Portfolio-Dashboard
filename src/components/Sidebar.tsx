@@ -312,27 +312,39 @@ const Sidebar: React.FC = () => {
                         >
                           {getInitials(user)}
                         </div>
-                        {user}
-                      </button>
-                      <div className="flex items-center gap-1">
-                        <Link
-                          to={`/settings/${user}`}
-                          onClick={() => setIsUserMenuOpen(false)}
-                          className="p-1 text-[#555555] hover:text-[#f5f5f5] transition-colors duration-200"
-                          title={`Paramètres de ${user}`}
-                        >
-                          <Settings className="h-3.5 w-3.5" />
-                        </Link>
-                        {availableUsers.length > 1 && (
-                          <button
-                            onClick={() => handleDeleteUser(user)}
-                            className="p-1 text-[#555555] hover:text-[#ef4444] transition-colors duration-200"
-                            title={`Supprimer ${user}`}
+                        <span className="flex-1 truncate">{user}</span>
+                        {currentUser === user ? (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#c8a55e]/15 text-[#c8a55e] font-medium">Actif</span>
+                        ) : (
+                          <span
+                            className="flex items-center gap-1 text-[11px] text-[#666666]"
+                            title="Mot de passe requis pour accéder à ce compte"
                           >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
+                            <Lock className="w-3 h-3 text-[#8a8a8a]" />
+                          </span>
                         )}
-                      </div>
+                      </button>
+                      {currentUser === user && (
+                        <div className="flex items-center gap-1 ml-1.5">
+                          <Link
+                            to={`/settings/${user}`}
+                            onClick={() => setIsUserMenuOpen(false)}
+                            className="p-1 text-[#555555] hover:text-[#f5f5f5] transition-colors duration-200"
+                            title={`Paramètres de mon profil (${user})`}
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </Link>
+                          {availableUsers.length > 1 && (
+                            <button
+                              onClick={() => handleDeleteUser(user)}
+                              className="p-1 text-[#555555] hover:text-[#ef4444] transition-colors duration-200"
+                              title={`Supprimer mon profil (${user})`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
 

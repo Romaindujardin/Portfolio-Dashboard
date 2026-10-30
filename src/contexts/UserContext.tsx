@@ -48,7 +48,7 @@ interface UserProviderProps {
 
 const isSessionUnlocked = (username: string): boolean => {
   try {
-    return sessionStorage.getItem(`portfolio_auth_unlocked_${username}`) === "true";
+    return sessionStorage.getItem("portfolio_auth_unlocked_user") === username;
   } catch {
     return false;
   }
@@ -56,20 +56,35 @@ const isSessionUnlocked = (username: string): boolean => {
 
 const markSessionUnlocked = (username: string) => {
   try {
-    sessionStorage.setItem(`portfolio_auth_unlocked_${username}`, "true");
+    sessionStorage.setItem("portfolio_auth_unlocked_user", username);
+    // Nettoyer les clés héritées pour éviter toute fuite ou confusion d'état
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (
+        key &&
+        key.startsWith("portfolio_auth_unlocked_") &&
+        key !== "portfolio_auth_unlocked_user"
+      ) {
+        sessionStorage.removeItem(key);
+      }
+    }
   } catch {}
 };
 
 const clearSessionUnlocked = (username?: string) => {
   try {
-    if (username) {
-      sessionStorage.removeItem(`portfolio_auth_unlocked_${username}`);
-    } else {
-      for (let i = sessionStorage.length - 1; i >= 0; i--) {
-        const key = sessionStorage.key(i);
-        if (key && key.startsWith("portfolio_auth_unlocked_")) {
-          sessionStorage.removeItem(key);
-        }
+    const active = sessionStorage.getItem("portfolio_auth_unlocked_user");
+    if (!username || active === username) {
+      sessionStorage.removeItem("portfolio_auth_unlocked_user");
+    }
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (
+        key &&
+        (key.startsWith("portfolio_auth_unlocked_") ||
+          key === "portfolio_auth_unlocked_user")
+      ) {
+        sessionStorage.removeItem(key);
       }
     }
   } catch {}
@@ -204,11 +219,9 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const lockUser = (user?: string) => {
     const target = user || currentUser;
     clearSessionUnlocked(target);
-    if (target === currentUser) {
-      setIsLocked(true);
-      setAuthTargetUser(target);
-      setAuthMode("unlock");
-    }
+    setIsLocked(true);
+    setAuthTargetUser(target);
+    setAuthMode("unlock");
   };
 
   const lockAll = () => {
@@ -219,29 +232,33 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   };
 
   const requestUserSwitch = async (targetUser: string) => {
+    // Si on clique sur le profil déjà actif
     if (targetUser === currentUser) {
+      // Si la modale ciblait un autre utilisateur, on annule et on revient au profil actif
+      if (authTargetUser !== currentUser) {
+        setAuthTargetUser(currentUser);
+        setAuthMode(isSessionUnlocked(currentUser) ? null : "unlock");
+        return;
+      }
       if (isLocked) {
         await checkUserAuth(currentUser);
       }
       return;
     }
 
-    if (isSessionUnlocked(targetUser)) {
-      // Déjà déverrouillé dans l'onglet
-      setCurrentUser(targetUser);
-      setAuthTargetUser(targetUser);
-      setIsLocked(false);
-      setAuthMode(null);
-      return;
-    }
-
-    // Demander le mot de passe pour targetUser
+    // Basculer vers un autre compte exige TOUJOURS le mot de passe de ce compte.
+    // L'isolation est stricte : chaque profil a son mot de passe et personne ne peut
+    // accéder au compte de l'autre sans authentification.
     setAuthTargetUser(targetUser);
+    setIsCheckingAuth(true);
     try {
       const status = await getAuthStatus(targetUser);
       setAuthMode(status.hasPassword ? "unlock" : "setup");
-    } catch {
+    } catch (err) {
+      console.warn("Erreur lors de la vérification de l'état d'authentification:", err);
       setAuthMode("unlock");
+    } finally {
+      setIsCheckingAuth(false);
     }
   };
 
@@ -252,7 +269,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   const cancelAuthModal = () => {
     if (authTargetUser !== currentUser) {
-      // Annule la bascule vers l'autre utilisateur
+      // Annule la bascule vers l'autre utilisateur et revient au profil actif
       setAuthTargetUser(currentUser);
       setAuthMode(isSessionUnlocked(currentUser) ? null : "unlock");
     }
