@@ -853,9 +853,31 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     const appUrl = (process.env.APP_URL || "https://localhost:5173").replace(/\/+$/, "");
     const redirectBase = `${appUrl}/patrimoine`;
 
+    console.log("[Enable Banking OAuth Callback] Paramètres reçus :", {
+      error: req.query.error,
+      error_description: req.query.error_description,
+      state: req.query.state,
+      hasCode: Boolean(req.query.code),
+    });
+
     if (req.query.error) {
       const message =
         req.query.error_description || req.query.error || "Autorisation refusée";
+      const state = req.query.state ? asString(req.query.state, { max: 200 }) : null;
+      if (state) {
+        try {
+          const userIdFromState = state.split(".")[0];
+          const pending = repository.findPendingConnectorByState(state, userIdFromState);
+          if (pending) {
+            repository.updateConnector(pending.id, userIdFromState, {
+              status: "error",
+              lastError: `Échec d'autorisation (${message})`,
+            });
+          }
+        } catch {
+          // Tolérance silencieuse
+        }
+      }
       if (wantsJson) return res.status(400).json({ error: message });
       return res.redirect(
         `${redirectBase}?connection=error&message=${encodeURIComponent(message)}`,
@@ -876,6 +898,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const status = result.status === "PENDING" ? "pending" : "success";
       return res.redirect(`${redirectBase}?connection=${status}`);
     } catch (error) {
+      console.error("[Enable Banking OAuth Callback] Échec de la finalisation :", error);
       if (wantsJson) {
         return res.status(error.status || 500).json({ error: error.message });
       }
