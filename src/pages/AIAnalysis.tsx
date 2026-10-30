@@ -16,6 +16,7 @@ import {
   Send,
   Sparkles,
   X,
+  User,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import { useCurrency, formatMoney } from "../contexts/CurrencyContext";
@@ -422,9 +423,14 @@ const AIAnalysis: React.FC = () => {
       {/* En-tête */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
-            Conseiller IA
-          </h1>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
+              Conseiller IA
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[rgba(255,255,255,0.05)] text-[#a3a3a3] border border-[rgba(255,255,255,0.08)]">
+              <User className="w-3.5 h-3.5 text-[#c8a55e]" /> Profil de {currentUser}
+            </span>
+          </div>
           <p className="text-sm text-[#8a8a8a] mt-1">
             Joignez vos comptes, vos lignes et votre stratégie d'épargne, puis
             posez votre question : projet immobilier, rééquilibrage, fiscalité,

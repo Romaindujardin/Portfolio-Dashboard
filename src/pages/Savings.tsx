@@ -3,6 +3,7 @@ import {
   Search,
   ChevronRight,
   Clock,
+  Users,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -554,9 +555,14 @@ export const Savings: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] border-[rgba(255,255,255,0.06)] pb-5">
         <div>
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
-              Épargne & Placements Réels
-            </h1>
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
+                Épargne & Placements Réels
+              </h1>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border border-[rgba(200,165,94,0.25)]">
+                <Users className="w-3.5 h-3.5" /> Espace Foyer
+              </span>
+            </div>
             <p className="text-sm text-[#555555] mt-0.5">
               Suivi concret de vos capitaux placés, historique des poches et
               évolution mois par mois.

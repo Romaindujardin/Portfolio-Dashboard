@@ -7,6 +7,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Wallet2,
+  User,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import { useCurrency } from "../contexts/CurrencyContext";
@@ -155,9 +156,14 @@ const Patrimoine: React.FC = () => {
       {/* En-tête Principal */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] pb-5">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
-            Patrimoine
-          </h1>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
+              Patrimoine
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[rgba(255,255,255,0.05)] text-[#a3a3a3] border border-[rgba(255,255,255,0.08)]">
+              <User className="w-3.5 h-3.5 text-[#c8a55e]" /> Profil de {currentUser}
+            </span>
+          </div>
           <p className="text-sm text-[#8a8a8a] mt-1">
             Vue consolidée de vos comptes bancaires, investissements, crypto, biens immobiliers et emprunts.
           </p>

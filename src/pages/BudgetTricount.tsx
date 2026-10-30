@@ -12,6 +12,7 @@ import {
   DollarSign,
   X,
   Sliders,
+  Users,
 } from "lucide-react";
 import {
   TricountExpense,
@@ -516,9 +517,14 @@ const BudgetTricount: React.FC = () => {
       {/* En-tête Principal */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
-            Budget
-          </h1>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
+              Budget
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border border-[rgba(200,165,94,0.25)]">
+              <Users className="w-3.5 h-3.5" /> Espace Foyer
+            </span>
+          </div>
           <p className="text-sm text-[#8a8a8a] mt-1">
             Confrontation entre vos revenus, vos dépenses réelles et les
             objectifs de votre stratégie d'épargne.

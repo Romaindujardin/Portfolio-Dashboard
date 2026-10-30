@@ -1230,6 +1230,9 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
             <h1 className="text-2xl md:text-3xl font-bold text-[#f5f5f5]">
               Stratégie d'Épargne
             </h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border border-[rgba(200,165,94,0.25)]">
+              <Users size={12} /> Espace Foyer
+            </span>
             {hasCustomStrategyForMonth(activeMonth) ? (
               <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
                 <CheckCircle2 size={12} /> Personnalisée pour{" "}
