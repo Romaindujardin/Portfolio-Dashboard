@@ -439,15 +439,23 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
             </Field>
             <Field
               label="Clé privée (PEM)"
-              required
-              hint="Collez le contenu du fichier .pem téléchargé lors de la création de l'application. La clé est chiffrée en AES-256-GCM et n'est jamais renvoyée au navigateur."
+              required={!configured}
+              hint={
+                configured
+                  ? "Clé privée déjà enregistrée et chiffrée. Laissez vide pour conserver la clé actuelle."
+                  : "Collez le contenu du fichier .pem téléchargé lors de la création de l'application. La clé est chiffrée en AES-256-GCM et n'est jamais renvoyée au navigateur."
+              }
             >
               <textarea
                 value={configForm.privateKey}
                 onChange={(event) =>
                   setConfigForm({ ...configForm, privateKey: event.target.value })
                 }
-                placeholder={"-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"}
+                placeholder={
+                  configured
+                    ? "•••••••• (clé existante conservée si vide)"
+                    : "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----"
+                }
                 className="min-h-[110px] w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-3 py-2 font-mono text-[11px] text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
               />
             </Field>

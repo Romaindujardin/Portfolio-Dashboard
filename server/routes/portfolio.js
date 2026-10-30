@@ -795,8 +795,9 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     "/connections/settings",
     asyncHandler(async (req, res) => {
       const body = req.body || {};
-      const applicationId = asString(body.applicationId, { max: 120 });
-      const privateKey = String(body.privateKey || "").trim();
+      const existingConfig = connector.storedConfig() || {};
+      const applicationId = asString(body.applicationId, { max: 120 }) || existingConfig.applicationId || "";
+      const privateKey = String(body.privateKey || "").trim() || existingConfig.privateKey || "";
       const redirectUri = asString(body.redirectUri, { max: 500 });
       if (!applicationId || !privateKey || !redirectUri) {
         throw new HttpError(
