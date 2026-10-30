@@ -56,6 +56,7 @@ import {
   getStoredIncomes,
 } from "../../utils/tricountStorage";
 import { getSavingsStrategy } from "../../utils/savingsStorage";
+import { useUser } from "../../contexts/UserContext";
 import {
   Badge,
   Button,
@@ -141,6 +142,18 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
 
   // ===== Intégration Tricount dans le modal de transactions =====
   const [tricountExpenses, setTricountExpenses] = useState<TricountExpense[]>([]);
+  const { currentUser, availableUsers } = useUser();
+  const effectiveUserId = userId || currentUser;
+  const strategy = useMemo(() => getSavingsStrategy(effectiveUserId), [effectiveUserId]);
+  const p1Name = strategy.household?.person1?.name || (availableUsers[0] || "Romain");
+  const p2Name =
+    strategy.household?.person2?.name ||
+    availableUsers.find((u) => u.toLowerCase() !== p1Name.toLowerCase()) ||
+    "Sophie";
+  const isP2 = effectiveUserId.trim().toLowerCase() === p2Name.toLowerCase();
+  const defaultPayer: TricountPayer = isP2 ? "person2" : "person1";
+  const defaultBeneficiary: TricountBeneficiary = isP2 ? "person2" : "person1";
+
   const [tricountIncomes, setTricountIncomes] = useState<TricountIncome[]>([]);
   const [selectedTxForTricount, setSelectedTxForTricount] = useState<Transaction | null>(null);
   const [matchedTricountItem, setMatchedTricountItem] = useState<TricountExpense | TricountIncome | null>(null);
@@ -151,8 +164,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
     date: "",
     label: "",
     amount: "",
-    payer: "person1" as TricountPayer,
-    beneficiary: "person1" as TricountBeneficiary,
+    payer: defaultPayer as TricountPayer,
+    beneficiary: defaultBeneficiary as TricountBeneficiary,
     splitMethod: "50_50" as TricountSplitMethod,
     pocketId: "unallocated",
     subPocketId: "",
@@ -207,8 +220,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         date: matched.date || t.date,
         label: matched.label || t.label || "",
         amount: String(matched.amount || Math.abs(t.amount)),
-        payer: isExp ? matched.payerPersonId : "person1",
-        beneficiary: !isExp ? matched.beneficiaryPersonId : "person1",
+        payer: isExp ? matched.payerPersonId : defaultPayer,
+        beneficiary: !isExp ? matched.beneficiaryPersonId : defaultBeneficiary,
         splitMethod: isExp ? matched.splitMethod : "50_50",
         pocketId: isExp ? matched.pocketId || "unallocated" : "unallocated",
         subPocketId: isExp ? matched.subPocketId || "" : "",
@@ -220,8 +233,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         date: t.date,
         label: t.label || "",
         amount: String(Math.abs(t.amount)),
-        payer: "person1",
-        beneficiary: "person1",
+        payer: defaultPayer,
+        beneficiary: defaultBeneficiary,
         splitMethod: "50_50",
         pocketId: "unallocated",
         subPocketId: "",
@@ -1166,8 +1179,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                 }
                 className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
               >
-                <option value="person1">Romain</option>
-                <option value="person2">Sophie</option>
+                <option value="person1">{p1Name}</option>
+                <option value="person2">{p2Name}</option>
                 <option value="shared">Commun</option>
               </select>
             </Field>
@@ -1185,8 +1198,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                     }
                     className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
                   >
-                    <option value="person1">Romain</option>
-                    <option value="person2">Sophie</option>
+                    <option value="person1">{p1Name}</option>
+                    <option value="person2">{p2Name}</option>
                   </select>
                 </Field>
 
@@ -1203,8 +1216,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                   >
                     <option value="50_50">50 / 50 (Équitable)</option>
                     <option value="proportional">Au prorata des revenus</option>
-                    <option value="100_person1">100% Romain (Perso)</option>
-                    <option value="100_person2">100% Sophie (Perso)</option>
+                    <option value="100_person1">100% {p1Name} (Perso)</option>
+                    <option value="100_person2">100% {p2Name} (Perso)</option>
                   </select>
                 </Field>
               </div>
