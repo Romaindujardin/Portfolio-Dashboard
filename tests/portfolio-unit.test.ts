@@ -655,3 +655,48 @@ describe("Marché — validation et résolution", () => {
     ).toMatchObject({ ticker: "AAPL", rank: 0 });
   });
 });
+
+describe("Patrimoine — comptes et quotes-parts joints (méthode Picsou)", () => {
+  it("un compte joint créé par Romain avec 50% Sophie est visible et consultable par Sophie", () => {
+    const db = new Database(":memory:");
+    initializePortfolioSchema(db);
+    const repo = new PortfolioRepository(db);
+
+    // Romain crée un compte joint
+    const account = repo.createAccount("Romain", {
+      name: "Compte Joint Bourso",
+      type: "CHECKING",
+      balance: 4000,
+    });
+
+    // Attribution des quotes-parts 50/50
+    repo.replaceOwnerships(account.id, "Romain", [
+      { ownerName: "Romain", sharePercent: 50 },
+      { ownerName: "Sophie", sharePercent: 50 },
+    ]);
+
+    // Romain voit le compte
+    const romainAccounts = repo.listAccounts("Romain");
+    expect(romainAccounts.some((a) => a.id === account.id)).toBe(true);
+
+    // Sophie voit également le compte joint
+    const sophieAccounts = repo.listAccounts("Sophie");
+    expect(sophieAccounts.some((a) => a.id === account.id)).toBe(true);
+
+    // Sophie peut obtenir les détails et ownerships du compte
+    expect(repo.getAccount(account.id, "Sophie")).toBeTruthy();
+    const ownerships = repo.listOwnerships(account.id, "Sophie");
+    expect(ownerships).toHaveLength(2);
+    expect(ownerships.find((o) => o.ownerName === "Sophie")?.sharePercent).toBe(50);
+
+    // Dans l'overview de Sophie, la part personnelle calculée reflète bien 50%
+    const sophieOverview = repo.getOverview("Sophie");
+    expect(sophieOverview.perOwner["Sophie"]).toBe(2000);
+    expect(sophieOverview.perOwner["Romain"]).toBe(2000);
+
+    // Un tiers isolé ne voit pas ce compte joint
+    expect(repo.listAccounts("Inconnu")).toHaveLength(0);
+    expect(repo.getAccount(account.id, "Inconnu")).toBeNull();
+  });
+});
+

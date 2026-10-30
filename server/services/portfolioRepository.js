@@ -214,15 +214,25 @@ export class PortfolioRepository {
 
   listAccounts(userId, { includeArchived = false } = {}) {
     const sql = includeArchived
-      ? "SELECT * FROM accounts WHERE user_id = ? ORDER BY type, name"
-      : "SELECT * FROM accounts WHERE user_id = ? AND is_archived = 0 ORDER BY type, name";
-    return this.db.prepare(sql).all(userId).map(mapAccount);
+      ? `SELECT DISTINCT a.* FROM accounts a
+         LEFT JOIN account_ownerships o ON o.account_id = a.id
+         WHERE a.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0)
+         ORDER BY a.type, a.name`
+      : `SELECT DISTINCT a.* FROM accounts a
+         LEFT JOIN account_ownerships o ON o.account_id = a.id
+         WHERE (a.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0)) AND a.is_archived = 0
+         ORDER BY a.type, a.name`;
+    return this.db.prepare(sql).all(userId, userId).map(mapAccount);
   }
 
   getAccount(id, userId) {
     const row = this.db
-      .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
-      .get(id, userId);
+      .prepare(
+        `SELECT DISTINCT a.* FROM accounts a
+         LEFT JOIN account_ownerships o ON o.account_id = a.id
+         WHERE a.id = ? AND (a.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0))`,
+      )
+      .get(id, userId, userId);
     return mapAccount(row);
   }
 
@@ -299,9 +309,12 @@ export class PortfolioRepository {
     }
     if (fields.length === 0) return this.getAccount(id, userId);
     fields.push("updated_at = ?");
-    values.push(nowIso(), id, userId);
+    values.push(nowIso(), id, userId, id, userId);
     this.db
-      .prepare(`UPDATE accounts SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`)
+      .prepare(
+        `UPDATE accounts SET ${fields.join(", ")}
+         WHERE id = ? AND (user_id = ? OR EXISTS (SELECT 1 FROM account_ownerships WHERE account_id = ? AND owner_name = ? AND share_percent > 0))`,
+      )
       .run(...values);
     return this.getAccount(id, userId);
   }
@@ -340,42 +353,47 @@ export class PortfolioRepository {
   // ─── Transactions ─────────────────────────────────────────────────────────
 
   listTransactions(accountId, userId, { from, to, limit = 500 } = {}) {
-    const clauses = ["account_id = ?", "user_id = ?"];
-    const values = [accountId, userId];
+    const clauses = [
+      "t.account_id = ?",
+      "(t.user_id = ? OR EXISTS (SELECT 1 FROM account_ownerships o WHERE o.account_id = t.account_id AND o.owner_name = ? AND o.share_percent > 0))",
+    ];
+    const values = [accountId, userId, userId];
     if (from) {
-      clauses.push("date >= ?");
+      clauses.push("t.date >= ?");
       values.push(from);
     }
     if (to) {
-      clauses.push("date <= ?");
+      clauses.push("t.date <= ?");
       values.push(to);
     }
     values.push(Math.min(Math.max(Number(limit) || 500, 1), 5000));
     return this.db
       .prepare(
-        `SELECT * FROM transactions WHERE ${clauses.join(" AND ")}
-         ORDER BY date DESC, created_at DESC LIMIT ?`,
+        `SELECT DISTINCT t.* FROM transactions t WHERE ${clauses.join(" AND ")}
+         ORDER BY t.date DESC, t.created_at DESC LIMIT ?`,
       )
       .all(...values)
       .map(mapTransaction);
   }
 
   listAllTransactions(userId, { from, to, limit = 2000 } = {}) {
-    const clauses = ["user_id = ?"];
-    const values = [userId];
+    const clauses = [
+      "(t.user_id = ? OR EXISTS (SELECT 1 FROM account_ownerships o WHERE o.account_id = t.account_id AND o.owner_name = ? AND o.share_percent > 0))",
+    ];
+    const values = [userId, userId];
     if (from) {
-      clauses.push("date >= ?");
+      clauses.push("t.date >= ?");
       values.push(from);
     }
     if (to) {
-      clauses.push("date <= ?");
+      clauses.push("t.date <= ?");
       values.push(to);
     }
     values.push(Math.min(Math.max(Number(limit) || 2000, 1), 10000));
     return this.db
       .prepare(
-        `SELECT * FROM transactions WHERE ${clauses.join(" AND ")}
-         ORDER BY date DESC, created_at DESC LIMIT ?`,
+        `SELECT DISTINCT t.* FROM transactions t WHERE ${clauses.join(" AND ")}
+         ORDER BY t.date DESC, t.created_at DESC LIMIT ?`,
       )
       .all(...values)
       .map(mapTransaction);
@@ -515,16 +533,26 @@ export class PortfolioRepository {
   listHoldings(accountId, userId) {
     return this.db
       .prepare(
-        "SELECT * FROM holdings WHERE account_id = ? AND user_id = ? ORDER BY name, ticker",
+        `SELECT DISTINCT h.* FROM holdings h
+         JOIN accounts a ON a.id = h.account_id
+         LEFT JOIN account_ownerships o ON o.account_id = a.id
+         WHERE h.account_id = ? AND (h.user_id = ? OR a.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0))
+         ORDER BY h.name`,
       )
-      .all(accountId, userId)
+      .all(accountId, userId, userId, userId)
       .map(mapHolding);
   }
 
   listAllHoldings(userId) {
     return this.db
-      .prepare("SELECT * FROM holdings WHERE user_id = ? ORDER BY account_id, name")
-      .all(userId)
+      .prepare(
+        `SELECT DISTINCT h.* FROM holdings h
+         JOIN accounts a ON a.id = h.account_id
+         LEFT JOIN account_ownerships o ON o.account_id = a.id
+         WHERE h.user_id = ? OR a.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0)
+         ORDER BY h.account_id, h.name`,
+      )
+      .all(userId, userId, userId)
       .map(mapHolding);
   }
 
@@ -806,16 +834,27 @@ export class PortfolioRepository {
 
   listProperties(userId) {
     return this.db
-      .prepare("SELECT * FROM properties WHERE user_id = ? ORDER BY created_at DESC")
-      .all(userId)
+      .prepare(
+        `SELECT DISTINCT p.* FROM properties p
+         LEFT JOIN accounts a ON a.id = p.account_id
+         LEFT JOIN account_ownerships o ON o.account_id = a.id
+         WHERE p.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0)
+         ORDER BY p.created_at DESC`,
+      )
+      .all(userId, userId)
       .map(mapProperty);
   }
 
   getProperty(id, userId) {
     return mapProperty(
       this.db
-        .prepare("SELECT * FROM properties WHERE id = ? AND user_id = ?")
-        .get(id, userId),
+        .prepare(
+          `SELECT DISTINCT p.* FROM properties p
+           LEFT JOIN accounts a ON a.id = p.account_id
+           LEFT JOIN account_ownerships o ON o.account_id = a.id
+           WHERE p.id = ? AND (p.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0))`,
+        )
+        .get(id, userId, userId),
     );
   }
 
@@ -1015,14 +1054,27 @@ export class PortfolioRepository {
 
   listLoans(userId) {
     return this.db
-      .prepare("SELECT * FROM loans WHERE user_id = ? ORDER BY created_at DESC")
-      .all(userId)
+      .prepare(
+        `SELECT DISTINCT l.* FROM loans l
+         LEFT JOIN accounts a ON a.id = l.account_id
+         LEFT JOIN account_ownerships o ON o.account_id = a.id
+         WHERE l.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0)
+         ORDER BY l.created_at DESC`,
+      )
+      .all(userId, userId)
       .map(mapLoan);
   }
 
   getLoan(id, userId) {
     return mapLoan(
-      this.db.prepare("SELECT * FROM loans WHERE id = ? AND user_id = ?").get(id, userId),
+      this.db
+        .prepare(
+          `SELECT DISTINCT l.* FROM loans l
+           LEFT JOIN accounts a ON a.id = l.account_id
+           LEFT JOIN account_ownerships o ON o.account_id = a.id
+           WHERE l.id = ? AND (l.user_id = ? OR (o.owner_name = ? AND o.share_percent > 0))`,
+        )
+        .get(id, userId, userId),
     );
   }
 
@@ -1111,23 +1163,25 @@ export class PortfolioRepository {
   listOwnerships(accountId, userId) {
     return this.db
       .prepare(
-        `SELECT o.* FROM account_ownerships o
+        `SELECT DISTINCT o.* FROM account_ownerships o
          JOIN accounts a ON a.id = o.account_id
-         WHERE o.account_id = ? AND a.user_id = ?
+         LEFT JOIN account_ownerships o2 ON o2.account_id = a.id
+         WHERE o.account_id = ? AND (a.user_id = ? OR (o2.owner_name = ? AND o2.share_percent > 0))
          ORDER BY o.share_percent DESC`,
       )
-      .all(accountId, userId)
+      .all(accountId, userId, userId)
       .map(mapOwnership);
   }
 
   listAllOwnerships(userId) {
     return this.db
       .prepare(
-        `SELECT o.* FROM account_ownerships o
+        `SELECT DISTINCT o.* FROM account_ownerships o
          JOIN accounts a ON a.id = o.account_id
-         WHERE a.user_id = ?`,
+         LEFT JOIN account_ownerships o2 ON o2.account_id = a.id
+         WHERE a.user_id = ? OR (o2.owner_name = ? AND o2.share_percent > 0)`,
       )
-      .all(userId)
+      .all(userId, userId)
       .map(mapOwnership);
   }
 
