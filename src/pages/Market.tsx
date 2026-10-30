@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import {
   Activity,
   ArrowDownRight,
@@ -85,20 +84,10 @@ const POPULAR_TICKERS = [
 type MainTab = "etf-lookthrough" | "indices" | "search";
 
 const Market: React.FC = () => {
-  const [searchParams] = useSearchParams();
   const { currentUser } = useUser();
   const { formatMoney } = useCurrency();
 
-  const [activeTab, setActiveTab] = useState<MainTab>(() => {
-    const tabParam = searchParams.get("tab") as MainTab | null;
-    if (tabParam && ["etf-lookthrough", "indices", "search"].includes(tabParam)) {
-      return tabParam;
-    }
-    if (searchParams.get("ticker")) {
-      return "search";
-    }
-    return "etf-lookthrough";
-  });
+  const [activeTab, setActiveTab] = useState<MainTab>("etf-lookthrough");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   // ─── 1. État du Look-Through ETF ──────────────────────────────────────────
@@ -187,20 +176,8 @@ const Market: React.FC = () => {
     void loadBreakdown();
     void loadCatalog();
     void loadIndices(false);
-
-    const tickerParam = searchParams.get("ticker");
-    const tabParam = searchParams.get("tab") as MainTab | null;
-    if (tabParam && ["etf-lookthrough", "indices", "search"].includes(tabParam)) {
-      setActiveTab(tabParam);
-    }
-    if (tickerParam) {
-      setActiveTab("search");
-      setSearchQuery(tickerParam);
-      void inspectInstrument(tickerParam, false);
-    } else {
-      void inspectInstrument("^FCHI", false);
-    }
-  }, [loadBreakdown, loadCatalog, loadIndices, inspectInstrument, searchParams]);
+    void inspectInstrument("^FCHI", false);
+  }, [loadBreakdown, loadCatalog, loadIndices, inspectInstrument]);
 
   // Recherche de symboles
   const handleSearch = async () => {
