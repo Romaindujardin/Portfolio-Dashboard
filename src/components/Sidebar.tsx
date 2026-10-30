@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutGrid,
@@ -78,6 +78,41 @@ const Sidebar: React.FC = () => {
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState("");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Fermer le menu utilisateur lors d'un clic extérieur, changement d'URL ou touche Échap
+  useEffect(() => {
+    if (!isUserMenuOpen) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isUserMenuOpen]);
+
+  useEffect(() => {
+    setIsUserMenuOpen(false);
+  }, [location.pathname]);
 
   // Sous-page(s) dépliée(s) : « Budget › Stratégie » s'ouvre automatiquement sur sa route
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -231,7 +266,7 @@ const Sidebar: React.FC = () => {
       <div className="mt-auto border-t border-[rgba(255,255,255,0.06)]">
         {/* User selector */}
         <div className="px-4 py-4">
-          <div className="relative">
+          <div className="relative" ref={userMenuRef}>
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
               className="flex items-center gap-3 w-full px-2 py-2.5 rounded-lg hover:bg-[rgba(255,255,255,0.04)] transition-all duration-200"
