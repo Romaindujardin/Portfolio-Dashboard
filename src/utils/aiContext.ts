@@ -8,7 +8,15 @@ import type {
   PocketCategory,
   PocketOwnership,
   SavingsPocket,
+  TricountExpense,
 } from "../types";
+import type {
+  Property,
+  Loan,
+  Quote,
+  PortfolioAccount,
+  PortfolioEtfBreakdown,
+} from "../types/portfolio";
 import {
   buildCashflowSeries,
   parseBankCsvTransactions,
@@ -31,24 +39,51 @@ import {
   calculateMonthlyBudgetSummary,
   formatMonthLabel,
   getCurrentMonthKey,
+  getExpensesForMonth,
+  getStoredExpenses,
+  getStoredIncomes,
+  isPlacementPocket,
 } from "./tricountStorage";
 import { getUserSettings } from "./userSettings";
+import {
+  getProperties,
+  getLoans,
+  getOverview,
+  getEtfBreakdown,
+  getMarketIndices,
+} from "../services/portfolioApi";
+import { getWealthHistory } from "./wealthHistory";
 
 // ===== Types publics =====
 
 export interface AiContextSelection {
-  /** Comptes, enveloppes (PEA, PEE, assurance vie...) et lignes associées. */
+  /** Comptes bancaires, d'investissement (PEA, CTO, PEE, Livrets) et lignes associées. */
   accounts: boolean;
+  /** Immobilier (biens, valorisations estimées) et crédits/emprunts (taux, mensualités, restant dû). */
+  properties_loans: boolean;
   /** Portefeuille crypto (wallets et actifs valorisés en €). */
   crypto: boolean;
-  /** Stratégie d'épargne, foyer, poches et réalité du mois en cours. */
+  /** Budget réel (Tricount) : dépenses du mois, catégories, équilibre des contributions du couple. */
+  budget: boolean;
+  /** Épargne & placements réels constatés : historique des versements réels vs objectifs. */
+  savings: boolean;
+  /** Stratégie d'épargne prévisionnelle : revenus du foyer, charges incompressibles, poches cibles. */
   strategy: boolean;
+  /** Look-Through ETF : décomposition sectorielle & géographique réelle des ETF du portefeuille. */
+  market_lookthrough: boolean;
+  /** Historique et performance du patrimoine net dans le temps (snapshots, tendance). */
+  history_performance: boolean;
 }
 
 export const DEFAULT_AI_CONTEXT_SELECTION: AiContextSelection = {
   accounts: true,
+  properties_loans: true,
   crypto: true,
+  budget: true,
+  savings: true,
   strategy: true,
+  market_lookthrough: true,
+  history_performance: true,
 };
 
 export interface AiContextMeta {
@@ -77,8 +112,13 @@ export interface AiContextResult {
 
 export interface AiContextPreview {
   accounts: string;
+  properties_loans: string;
   crypto: string;
+  budget: string;
+  savings: string;
   strategy: string;
+  market_lookthrough: string;
+  history_performance: string;
 }
 
 // ===== Formatage français (euros) =====
@@ -300,6 +340,91 @@ export const buildAccountsContext = async (
       : "Aucun compte ni ligne disponible (aucun relevé CSV importé).";
 
   return { text, sections: sectionCount, lines, bankAccounts, totalValue };
+};
+
+// ===== Immobilier & Emprunts =====
+
+export interface PropertiesAndLoansResult {
+  text: string;
+  properties: number;
+  loans: number;
+  totalNetValue: number;
+}
+
+export const buildPropertiesAndLoansContext = async (
+  userId: string,
+): Promise<PropertiesAndLoansResult> => {
+  let properties: Property[] = [];
+  let loans: Loan[] = [];
+  try {
+    const [p, l] = await Promise.all([
+      getProperties(userId).catch(() => []),
+      getLoans(userId).catch(() => []),
+    ]);
+    properties = p;
+    loans = l;
+  } catch {
+    // ignore
+  }
+
+  if (properties.length === 0 && loans.length === 0) {
+    return {
+      text: "Aucun bien immobilier ni emprunt enregistré dans le patrimoine.",
+      properties: 0,
+      loans: 0,
+      totalNetValue: 0,
+    };
+  }
+
+  const parts: string[] = [];
+  let totalPropertiesValue = 0;
+  let totalDebt = 0;
+
+  if (properties.length > 0) {
+    const pLines: string[] = [];
+    for (const prop of properties) {
+      const val = prop.estimatedValue ?? prop.purchasePrice ?? 0;
+      totalPropertiesValue += val;
+      const bits: string[] = [prop.name || "Bien immobilier"];
+      if (prop.city) bits.push(prop.city);
+      if (val > 0) bits.push(`estimation ${formatEur(val)}`);
+      if (prop.purchasePrice) bits.push(`achat ${formatEur(prop.purchasePrice)}`);
+      if (prop.rentalStatus) bits.push(`statut : ${prop.rentalStatus}`);
+      pLines.push(`- ${bits.join(" · ")}`);
+    }
+    parts.push(
+      `### Biens immobiliers (${properties.length} bien(s) · valeur estimée ${formatEur(totalPropertiesValue)})\n${pLines.join("\n")}`,
+    );
+  }
+
+  if (loans.length > 0) {
+    const lLines: string[] = [];
+    for (const loan of loans) {
+      const remaining = loan.remainingPrincipal ?? loan.initialAmount ?? 0;
+      totalDebt += remaining;
+      const bits: string[] = [loan.name || "Crédit"];
+      if (remaining > 0) bits.push(`capital restant dû ${formatEur(remaining)}`);
+      if (loan.initialAmount) bits.push(`montant initial ${formatEur(loan.initialAmount)}`);
+      if (loan.monthlyPayment) bits.push(`mensualité ${formatEur(loan.monthlyPayment)}/mois`);
+      if (loan.interestRate != null) bits.push(`taux ${formatPercent(loan.interestRate)}`);
+      lLines.push(`- ${bits.join(" · ")}`);
+    }
+    parts.push(
+      `### Emprunts et crédits en cours (${loans.length} prêt(s) · capital restant dû ${formatEur(totalDebt)})\n${lLines.join("\n")}`,
+    );
+  }
+
+  const netRealEstate = totalPropertiesValue - totalDebt;
+  parts.push(
+    `**Actif net immobilier personnel & foyer** : ${formatEur(netRealEstate)} (${formatEur(totalPropertiesValue)} d'actifs bruts - ${formatEur(totalDebt)} de dettes).`,
+  );
+
+  return {
+    text: parts.join("\n\n"),
+    properties: properties.length,
+    loans: loans.length,
+    totalNetValue: netRealEstate,
+  };
 };
 
 // ===== Portefeuille crypto =====
@@ -606,13 +731,263 @@ export const buildStrategyContext = (
   return { text: parts.join("\n\n"), pockets: pockets.length };
 };
 
+// ===== Suivi réel du budget (Tricount) =====
+
+export interface BudgetContextResult {
+  text: string;
+  count: number;
+}
+
+export const buildBudgetContext = (
+  userId: string,
+  monthKey: string = getCurrentMonthKey(),
+): BudgetContextResult => {
+  const expenses = getExpensesForMonth(monthKey);
+  const incomes = getStoredIncomes().filter((inc) => inc.month === monthKey);
+  const strategy = getSavingsStrategy(userId);
+  const summary = calculateMonthlyBudgetSummary(monthKey, strategy);
+
+  if (expenses.length === 0 && incomes.length === 0) {
+    return {
+      text: `Aucune dépense ni revenu saisi pour le mois de ${formatMonthLabel(monthKey)} (${monthKey}).`,
+      count: 0,
+    };
+  }
+
+  const parts: string[] = [];
+  parts.push(
+    `### Bilan du budget réel du foyer — ${formatMonthLabel(monthKey)} (${monthKey})`,
+  );
+  parts.push(`- Revenus réels perçus : ${formatEur(summary.totalIncome)}`);
+  parts.push(
+    `- Dépenses réelles courantes de vie : ${formatEur(summary.totalExpenses)} (${expenses.length} opération(s))`,
+  );
+  parts.push(
+    `- Reste à vivre / Capacité résiduelle : ${formatEur(summary.realSavingsAmount)} (${formatPercent(summary.realSavingsRate)} des revenus)`,
+  );
+  if (summary.totalPlacements > 0) {
+    parts.push(
+      `- Dont placements/investissements réalisés ce mois : ${formatEur(summary.totalPlacements)}`,
+    );
+  }
+
+  // Équilibre des contributions si couple
+  if (strategy.household?.enabled) {
+    const p1Name = strategy.household.person1?.name || "Personne 1";
+    const p2Name = strategy.household.person2?.name || "Personne 2";
+    parts.push(
+      `- Dépenses payées : ${p1Name} ${formatEur(summary.p1Expenses)} · ${p2Name} ${formatEur(summary.p2Expenses)}`,
+    );
+    if (summary.balanceSummary) {
+      parts.push(
+        `- Équilibre des comptes : ${summary.balanceSummary.statusMessage || "Comptes à l'équilibre"}`,
+      );
+    }
+  }
+
+  // Les 5 plus grosses dépenses du mois
+  const topExpenses = [...expenses]
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
+  if (topExpenses.length > 0) {
+    const expLines = topExpenses.map(
+      (e) =>
+        `- ${e.label || "Dépense"} : ${formatEur(e.amount)} (${e.date || "date non précisée"}${e.pocketName ? ` · poche « ${e.pocketName} »` : ""})`,
+    );
+    parts.push(`#### Principales dépenses du mois :\n${expLines.join("\n")}`);
+  }
+
+  return {
+    text: parts.join("\n\n"),
+    count: expenses.length,
+  };
+};
+
+// ===== Épargne & Placements réels =====
+
+export interface SavingsRealContextResult {
+  text: string;
+  count: number;
+  total: number;
+}
+
+export const buildSavingsRealContext = (
+  userId: string,
+): SavingsRealContextResult => {
+  const allExpenses = getStoredExpenses();
+  const placements = allExpenses.filter(
+    (e) => e.nature === "placement" || isPlacementPocket(undefined),
+  );
+
+  if (placements.length === 0) {
+    return {
+      text: "Aucun versement d'épargne ou placement réel n'a encore été enregistré dans l'outil.",
+      count: 0,
+      total: 0,
+    };
+  }
+
+  const totalPlacements = placements.reduce(
+    (s, p) => s + (p.amount || 0),
+    0,
+  );
+  const parts: string[] = [];
+  parts.push(`### Suivi concret des versements d'épargne & placements`);
+  parts.push(
+    `- Total cumulé des versements enregistrés : ${formatEur(totalPlacements)} (${placements.length} versement(s))`,
+  );
+
+  const byPocket = new Map<string, number>();
+  for (const p of placements) {
+    const key = p.pocketName || "Poche d'épargne";
+    byPocket.set(key, (byPocket.get(key) || 0) + (p.amount || 0));
+  }
+
+  if (byPocket.size > 0) {
+    const pLines: string[] = [];
+    for (const [name, amt] of byPocket.entries()) {
+      pLines.push(`- Poche « ${name} » : ${formatEur(amt)} versés`);
+    }
+    parts.push(
+      `#### Répartition constatée par poche :\n${pLines.join("\n")}`,
+    );
+  }
+
+  return {
+    text: parts.join("\n\n"),
+    count: placements.length,
+    total: totalPlacements,
+  };
+};
+
+// ===== Look-Through ETF & Marché (méthode Picsou) =====
+
+export interface MarketLookthroughResult {
+  text: string;
+  etfs: number;
+}
+
+export const buildMarketLookthroughContext = async (
+  userId: string,
+): Promise<MarketLookthroughResult> => {
+  let breakdown: PortfolioEtfBreakdown | null = null;
+  let indices: Quote[] = [];
+  try {
+    [breakdown, indices] = await Promise.all([
+      getEtfBreakdown(userId).catch(() => null),
+      getMarketIndices().catch(() => []),
+    ]);
+  } catch {
+    // ignore
+  }
+
+  const parts: string[] = [];
+  parts.push(
+    "### Décomposition Look-Through des ETF du portefeuille (méthode Picsou)",
+  );
+
+  if (breakdown && breakdown.etfs && breakdown.etfs.length > 0) {
+    parts.push(
+      `- ETF détectés dans vos portefeuilles : ${breakdown.etfs
+        .map((e) => `${e.name} (${e.ticker}) · valeur ${formatEur(e.value)}`)
+        .join(", ")}`,
+    );
+    if (breakdown.sectors && breakdown.sectors.length > 0) {
+      const topS = breakdown.sectors
+        .slice(0, 6)
+        .map((s) => `${s.sector} (${formatPercent(s.weight)})`);
+      parts.push(`- Expositions sectorielles réelles : ${topS.join(", ")}`);
+    }
+    if (breakdown.countries && breakdown.countries.length > 0) {
+      const topC = breakdown.countries
+        .slice(0, 6)
+        .map((c) => `${c.country} (${formatPercent(c.weight)})`);
+      parts.push(`- Expositions géographiques réelles : ${topC.join(", ")}`);
+    }
+    if (breakdown.topHoldings && breakdown.topHoldings.length > 0) {
+      const topH = breakdown.topHoldings
+        .slice(0, 5)
+        .map((h) => `${h.name} (${formatPercent(h.weight)})`);
+      parts.push(`- Principales entreprises sous-jacentes : ${topH.join(", ")}`);
+    }
+  } else {
+    parts.push(
+      "- Aucun ETF avec décomposition sectorielle/géographique n'est actuellement détecté dans vos comptes.",
+    );
+  }
+
+  if (indices.length > 0) {
+    const indLines = indices
+      .slice(0, 8)
+      .map(
+        (idx) =>
+          `${idx.name || idx.ticker} : ${formatEur(idx.price)} (${
+            idx.changePercent != null
+              ? (idx.changePercent >= 0 ? "+" : "") + formatPercent(idx.changePercent)
+              : "0,0 %"
+          })`,
+      );
+    parts.push(
+      `#### Indices de marché mondiaux en direct :\n${indLines
+        .map((l) => `- ${l}`)
+        .join("\n")}`,
+    );
+  }
+
+  return {
+    text: parts.join("\n\n"),
+    etfs: breakdown?.etfs?.length || 0,
+  };
+};
+
+// ===== Historique du patrimoine net =====
+
+export interface HistoryPerformanceResult {
+  text: string;
+  snapshots: number;
+}
+
+export const buildHistoryPerformanceContext = (
+  userId: string,
+): HistoryPerformanceResult => {
+  const snapshots = getWealthHistory(userId);
+  if (snapshots.length === 0) {
+    return {
+      text: "Historique du patrimoine net : aucun relevé journalier enregistré pour le moment.",
+      snapshots: 0,
+    };
+  }
+
+  const first = snapshots[0];
+  const last = snapshots[snapshots.length - 1];
+  const diff = last.v - first.v;
+  const pct = first.v > 0 ? (diff / first.v) * 100 : 0;
+
+  const minV = Math.min(...snapshots.map((s) => s.v));
+  const maxV = Math.max(...snapshots.map((s) => s.v));
+
+  const parts: string[] = [
+    "### Historique et tendance du patrimoine net",
+    `- Nombre de relevés enregistrés : ${snapshots.length} jour(s)`,
+    `- Premier relevé : ${formatEur(first.v)} (${first.t.slice(0, 10)})`,
+    `- Dernier relevé : ${formatEur(last.v)} (${last.t.slice(0, 10)})`,
+    `- Évolution globale constatée : ${formatSignedEur(diff)} (${pct >= 0 ? "+" : ""}${formatPercent(pct)})`,
+    `- Record historique (ATH) : ${formatEur(maxV)} · Point bas : ${formatEur(minV)}`,
+  ];
+
+  return {
+    text: parts.join("\n"),
+    snapshots: snapshots.length,
+  };
+};
+
 // ===== Orchestrateur =====
 
 const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 export const collectAiContext = async (
   userId: string,
-  selection: AiContextSelection = DEFAULT_AI_CONTEXT_SELECTION,
+  selection: Partial<AiContextSelection> = DEFAULT_AI_CONTEXT_SELECTION,
   monthKey: string = getCurrentMonthKey(),
 ): Promise<AiContextResult> => {
   const blocks: string[] = [
@@ -629,7 +1004,9 @@ export const collectAiContext = async (
     monthKey,
   };
 
-  if (selection.accounts) {
+  const isEnabled = (key: keyof AiContextSelection) => selection[key] === true;
+
+  if (isEnabled("accounts")) {
     const accounts = await buildAccountsContext(userId);
     blocks.push(`## COMPTES, ENVELOPPES ET LIGNES\n${accounts.text}`);
     meta.sections += accounts.sections;
@@ -638,7 +1015,12 @@ export const collectAiContext = async (
     meta.totalValue += accounts.totalValue;
   }
 
-  if (selection.crypto) {
+  if (isEnabled("properties_loans")) {
+    const immo = await buildPropertiesAndLoansContext(userId);
+    blocks.push(`## IMMOBILIER & EMPRUNTS\n${immo.text}`);
+  }
+
+  if (isEnabled("crypto")) {
     const crypto = await buildCryptoContext(userId);
     blocks.push(`## PORTEFEUILLE CRYPTO\n${crypto.text}`);
     meta.wallets += crypto.wallets;
@@ -646,13 +1028,36 @@ export const collectAiContext = async (
     meta.totalValue += crypto.totalValue;
   }
 
-  if (selection.strategy) {
+  if (isEnabled("budget")) {
+    const budget = buildBudgetContext(userId, monthKey);
+    blocks.push(`## BUDGET RÉEL DU FOYER\n${budget.text}`);
+  }
+
+  if (isEnabled("savings")) {
+    const savings = buildSavingsRealContext(userId);
+    blocks.push(`## ÉPARGNE & PLACEMENTS RÉELS\n${savings.text}`);
+  }
+
+  if (isEnabled("strategy")) {
     const strategy = buildStrategyContext(userId, monthKey);
     blocks.push(`## STRATÉGIE D'ÉPARGNE\n${strategy.text}`);
     meta.pockets += strategy.pockets;
   }
 
-  if (!selection.accounts && !selection.crypto && !selection.strategy) {
+  if (isEnabled("market_lookthrough")) {
+    const market = await buildMarketLookthroughContext(userId);
+    blocks.push(
+      `## MARCHÉ & DÉCOMPOSITION ETF (LOOK-THROUGH)\n${market.text}`,
+    );
+  }
+
+  if (isEnabled("history_performance")) {
+    const history = buildHistoryPerformanceContext(userId);
+    blocks.push(`## HISTORIQUE DU PATRIMOINE NET\n${history.text}`);
+  }
+
+  const hasAny = Object.values(selection).some((v) => v === true);
+  if (!hasAny) {
     blocks.push("(Aucune donnée n'a été jointe à la question.)");
   }
 
@@ -664,14 +1069,32 @@ export const getAiContextPreview = async (
   userId: string,
 ): Promise<AiContextPreview> => {
   let accounts = "Comptes & lignes";
+  let properties_loans = "Immobilier & emprunts";
   let crypto = "Portefeuille crypto";
+  let budget = "Budget réel Tricount";
+  let savings = "Épargne & versements";
   let strategy = "Stratégie d'épargne";
+  let market_lookthrough = "Look-Through ETF";
+  let history_performance = "Historique patrimoine";
 
   try {
     const settings = getUserSettings(userId);
     accounts = `${settings.accountSections.length} enveloppe(s) configurée(s)`;
   } catch (error) {
     console.warn("Aperçu IA : comptes indisponibles", error);
+  }
+
+  try {
+    const [p, l] = await Promise.all([
+      getProperties(userId).catch(() => []),
+      getLoans(userId).catch(() => []),
+    ]);
+    properties_loans =
+      p.length > 0 || l.length > 0
+        ? `${p.length} bien(s) · ${l.length} prêt(s)`
+        : "Aucun bien ou prêt";
+  } catch (error) {
+    console.warn("Aperçu IA : immo indisponible", error);
   }
 
   try {
@@ -686,11 +1109,59 @@ export const getAiContextPreview = async (
   }
 
   try {
+    const currentMonth = getCurrentMonthKey();
+    const exp = getExpensesForMonth(currentMonth);
+    const totalExp = exp.reduce((s, e) => s + (e.amount || 0), 0);
+    budget = `${exp.length} dépense(s) (${formatEur(totalExp)})`;
+  } catch (error) {
+    console.warn("Aperçu IA : budget indisponible", error);
+  }
+
+  try {
+    const allExp = getStoredExpenses();
+    const placements = allExp.filter(
+      (e) => e.nature === "placement" || isPlacementPocket(undefined),
+    );
+    const totalPlac = placements.reduce((s, p) => s + (p.amount || 0), 0);
+    savings = `${placements.length} versement(s) (${formatEur(totalPlac)})`;
+  } catch (error) {
+    console.warn("Aperçu IA : épargne indisponible", error);
+  }
+
+  try {
     const s = getSavingsStrategy(userId);
     strategy = `${s.pockets.length} poche(s) · ${s.incomes.length} revenu(s)`;
   } catch (error) {
     console.warn("Aperçu IA : stratégie indisponible", error);
   }
 
-  return { accounts, crypto, strategy };
+  try {
+    const breakdown = await getEtfBreakdown(userId).catch(() => null);
+    const etfCount = breakdown?.etfs?.length || 0;
+    market_lookthrough =
+      etfCount > 0 ? `${etfCount} ETF analysé(s)` : "Indices & ETF marché";
+  } catch (error) {
+    console.warn("Aperçu IA : look-through indisponible", error);
+  }
+
+  try {
+    const history = getWealthHistory(userId);
+    history_performance =
+      history.length > 0
+        ? `${history.length} relevé(s) journalier(s)`
+        : "Aucun relevé";
+  } catch (error) {
+    console.warn("Aperçu IA : historique indisponible", error);
+  }
+
+  return {
+    accounts,
+    properties_loans,
+    crypto,
+    budget,
+    savings,
+    strategy,
+    market_lookthrough,
+    history_performance,
+  };
 };

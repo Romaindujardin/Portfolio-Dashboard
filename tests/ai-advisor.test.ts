@@ -21,7 +21,18 @@ import {
   formatPercent,
   formatSignedEur,
   getAiContextPreview,
+  buildPropertiesAndLoansContext,
+  buildBudgetContext,
+  buildSavingsRealContext,
+  buildMarketLookthroughContext,
+  buildHistoryPerformanceContext,
 } from "../src/utils/aiContext";
+import {
+  simulateCompoundInterest,
+  calculateRebalancing,
+  executeAdvisorTool,
+  ADVISOR_TOOL_DECLARATIONS,
+} from "../src/utils/aiTools";
 import {
   askGeminiAdvisor,
   buildAdvisorSystemPrompt,
@@ -654,5 +665,194 @@ describe("storage wallets (rappel de cohérence)", () => {
     const wallets = await getStoredWallets(USER);
     expect(wallets).toHaveLength(1);
     expect(wallets[0].assets.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("aiTools — outils et simulations financières", () => {
+  it("déclare les 6 outils avec schéma JSON complet", () => {
+    expect(ADVISOR_TOOL_DECLARATIONS).toHaveLength(6);
+    const names = ADVISOR_TOOL_DECLARATIONS.map((t) => t.name);
+    expect(names).toContain("search_market_asset");
+    expect(names).toContain("get_asset_price_quote");
+    expect(names).toContain("get_etf_lookthrough");
+    expect(names).toContain("get_market_indices");
+    expect(names).toContain("simulate_compound_interest");
+    expect(names).toContain("calculate_rebalancing");
+  });
+
+  it("simulateCompoundInterest calcule les intérêts composés avec exactitude", () => {
+    const result = simulateCompoundInterest(10000, 300, 7, 10);
+    expect(result.initialCapital).toBe(10000);
+    expect(result.monthlyContribution).toBe(300);
+    expect(result.years).toBe(10);
+    expect(result.totalInvested).toBe(10000 + 300 * 12 * 10); // 46 000 €
+    expect(result.finalCapital).toBeGreaterThan(65000); // Intérêts composés à 7%
+    expect(result.totalInterest).toBe(result.finalCapital - result.totalInvested);
+    expect(result.milestones.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("calculateRebalancing génère les ordres d'achat et de vente exacts", () => {
+    const holdings = [
+      { name: "MSCI World", currentAmount: 8000 },
+      { name: "Emerging Markets", currentAmount: 2000 },
+    ];
+    const target = [
+      { name: "MSCI World", targetPercent: 70 },
+      { name: "Emerging Markets", targetPercent: 30 },
+    ];
+    // Total = 10 000 €. Cible World = 7 000 € (Vendre 1000 €), Emerging = 3 000 € (Acheter 1000 €)
+    const result = calculateRebalancing(holdings, target, 0);
+    expect(result.totalCurrentValue).toBe(10000);
+    const worldAction = result.actions.find((a) => a.name === "MSCI World")!;
+    const emAction = result.actions.find((a) => a.name === "Emerging Markets")!;
+    expect(worldAction.action).toBe("VENTE");
+    expect(worldAction.differenceEur).toBe(-1000);
+    expect(emAction.action).toBe("ACHAT");
+    expect(emAction.differenceEur).toBe(1000);
+  });
+
+  it("executeAdvisorTool exécute les calculs et gère les erreurs", async () => {
+    const sim = await executeAdvisorTool(
+      "simulate_compound_interest",
+      { initialCapital: 5000, monthlyContribution: 200, annualReturnPercent: 8, years: 5 },
+      USER,
+    );
+    expect(sim.finalCapital).toBeGreaterThan(5000 + 200 * 60);
+
+    const unknown = await executeAdvisorTool("unknown_tool", {}, USER);
+    expect(unknown.error).toContain("inconnu");
+  });
+});
+
+describe("geminiAI — boucle autonome de Function Calling", () => {
+  it("exécute un tool call de Gemini puis renvoie la synthèse finale", async () => {
+    seedUser();
+    let callIndex = 0;
+    const toolEvents: string[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        callIndex++;
+        // Premier tour : Gemini demande l'outil simulate_compound_interest
+        if (callIndex === 1) {
+          return new Response(
+            JSON.stringify({
+              candidates: [
+                {
+                  content: {
+                    parts: [
+                      {
+                        functionCall: {
+                          name: "simulate_compound_interest",
+                          args: {
+                            initialCapital: 10000,
+                            monthlyContribution: 500,
+                            annualReturnPercent: 7,
+                            years: 10,
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
+        // Deuxième tour : Gemini reçoit le résultat et formule sa recommandation finale
+        const body = JSON.parse(String(init?.body));
+        expect(body.contents.length).toBeGreaterThan(2);
+
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: "Avec 500 €/mois à 7 %, votre capital projeté atteindra plus de **100 000 €** au bout de 10 ans.",
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+
+    const answer = await askGeminiAdvisor(
+      {
+        username: USER,
+        contextText: "contexte",
+        history: [],
+        question: "Combien j'aurai dans 10 ans avec 500 € par mois ?",
+      },
+      {
+        onToolCall: ({ name }) => toolEvents.push(`call:${name}`),
+        onToolResult: ({ name }) => toolEvents.push(`result:${name}`),
+      },
+    );
+
+    expect(answer).toContain("100 000 €");
+    expect(toolEvents).toEqual([
+      "call:simulate_compound_interest",
+      "result:simulate_compound_interest",
+    ]);
+  });
+});
+
+describe("aiContext — nouveaux modules de vision totale 360°", () => {
+  it("buildPropertiesAndLoansContext renvoie une structure claire", async () => {
+    const res = await buildPropertiesAndLoansContext(USER);
+    expect(typeof res.text).toBe("string");
+    expect(res.properties).toBeGreaterThanOrEqual(0);
+    expect(res.loans).toBeGreaterThanOrEqual(0);
+  });
+
+  it("buildBudgetContext analyse les dépenses réelles et le reste à vivre", () => {
+    seedUser();
+    const res = buildBudgetContext(USER, MONTH);
+    expect(res.text).toContain("Bilan du budget réel");
+    expect(res.text).toContain("Revenus réels perçus");
+    expect(res.text).toContain("Dépenses réelles courantes");
+  });
+
+  it("buildSavingsRealContext suit les placements enregistrés", () => {
+    seedUser();
+    const res = buildSavingsRealContext(USER);
+    expect(res.text).toContain("versements");
+  });
+
+  it("buildHistoryPerformanceContext résume l'historique du patrimoine net", () => {
+    localStorage.setItem(
+      `wealth_history_${USER}`,
+      JSON.stringify([
+        { t: "2026-01-01T00:00:00Z", v: 50000 },
+        { t: "2026-10-01T00:00:00Z", v: 65000 },
+      ]),
+    );
+    const res = buildHistoryPerformanceContext(USER);
+    expect(res.text).toContain("Historique et tendance");
+    expect(res.text).toContain("50 000,00 €");
+    expect(res.text).toContain("65 000,00 €");
+    expect(res.snapshots).toBe(2);
+  });
+
+  it("getAiContextPreview fournit un aperçu pour les 8 modules", async () => {
+    seedUser();
+    const preview = await getAiContextPreview(USER);
+    expect(preview.accounts).toBeDefined();
+    expect(preview.properties_loans).toBeDefined();
+    expect(preview.crypto).toBeDefined();
+    expect(preview.budget).toBeDefined();
+    expect(preview.savings).toBeDefined();
+    expect(preview.strategy).toBeDefined();
+    expect(preview.market_lookthrough).toBeDefined();
+    expect(preview.history_performance).toBeDefined();
   });
 });

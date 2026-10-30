@@ -1,7 +1,11 @@
 // Conseiller IA (Gemini) : envoie la question de l'utilisateur avec le contexte
-// patrimonial (comptes, lignes, crypto, stratégie) en systemInstruction,
-// puis gère la conversation multi-tours.
+// patrimonial complet en systemInstruction, dispose d'outils d'analyse de marché
+// et de calcul financier, puis gère la conversation multi-tours.
 import { getGeminiApiKey } from "./userSettings";
+import {
+  ADVISOR_TOOL_DECLARATIONS,
+  executeAdvisorTool,
+} from "./aiTools";
 
 export type AdvisorRole = "user" | "assistant";
 
@@ -25,6 +29,12 @@ export interface AskAdvisorOptions {
   models?: string[];
   /** Délais de backoff entre deux tentatives sur un même modèle. Défaut : [900]. */
   retryDelaysMs?: number[];
+  /** Activer les outils de marché et calculs (function calling). Défaut : true. */
+  enableTools?: boolean;
+  /** Notification lors de l'appel d'un outil par le modèle. */
+  onToolCall?: (tool: { name: string; args: Record<string, any> }) => void;
+  /** Notification lorsque le résultat de l'outil est disponible. */
+  onToolResult?: (tool: { name: string; result: any }) => void;
 }
 
 export const ADVISOR_MODEL = "gemini-2.5-flash";
@@ -96,6 +106,7 @@ export const buildAdvisorSystemPrompt = (contextText: string): string =>
     "5. Sois concret : pour un rééquilibrage, donne des ordres de grandeur (montants en € et pourcentages) calculés à partir des données fournies.",
     "6. Si la demande est ambiguë, commence par 1 à 3 questions de clarification avant de conclure.",
     "7. Pense à la cohérence d'ensemble entre les poches réelles du mois, la stratégie d'épargne et les enveloppes d'investissement.",
+    "8. Tu disposes d'outils (tools) intégrés pour rechercher des cours d'actifs en direct (get_asset_price_quote, search_market_asset), analyser la décomposition réelle sous-jacente des ETF (get_etf_lookthrough), consulter les indices mondiaux (get_market_indices), simuler des intérêts composés avec précision (simulate_compound_interest) et calculer des rééquilibrages de portefeuille (calculate_rebalancing). Utilise-les activement dès que pertinent.",
   ].join("\n");
 
 const extractCandidateText = (data: unknown): string => {
@@ -114,18 +125,26 @@ const extractCandidateText = (data: unknown): string => {
     .trim();
 };
 
-export const askGeminiAdvisor = async ({
-  username,
-  contextText,
-  history,
-  question,
-}: AskAdvisorParams, options: AskAdvisorOptions = {}): Promise<string> => {
+export const askGeminiAdvisor = async (
+  {
+    username,
+    contextText,
+    history,
+    question,
+  }: AskAdvisorParams,
+  options: AskAdvisorOptions = {},
+): Promise<string> => {
   const trimmedQuestion = (question || "").trim();
   if (!trimmedQuestion) {
     throw new Error("Votre question est vide.");
   }
 
-  const contents = [
+  const enableTools = options.enableTools !== false;
+  const tools = enableTools
+    ? [{ functionDeclarations: ADVISOR_TOOL_DECLARATIONS }]
+    : undefined;
+
+  const currentContents: any[] = [
     ...history
       .filter((m) => m.text && m.text.trim())
       .map((m) => ({
@@ -135,19 +154,6 @@ export const askGeminiAdvisor = async ({
     { role: "user", parts: [{ text: trimmedQuestion }] },
   ];
 
-  const body = {
-    systemInstruction: {
-      parts: [{ text: buildAdvisorSystemPrompt(contextText) }],
-    },
-    contents,
-    generationConfig: {
-      temperature: 0.7,
-      // 8192 = maximum sûr commun aux trois modèles de la cascade
-      // (gemini-2.0-flash plafonne à 8192 tokens de sortie).
-      maxOutputTokens: 8192,
-    },
-  };
-
   const models =
     options.models && options.models.length > 0
       ? options.models
@@ -155,52 +161,124 @@ export const askGeminiAdvisor = async ({
   const retryDelays = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 
   const requestModel = async (url: string): Promise<string> => {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let loopCount = 0;
+    const maxIterations = 5;
 
-    if (!response.ok) {
-      let detail = "";
-      try {
-        detail = (await response.text()).slice(0, 300);
-      } catch {
-        detail = "";
+    while (loopCount < maxIterations) {
+      loopCount++;
+
+      const body: any = {
+        systemInstruction: {
+          parts: [{ text: buildAdvisorSystemPrompt(contextText) }],
+        },
+        contents: currentContents,
+        generationConfig: {
+          temperature: 0.7,
+          // 8192 = maximum sûr commun aux trois modèles de la cascade
+          maxOutputTokens: 8192,
+        },
+      };
+
+      if (tools) {
+        body.tools = tools;
       }
-      const error = new Error(
-        buildHttpErrorMessage(response.status, detail),
-      ) as GeminiHttpError;
-      error.status = response.status;
-      throw error;
-    }
 
-    const data: unknown = await response.json();
-    const finishReason = (
-      (data as { candidates?: Array<{ finishReason?: string }> } | null)
-        ?.candidates?.[0]?.finishReason || ""
-    ).toUpperCase();
-    const text = extractCandidateText(data);
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-    if (!text) {
-      const blockReason = (
-        data as { promptFeedback?: { blockReason?: string } } | null
-      )?.promptFeedback?.blockReason;
-      if (finishReason === "SAFETY" || blockReason) {
+      if (!response.ok) {
+        let detail = "";
+        try {
+          detail = (await response.text()).slice(0, 300);
+        } catch {
+          detail = "";
+        }
+        const error = new Error(
+          buildHttpErrorMessage(response.status, detail),
+        ) as GeminiHttpError;
+        error.status = response.status;
+        throw error;
+      }
+
+      const data: any = await response.json();
+      const candidate = data?.candidates?.[0];
+      const finishReason = (candidate?.finishReason || "").toUpperCase();
+      const parts = candidate?.content?.parts || [];
+
+      // Vérifier si Gemini demande d'exécuter un outil (Function Call)
+      const functionCallPart = parts.find(
+        (p: any) => p && typeof p === "object" && p.functionCall,
+      );
+
+      if (functionCallPart && functionCallPart.functionCall) {
+        const { name, args } = functionCallPart.functionCall;
+        const safeArgs = args || {};
+
+        options.onToolCall?.({ name, args: safeArgs });
+
+        let result: any = null;
+        try {
+          result = await executeAdvisorTool(name, safeArgs, username);
+        } catch (toolErr) {
+          result = {
+            error:
+              toolErr instanceof Error
+                ? toolErr.message
+                : "Erreur lors de l'exécution de l'outil.",
+          };
+        }
+
+        options.onToolResult?.({ name, result });
+
+        // Ajouter l'appel et le résultat dans la conversation multi-tours
+        currentContents.push({
+          role: "model",
+          parts: [{ functionCall: functionCallPart.functionCall }],
+        });
+        currentContents.push({
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                name,
+                response: { name, content: result },
+              },
+            },
+          ],
+        });
+
+        // Poursuit la boucle pour laisser Gemini formuler sa réponse avec le résultat
+        continue;
+      }
+
+      // Réponse textuelle finale
+      const text = extractCandidateText(data);
+
+      if (!text) {
+        const blockReason = data?.promptFeedback?.blockReason;
+        if (finishReason === "SAFETY" || blockReason) {
+          throw new Error(
+            "La réponse a été bloquée par les filtres de sécurité de Gemini. Reformulez votre question.",
+          );
+        }
         throw new Error(
-          "La réponse a été bloquée par les filtres de sécurité de Gemini. Reformulez votre question.",
+          "Gemini n'a renvoyé aucune réponse exploitable. Réessayez dans un instant.",
         );
       }
-      throw new Error(
-        "Gemini n'a renvoyé aucune réponse exploitable. Réessayez dans un instant.",
-      );
+
+      if (finishReason === "MAX_TOKENS") {
+        return `${text}\n\n---\n⚠️ Réponse tronquée : la limite de longueur du modèle a été atteinte. Répondez « continue » pour obtenir la suite.`;
+      }
+
+      return text;
     }
 
-    if (finishReason === "MAX_TOKENS") {
-      return `${text}\n\n---\n⚠️ Réponse tronquée : la limite de longueur du modèle a été atteinte. Répondez « continue » pour obtenir la suite.`;
-    }
-
-    return text;
+    throw new Error(
+      "Limite d'itérations d'outils atteinte sans réponse finale.",
+    );
   };
 
   // Cascade de modèles : en cas de surcharge (503/429...), on réessaie le même

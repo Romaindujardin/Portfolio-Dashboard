@@ -1,22 +1,29 @@
 // Conseiller IA : l'utilisateur joint ses comptes, ses lignes, son portefeuille
-// crypto et sa stratégie d'épargne, puis pose une question libre à Gemini
-// (projet immobilier, rééquilibrage, fiscalité, capacité d'épargne...).
+// crypto, son immobilier, son budget réel, ses placements réels, sa stratégie
+// et l'analyse look-through de ses ETF. L'IA dispose d'outils (tools) en direct
+// pour interroger les cours, décomposer des ETF, simuler des placements et rééquilibrer.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
+  BarChart3,
+  Building2,
   Check,
+  Clock,
   Coins,
   Copy,
   Database,
   Landmark,
   Loader2,
   PiggyBank,
+  Receipt,
   RotateCcw,
   Send,
   Sparkles,
-  X,
+  TrendingUp,
   User,
+  Wrench,
+  X,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import { useCurrency, formatMoney } from "../contexts/CurrencyContext";
@@ -51,8 +58,13 @@ const loadSelection = (username: string): AiContextSelection => {
     const parsed = JSON.parse(raw) as Partial<AiContextSelection>;
     return {
       accounts: parsed.accounts !== false,
+      properties_loans: parsed.properties_loans !== false,
       crypto: parsed.crypto !== false,
+      budget: parsed.budget !== false,
+      savings: parsed.savings !== false,
       strategy: parsed.strategy !== false,
+      market_lookthrough: parsed.market_lookthrough !== false,
+      history_performance: parsed.history_performance !== false,
     };
   } catch {
     return { ...DEFAULT_AI_CONTEXT_SELECTION };
@@ -89,8 +101,13 @@ const loadConversation = (username: string): StoredConversation | null => {
       messages,
       selection: {
         accounts: parsed?.selection?.accounts !== false,
+        properties_loans: parsed?.selection?.properties_loans !== false,
         crypto: parsed?.selection?.crypto !== false,
+        budget: parsed?.selection?.budget !== false,
+        savings: parsed?.selection?.savings !== false,
         strategy: parsed?.selection?.strategy !== false,
+        market_lookthrough: parsed?.selection?.market_lookthrough !== false,
+        history_performance: parsed?.selection?.history_performance !== false,
       },
     };
   } catch {
@@ -121,11 +138,11 @@ const clearStoredConversation = (username: string): void => {
 };
 
 const QUESTION_PRESETS = [
-  "J'aimerais acheter une maison d'ici 10 ans : comment m'y préparer ?",
-  "Je veux réduire mon exposition à l'Europe, comment rééquilibrer mes investissements ?",
-  "Comment améliorer ma capacité d'épargne mensuelle ?",
-  "Mon allocation entre PEA, PEE et assurance vie est-elle optimale ?",
-  "Suis-je suffisamment diversifié entre mes différents actifs ?",
+  "Vers quoi devrais-je investir mon épargne résiduelle mensuelle ?",
+  "Quelle est mon exposition réelle à la Tech US et à l'Europe à travers mes ETF ?",
+  "Simule un versement de 300 €/mois à 7% sur 15 ans avec mon capital actuel.",
+  "Analyse mon budget réel de ce mois et dis-moi si je tiens mes objectifs de sécurité.",
+  "Comment me conseilles-tu d'arbitrer mon patrimoine pour acheter un bien d'ici 10 ans ?",
 ];
 
 const summarizeContext = (meta: AiContextMeta): string => {
@@ -135,7 +152,7 @@ const summarizeContext = (meta: AiContextMeta): string => {
   if (meta.wallets > 0) bits.push(`${meta.wallets} wallet(s)`);
   if (meta.pockets > 0) bits.push(`${meta.pockets} poche(s)`);
   if (meta.totalValue > 0) bits.push(formatMoney(meta.totalValue));
-  return bits.length > 0 ? bits.join(" · ") : "aucune donnée disponible";
+  return bits.length > 0 ? bits.join(" · ") : "données sélectionnées";
 };
 
 interface ContextCardProps {
@@ -159,27 +176,33 @@ const ContextCard: React.FC<ContextCardProps> = ({
     type="button"
     onClick={onToggle}
     aria-pressed={active}
-    className={`rounded-xl border p-4 text-left transition-all duration-200 ${
+    className={`rounded-xl border p-3.5 text-left transition-all duration-200 flex flex-col justify-between ${
       active
-        ? "border-[#c8a55e]/50 bg-[#c8a55e]/10"
+        ? "border-[#c8a55e]/50 bg-[#c8a55e]/10 shadow-[0_0_15px_rgba(200,165,94,0.06)]"
         : "border-[rgba(255,255,255,0.06)] bg-[#0d0d0d] hover:border-[rgba(255,255,255,0.12)]"
     }`}
   >
-    <div className="flex items-center justify-between">
-      <Icon size={22} className={active ? "text-[#c8a55e]" : "text-[#555555]"} />
-      <span
-        className={`flex h-5 w-5 items-center justify-center rounded border ${
-          active ? "border-[#c8a55e] bg-[#c8a55e]" : "border-[#333333]"
-        }`}
-      >
-        {active && <Check size={14} className="text-[#0a0a0a]" />}
-      </span>
+    <div>
+      <div className="flex items-center justify-between">
+        <Icon size={20} className={active ? "text-[#c8a55e]" : "text-[#555555]"} />
+        <span
+          className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
+            active ? "border-[#c8a55e] bg-[#c8a55e]" : "border-[#333333]"
+          }`}
+        >
+          {active && <Check size={11} className="text-[#0a0a0a] stroke-[3]" />}
+        </span>
+      </div>
+      <p className="mt-2.5 text-xs font-semibold text-[#f5f5f5] tracking-tight">{title}</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-[#8a8a8a] line-clamp-2">
+        {description}
+      </p>
     </div>
-    <p className="mt-3 text-sm font-medium text-[#f5f5f5]">{title}</p>
-    <p className="mt-1 text-xs leading-relaxed text-[#8a8a8a]">
-      {description}
-    </p>
-    {hint && <p className="mt-2 text-xs font-medium text-[#c8a55e]">{hint}</p>}
+    {hint && (
+      <div className="mt-2.5 pt-2 border-t border-[rgba(255,255,255,0.04)]">
+        <p className="text-[10px] font-medium text-[#c8a55e] truncate">{hint}</p>
+      </div>
+    )}
   </button>
 );
 
@@ -198,6 +221,7 @@ const AIAnalysis: React.FC = () => {
   const [preview, setPreview] = useState<AiContextPreview | null>(null);
   const [question, setQuestion] = useState("");
   const [phase, setPhase] = useState<"idle" | "context" | "asking">("idle");
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [showContext, setShowContext] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
@@ -219,6 +243,7 @@ const AIAnalysis: React.FC = () => {
     setQuestion("");
     setError("");
     setShowContext(false);
+    setToolStatus(null);
 
     let cancelled = false;
     getAiContextPreview(currentUser)
@@ -247,7 +272,7 @@ const AIAnalysis: React.FC = () => {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, phase]);
+  }, [messages, phase, toolStatus]);
 
   const toggleSelection = (key: keyof AiContextSelection) => {
     setSelection((prev) => {
@@ -257,12 +282,52 @@ const AIAnalysis: React.FC = () => {
     });
   };
 
+  const selectAll = () => {
+    const next: AiContextSelection = {
+      accounts: true,
+      properties_loans: true,
+      crypto: true,
+      budget: true,
+      savings: true,
+      strategy: true,
+      market_lookthrough: true,
+      history_performance: true,
+    };
+    setSelection(next);
+    saveSelection(currentUser, next);
+  };
+
+  const deselectAll = () => {
+    const next: AiContextSelection = {
+      accounts: false,
+      properties_loans: false,
+      crypto: false,
+      budget: false,
+      savings: false,
+      strategy: false,
+      market_lookthrough: false,
+      history_performance: false,
+    };
+    setSelection(next);
+    saveSelection(currentUser, next);
+  };
+
+  const activeModulesCount = useMemo(
+    () => Object.values(selection).filter(Boolean).length,
+    [selection],
+  );
+
   const selectionChanged =
     messages.length > 0 &&
     conversationSelection != null &&
     (selection.accounts !== conversationSelection.accounts ||
+      selection.properties_loans !== conversationSelection.properties_loans ||
       selection.crypto !== conversationSelection.crypto ||
-      selection.strategy !== conversationSelection.strategy);
+      selection.budget !== conversationSelection.budget ||
+      selection.savings !== conversationSelection.savings ||
+      selection.strategy !== conversationSelection.strategy ||
+      selection.market_lookthrough !== conversationSelection.market_lookthrough ||
+      selection.history_performance !== conversationSelection.history_performance);
 
   const startNewConversation = () => {
     setMessages([]);
@@ -271,6 +336,7 @@ const AIAnalysis: React.FC = () => {
     setContextMeta(null);
     setError("");
     setShowContext(false);
+    setToolStatus(null);
     clearStoredConversation(currentUser);
   };
 
@@ -280,6 +346,7 @@ const AIAnalysis: React.FC = () => {
       if (!text || loading) return;
 
       setError("");
+      setToolStatus(null);
       const activeSelection = conversationSelection ?? { ...selection };
       let context = contextText;
 
@@ -315,12 +382,36 @@ const AIAnalysis: React.FC = () => {
       setPhase("asking");
 
       try {
-        const answer = await askGeminiAdvisor({
-          username: currentUser,
-          contextText: context,
-          history,
-          question: text,
-        });
+        const answer = await askGeminiAdvisor(
+          {
+            username: currentUser,
+            contextText: context,
+            history,
+            question: text,
+          },
+          {
+            onToolCall: ({ name, args }) => {
+              if (name === "search_market_asset") {
+                setToolStatus(`Recherche de "${args.query}" sur les marchés...`);
+              } else if (name === "get_asset_price_quote") {
+                setToolStatus(`Consultation du cours en direct pour ${args.ticker}...`);
+              } else if (name === "get_etf_lookthrough") {
+                setToolStatus(`Analyse de la composition sous-jacente de ${args.ticker}...`);
+              } else if (name === "get_market_indices") {
+                setToolStatus("Actualisation des grands indices mondiaux...");
+              } else if (name === "simulate_compound_interest") {
+                setToolStatus("Calcul de projection d'intérêts composés...");
+              } else if (name === "calculate_rebalancing") {
+                setToolStatus("Calcul des arbitrages de rééquilibrage...");
+              } else {
+                setToolStatus(`Exécution de l'outil ${name}...`);
+              }
+            },
+            onToolResult: () => {
+              setToolStatus(null);
+            },
+          },
+        );
         const withAnswer: AdvisorMessage[] = [
           ...nextMessages,
           { role: "assistant", text: answer },
@@ -339,6 +430,7 @@ const AIAnalysis: React.FC = () => {
         );
       } finally {
         setPhase("idle");
+        setToolStatus(null);
       }
     },
     [
@@ -392,29 +484,74 @@ const AIAnalysis: React.FC = () => {
   const contextCards: ContextCardProps[] = [
     {
       icon: Landmark,
-      title: "Comptes & lignes",
+      title: "Comptes & Lignes",
       description:
-        "PEA, PEE, assurance vie, comptes bancaires et les positions (lignes) associées à chacun.",
+        "PEA, CTO, PEE, assurance vie, comptes courants et les positions détaillées associées.",
       hint: preview?.accounts,
       active: selection.accounts,
       onToggle: () => toggleSelection("accounts"),
     },
     {
+      icon: Building2,
+      title: "Immobilier & Emprunts",
+      description:
+        "Biens immobiliers (estimations, adresses), prêts en cours (capital restant, taux) et quotes-parts.",
+      hint: preview?.properties_loans,
+      active: selection.properties_loans,
+      onToggle: () => toggleSelection("properties_loans"),
+    },
+    {
       icon: Coins,
-      title: "Portefeuille crypto",
-      description: "Wallets, actifs et valeurs estimées, converties en euros.",
+      title: "Portefeuille Crypto",
+      description: "Wallets connectés, tokens, actifs et valeurs estimées en euros.",
       hint: preview?.crypto,
       active: selection.crypto,
       onToggle: () => toggleSelection("crypto"),
     },
     {
+      icon: Receipt,
+      title: "Budget réel (Tricount)",
+      description:
+        "Dépenses réelles du mois en cours, catégories, payeurs, équilibre du foyer et reste à vivre.",
+      hint: preview?.budget,
+      active: selection.budget,
+      onToggle: () => toggleSelection("budget"),
+    },
+    {
+      icon: Clock,
+      title: "Épargne & Versements",
+      description:
+        "Suivi concret des versements d'épargne réels constatés par rapport aux objectifs.",
+      hint: preview?.savings,
+      active: selection.savings,
+      onToggle: () => toggleSelection("savings"),
+    },
+    {
       icon: PiggyBank,
       title: "Stratégie d'épargne",
       description:
-        "Foyer, revenus, poches planifiées et réalité du mois en cours (poches réelles).",
+        "Revenus déclarés du foyer, charges incompressibles, budget cible et poches prévues.",
       hint: preview?.strategy,
       active: selection.strategy,
       onToggle: () => toggleSelection("strategy"),
+    },
+    {
+      icon: TrendingUp,
+      title: "Look-Through ETF",
+      description:
+        "Décomposition géographique et sectorielle réelle des ETF (méthode Picsou) et cours des indices mondiaux.",
+      hint: preview?.market_lookthrough,
+      active: selection.market_lookthrough,
+      onToggle: () => toggleSelection("market_lookthrough"),
+    },
+    {
+      icon: BarChart3,
+      title: "Historique Patrimoine",
+      description:
+        "Évolution historique journalière du patrimoine net, records (ATH), point bas et plus/moins-values.",
+      hint: preview?.history_performance,
+      active: selection.history_performance,
+      onToggle: () => toggleSelection("history_performance"),
     },
   ];
 
@@ -432,14 +569,17 @@ const AIAnalysis: React.FC = () => {
             </span>
           </div>
           <p className="text-sm text-[#8a8a8a] mt-1">
-            Joignez vos comptes, vos lignes et votre stratégie d'épargne, puis
-            posez votre question : projet immobilier, rééquilibrage, fiscalité,
-            capacité d'épargne...
+            Vision complète à 360° sur votre patrimoine, votre budget et votre stratégie. Posez n'importe quelle question financière : l'IA dispose d'outils en direct pour consulter les cours de marché, décomposer vos ETF et simuler vos investissements.
           </p>
         </div>
-        <span className="badge badge-gold self-start inline-flex items-center gap-1.5 sm:self-center">
-          <Sparkles size={12} /> Gemini
-        </span>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border border-[rgba(200,165,94,0.25)]">
+            <Wrench size={12} /> Tools intégrés
+          </span>
+          <span className="badge badge-gold inline-flex items-center gap-1.5">
+            <Sparkles size={12} /> Gemini
+          </span>
+        </div>
       </div>
 
       {/* Clé API manquante */}
@@ -464,17 +604,41 @@ const AIAnalysis: React.FC = () => {
 
       {/* Étape 1 — données à joindre */}
       <div className="card">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#c8a55e] text-xs font-semibold text-[#0a0a0a]">
-            1
-          </span>
-          <h2 className="section-title">Données à joindre à votre question</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#c8a55e] text-xs font-semibold text-[#0a0a0a]">
+              1
+            </span>
+            <h2 className="section-title">Données à joindre à votre question</h2>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-[rgba(255,255,255,0.06)] text-[#8a8a8a]">
+              {activeModulesCount} / 8 actifs
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={selectAll}
+              className="text-xs text-[#8a8a8a] hover:text-[#f5f5f5] px-2.5 py-1 rounded-md hover:bg-white/5 transition-colors"
+            >
+              Tout cocher
+            </button>
+            <span className="text-white/20">|</span>
+            <button
+              type="button"
+              onClick={deselectAll}
+              className="text-xs text-[#8a8a8a] hover:text-[#f5f5f5] px-2.5 py-1 rounded-md hover:bg-white/5 transition-colors"
+            >
+              Tout décocher
+            </button>
+          </div>
         </div>
-        <p className="mb-4 text-sm text-[#8a8a8a]">
-          Le conseiller ne voit que ce que vous cochez. Il reçoit les montants
-          en euros et la réalité de vos poches du mois en cours.
+
+        <p className="mb-4 text-xs text-[#8a8a8a]">
+          Le conseiller n'analyse que les volets cochés. Vous gardez un contrôle total sur les informations partagées.
         </p>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {contextCards.map((card, index) => (
             <ContextCard key={index} {...card} />
           ))}
@@ -490,7 +654,7 @@ const AIAnalysis: React.FC = () => {
               onClick={openContextModal}
               className="inline-flex items-center gap-1 text-[#c8a55e] transition-colors hover:text-[#d4b06a]"
             >
-              <Database size={14} /> Voir les données envoyées
+              <Database size={14} /> Voir le texte complet transmis
             </button>
           </div>
         )}
@@ -532,7 +696,7 @@ const AIAnalysis: React.FC = () => {
             }
           }}
           rows={3}
-          placeholder="Ex. : voici mon patrimoine, j'aimerais acheter une maison d'ici 10 ans. Comment me conseilles-tu d'agir ?"
+          placeholder="Ex. : analyse mon portefeuille, vers quoi investir mes 500 € d'épargne résiduelle ce mois-ci ? Vérifie les cours des ETF monde et simule la projection."
           className="input resize-y"
         />
 
@@ -549,7 +713,7 @@ const AIAnalysis: React.FC = () => {
           ))}
         </div>
 
-        <div className="mt-4 flex items-center gap-3">
+        <div className="mt-4 flex items-center gap-3 flex-wrap">
           <button
             type="button"
             onClick={() => sendQuestion(question, true)}
@@ -559,9 +723,7 @@ const AIAnalysis: React.FC = () => {
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                {phase === "context"
-                  ? "Préparation de vos données..."
-                  : "Le conseiller réfléchit..."}
+                {toolStatus || (phase === "context" ? "Préparation des données..." : "Le conseiller réfléchit...")}
               </>
             ) : (
               <>
@@ -648,10 +810,21 @@ const AIAnalysis: React.FC = () => {
 
             {loading && (
               <div className="card flex items-center gap-3 text-sm text-[#8a8a8a]">
-                <Loader2 className="h-4 w-4 animate-spin text-[#c8a55e]" />
-                {phase === "context"
-                  ? "Préparation de vos données patrimoniales..."
-                  : "Le conseiller analyse votre situation..."}
+                <Loader2 className="h-5 w-5 animate-spin text-[#c8a55e]" />
+                <div>
+                  <p className="font-medium text-[#f5f5f5]">
+                    {toolStatus
+                      ? `⚡ ${toolStatus}`
+                      : phase === "context"
+                        ? "Agrégation des données patrimoniales..."
+                        : "Analyse et formulation de la recommandation..."}
+                  </p>
+                  <p className="text-xs text-[#8a8a8a]">
+                    {toolStatus
+                      ? "Outil en cours d'exécution sur votre application"
+                      : "Interrogation du modèle Gemini..."}
+                  </p>
+                </div>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -659,23 +832,23 @@ const AIAnalysis: React.FC = () => {
         </div>
       )}
 
-      {/* Modale — données envoyées au conseiller */}
+      {/* Modal affichage du contexte brut */}
       {showContext && contextText && (
-        <div className="modal-overlay" onClick={() => setShowContext(false)}>
-          <div
-            className="modal-content max-w-3xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="section-title flex items-center gap-2">
-                <Database size={18} className="text-[#c8a55e]" />
-                Données envoyées au conseiller
-              </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="card max-h-[85vh] w-full max-w-2xl overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] pb-3">
+              <div>
+                <h3 className="text-base font-semibold text-[#f5f5f5]">
+                  Données transmises au Conseiller IA
+                </h3>
+                <p className="text-xs text-[#8a8a8a]">
+                  Texte exact inclus dans le prompt système envoyé à Gemini.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowContext(false)}
-                className="text-[#8a8a8a] transition-colors hover:text-[#f5f5f5]"
-                aria-label="Fermer"
+                className="rounded p-1 text-[#8a8a8a] hover:bg-white/5 hover:text-[#f5f5f5]"
               >
                 <X size={18} />
               </button>
