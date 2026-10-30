@@ -537,9 +537,13 @@ const Dashboard: React.FC = () => {
   // ===== Totaux consolidés du patrimoine connecté =====
   const bankCash = cashSummary.balance ?? 0;
   const investmentValue = investmentSummary.balance ?? 0;
+  const hasOwnershipSplit = (overview?.accounts || []).some(
+    (a) => (a.ownerships || []).length > 0,
+  );
+  const userNetWorth = overview?.perOwner?.[currentUser] ?? overview?.totals?.netWorth ?? null;
   const totalWealthAll =
-    overview?.totals?.netWorth != null && overview.totals.netWorth > 0
-      ? overview.totals.netWorth
+    userNetWorth != null && (overview?.accounts || []).length > 0
+      ? userNetWorth
       : bankCash + investmentValue + cryptoTotalValue;
   const totalInvestmentsAll = investmentValue;
 
@@ -938,7 +942,7 @@ const Dashboard: React.FC = () => {
               <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#f5f5f5] stat-value">
                 {formatCurrency(totalWealthAll)}
               </h2>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full ${
                     totalGainLoss >= 0 ? "badge-green" : "badge-red"
@@ -950,6 +954,11 @@ const Dashboard: React.FC = () => {
                   {formatPercent(Math.abs(totalGainLossPercent), 2)})
                 </span>
                 <span className="text-xs text-[#555555]">performance globale</span>
+                {hasOwnershipSplit && (
+                  <span className="text-xs text-[#8a8a8a] bg-[rgba(255,255,255,0.05)] px-2 py-0.5 rounded-full border border-[rgba(255,255,255,0.08)]">
+                    Part nette ({currentUser})
+                  </span>
+                )}
               </div>
             </div>
           </div>
