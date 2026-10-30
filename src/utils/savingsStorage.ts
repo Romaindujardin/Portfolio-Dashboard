@@ -572,7 +572,8 @@ export const getStoredMonthlyStrategies = (): Record<string, SavingsStrategy> =>
 };
 
 export const saveStoredMonthlyStrategies = (
-  strategies: Record<string, SavingsStrategy>
+  strategies: Record<string, SavingsStrategy>,
+  userId: string = "Romain"
 ): void => {
   if (typeof window === "undefined") return;
   try {
@@ -581,7 +582,7 @@ export const saveStoredMonthlyStrategies = (
       JSON.stringify(strategies)
     );
     // Sauvegarder immédiatement sur la base de données SQLite et disque
-    pushMonthlyStrategiesToDatabase("Romain", strategies);
+    pushMonthlyStrategiesToDatabase(userId, strategies);
   } catch (e) {
     console.error("Erreur lors de la sauvegarde des stratégies mensuelles:", e);
   }
@@ -760,7 +761,7 @@ export const saveSavingsStrategyForMonth = (
   try {
     const monthlyMap = getStoredMonthlyStrategies();
     monthlyMap[monthKey] = strategy;
-    saveStoredMonthlyStrategies(monthlyMap);
+    saveStoredMonthlyStrategies(monthlyMap, userId);
 
     // Mettre également à jour la stratégie globale de référence
     saveSavingsStrategy(userId, strategy);

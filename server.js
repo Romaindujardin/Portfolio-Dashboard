@@ -1225,7 +1225,12 @@ app.get("/api/database/tricount/data", (req, res) => {
 
     // Si SQLite est vide, vérifier si une sauvegarde fichier existe pour auto-restaurer
     if (expenses.length === 0 && incomes.length === 0) {
-      const backup = readDiskBackup(`tricount_${userId}.json`);
+      const members = dbManager.getHouseholdMembers(userId);
+      let backup = null;
+      for (const m of members) {
+        backup = readDiskBackup(`tricount_${m}.json`);
+        if (backup) break;
+      }
       if (backup) {
         const cleanBackupExpenses = (backup.expenses || []).filter((e) => e && e.id !== "exp-1" && e.id !== "exp-2");
         if (cleanBackupExpenses.length > 0) {
@@ -1302,18 +1307,22 @@ app.post("/api/database/tricount/sync", (req, res) => {
       }
     }
 
-    // Sauvegarde de sécurité miroir immédiate sur disque en JSON
-    writeDiskBackup(`tricount_${userId}.json`, {
-      expenses: cleanExpenses,
-      incomes: incomes || [],
-      configs: cleanConfigs,
-      updatedAt: new Date().toISOString(),
-    });
+    // Sauvegarde de sécurité miroir immédiate sur disque en JSON pour tous les membres du foyer
+    const members = dbManager.getHouseholdMembers(userId);
+    for (const m of members) {
+      writeDiskBackup(`tricount_${m}.json`, {
+        expenses: cleanExpenses,
+        incomes: incomes || [],
+        configs: cleanConfigs,
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     res.json({
       success: true,
       message: "Tricount data synced successfully",
       saved: { expenses: expCount, incomes: incCount, configs: confCount },
+      stats: { expenses: expCount, incomes: incCount, configs: confCount },
     });
   } catch (error) {
     console.error("Error syncing tricount data:", error);
@@ -1330,16 +1339,19 @@ app.post("/api/database/tricount/expenses", (req, res) => {
       return res.status(400).json({ error: "user_id invalide" });
     if (!expense) return res.status(400).json({ error: "Expense data required" });
     const id = dbManager.saveTricountExpense(expense, userId);
-    // Rafraîchir backup disque
+    // Rafraîchir backup disque pour les membres du foyer
+    const members = dbManager.getHouseholdMembers(userId);
     const allExpenses = dbManager.getAllTricountExpenses(userId);
     const allIncomes = dbManager.getAllTricountIncomes(userId);
     const configs = dbManager.getAllTricountConfigs(userId);
-    writeDiskBackup(`tricount_${userId}.json`, {
-      expenses: allExpenses,
-      incomes: allIncomes,
-      configs,
-      updatedAt: new Date().toISOString(),
-    });
+    for (const m of members) {
+      writeDiskBackup(`tricount_${m}.json`, {
+        expenses: allExpenses,
+        incomes: allIncomes,
+        configs,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     res.json({ success: true, id });
   } catch (error) {
     console.error("Error saving tricount expense:", error);
@@ -1355,16 +1367,19 @@ app.delete("/api/database/tricount/expenses/:id", (req, res) => {
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const success = dbManager.deleteTricountExpense(id, userId);
-    // Rafraîchir backup disque
+    // Rafraîchir backup disque pour les membres du foyer
+    const members = dbManager.getHouseholdMembers(userId);
     const allExpenses = dbManager.getAllTricountExpenses(userId);
     const allIncomes = dbManager.getAllTricountIncomes(userId);
     const configs = dbManager.getAllTricountConfigs(userId);
-    writeDiskBackup(`tricount_${userId}.json`, {
-      expenses: allExpenses,
-      incomes: allIncomes,
-      configs,
-      updatedAt: new Date().toISOString(),
-    });
+    for (const m of members) {
+      writeDiskBackup(`tricount_${m}.json`, {
+        expenses: allExpenses,
+        incomes: allIncomes,
+        configs,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     res.json({ success });
   } catch (error) {
     console.error("Error deleting tricount expense:", error);
@@ -1381,16 +1396,19 @@ app.post("/api/database/tricount/incomes", (req, res) => {
       return res.status(400).json({ error: "user_id invalide" });
     if (!income) return res.status(400).json({ error: "Income data required" });
     const id = dbManager.saveTricountIncome(income, userId);
-    // Rafraîchir backup disque
+    // Rafraîchir backup disque pour les membres du foyer
+    const members = dbManager.getHouseholdMembers(userId);
     const allExpenses = dbManager.getAllTricountExpenses(userId);
     const allIncomes = dbManager.getAllTricountIncomes(userId);
     const configs = dbManager.getAllTricountConfigs(userId);
-    writeDiskBackup(`tricount_${userId}.json`, {
-      expenses: allExpenses,
-      incomes: allIncomes,
-      configs,
-      updatedAt: new Date().toISOString(),
-    });
+    for (const m of members) {
+      writeDiskBackup(`tricount_${m}.json`, {
+        expenses: allExpenses,
+        incomes: allIncomes,
+        configs,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     res.json({ success: true, id });
   } catch (error) {
     console.error("Error saving tricount income:", error);
@@ -1406,16 +1424,19 @@ app.delete("/api/database/tricount/incomes/:id", (req, res) => {
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const success = dbManager.deleteTricountIncome(id, userId);
-    // Rafraîchir backup disque
+    // Rafraîchir backup disque pour les membres du foyer
+    const members = dbManager.getHouseholdMembers(userId);
     const allExpenses = dbManager.getAllTricountExpenses(userId);
     const allIncomes = dbManager.getAllTricountIncomes(userId);
     const configs = dbManager.getAllTricountConfigs(userId);
-    writeDiskBackup(`tricount_${userId}.json`, {
-      expenses: allExpenses,
-      incomes: allIncomes,
-      configs,
-      updatedAt: new Date().toISOString(),
-    });
+    for (const m of members) {
+      writeDiskBackup(`tricount_${m}.json`, {
+        expenses: allExpenses,
+        incomes: allIncomes,
+        configs,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     res.json({ success });
   } catch (error) {
     console.error("Error deleting tricount income:", error);
@@ -1432,16 +1453,19 @@ app.post("/api/database/tricount/configs", (req, res) => {
       return res.status(400).json({ error: "user_id invalide" });
     if (!config) return res.status(400).json({ error: "Config data required" });
     const id = dbManager.saveTricountConfig(config, userId);
-    // Rafraîchir backup disque
+    // Rafraîchir backup disque pour les membres du foyer
+    const members = dbManager.getHouseholdMembers(userId);
     const allExpenses = dbManager.getAllTricountExpenses(userId);
     const allIncomes = dbManager.getAllTricountIncomes(userId);
     const configs = dbManager.getAllTricountConfigs(userId);
-    writeDiskBackup(`tricount_${userId}.json`, {
-      expenses: allExpenses,
-      incomes: allIncomes,
-      configs,
-      updatedAt: new Date().toISOString(),
-    });
+    for (const m of members) {
+      writeDiskBackup(`tricount_${m}.json`, {
+        expenses: allExpenses,
+        incomes: allIncomes,
+        configs,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     res.json({ success: true, id });
   } catch (error) {
     console.error("Error saving tricount config:", error);
@@ -1459,9 +1483,13 @@ app.get("/api/database/savings/strategy", (req, res) => {
       return res.status(400).json({ error: "user_id invalide" });
     let strategy = dbManager.getSavingsStrategy(userId);
     if (!strategy) {
-      strategy = readDiskBackup(`savings_strategy_${userId}.json`);
-      if (strategy) {
-        dbManager.saveSavingsStrategy(userId, strategy);
+      const members = dbManager.getHouseholdMembers(userId);
+      for (const m of members) {
+        strategy = readDiskBackup(`savings_strategy_${m}.json`);
+        if (strategy) {
+          dbManager.saveSavingsStrategy(userId, strategy);
+          break;
+        }
       }
     }
     res.json({ strategy });
@@ -1480,7 +1508,10 @@ app.post("/api/database/savings/strategy", (req, res) => {
       return res.status(400).json({ error: "user_id invalide" });
     if (!strategy) return res.status(400).json({ error: "Strategy data required" });
     dbManager.saveSavingsStrategy(userId, strategy);
-    writeDiskBackup(`savings_strategy_${userId}.json`, strategy);
+    const members = dbManager.getHouseholdMembers(userId);
+    for (const m of members) {
+      writeDiskBackup(`savings_strategy_${m}.json`, strategy);
+    }
     res.json({ success: true, message: "Savings strategy saved successfully" });
   } catch (error) {
     console.error("Error saving savings strategy:", error);
@@ -1496,9 +1527,13 @@ app.get("/api/database/savings/monthly", (req, res) => {
       return res.status(400).json({ error: "user_id invalide" });
     let strategies = dbManager.getAllSavingsMonthlyStrategies(userId);
     if (!strategies || Object.keys(strategies).length === 0) {
-      strategies = readDiskBackup(`savings_monthly_${userId}.json`) || {};
-      if (Object.keys(strategies).length > 0) {
-        dbManager.saveAllSavingsMonthlyStrategies(userId, strategies);
+      const members = dbManager.getHouseholdMembers(userId);
+      for (const m of members) {
+        strategies = readDiskBackup(`savings_monthly_${m}.json`) || {};
+        if (Object.keys(strategies).length > 0) {
+          dbManager.saveAllSavingsMonthlyStrategies(userId, strategies);
+          break;
+        }
       }
     }
     res.json({ strategies });
@@ -1518,7 +1553,10 @@ app.post("/api/database/savings/monthly", (req, res) => {
     if (!month || !strategy) return res.status(400).json({ error: "Month and strategy required" });
     dbManager.saveSavingsStrategyForMonth(userId, month, strategy);
     const all = dbManager.getAllSavingsMonthlyStrategies(userId);
-    writeDiskBackup(`savings_monthly_${userId}.json`, all);
+    const members = dbManager.getHouseholdMembers(userId);
+    for (const m of members) {
+      writeDiskBackup(`savings_monthly_${m}.json`, all);
+    }
     res.json({ success: true, message: `Monthly strategy for ${month} saved successfully` });
   } catch (error) {
     console.error("Error saving monthly strategy:", error);
@@ -1537,7 +1575,10 @@ app.post("/api/database/savings/monthly/batch", (req, res) => {
       return res.status(400).json({ error: "Strategies map required" });
     }
     dbManager.saveAllSavingsMonthlyStrategies(userId, strategies);
-    writeDiskBackup(`savings_monthly_${userId}.json`, strategies);
+    const members = dbManager.getHouseholdMembers(userId);
+    for (const m of members) {
+      writeDiskBackup(`savings_monthly_${m}.json`, strategies);
+    }
     res.json({ success: true, message: "Batch monthly strategies saved successfully" });
   } catch (error) {
     console.error("Error saving batch monthly strategies:", error);

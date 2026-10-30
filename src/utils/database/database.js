@@ -566,15 +566,47 @@ class DatabaseManager {
     return result.changes > 0;
   }
 
-  // ===== GESTION TRICOUNT / BUDGET FAMILLE =====
+  // ===== GESTION TRICOUNT / BUDGET FAMILLE (FOYER COMMUN) =====
+
+  getHouseholdMembers(userId = "Romain") {
+    if (!userId) return ["Romain", "Sophie"];
+    const db = this.getDatabase();
+    try {
+      const rows = db.prepare("SELECT strategy_json FROM savings_strategies").all();
+      for (const row of rows) {
+        if (!row.strategy_json) continue;
+        try {
+          const strat = JSON.parse(row.strategy_json);
+          const p1 = strat?.household?.person1?.name;
+          const p2 = strat?.household?.person2?.name;
+          if (p1 && p2) {
+            const members = [p1, p2];
+            if (members.includes(userId)) {
+              return members;
+            }
+          }
+        } catch {}
+      }
+    } catch {}
+
+    // Couple par défaut de l'application
+    if (userId === "Romain" || userId === "Sophie") {
+      return ["Romain", "Sophie"];
+    }
+
+    // Utilisateur unique / mode solo / test isolé
+    return [userId];
+  }
 
   getAllTricountExpenses(userId = "Romain") {
     const db = this.getDatabase();
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const rows = db
       .prepare(
-        "SELECT * FROM tricount_expenses WHERE user_id = ? OR user_id IS NULL ORDER BY date DESC, created_at DESC",
+        `SELECT * FROM tricount_expenses WHERE user_id IN (${placeholders}) OR user_id IS NULL ORDER BY date DESC, created_at DESC`,
       )
-      .all(userId || "Romain");
+      .all(...members);
     return rows.map((r) => ({
       id: r.id,
       month: r.month,
@@ -663,21 +695,25 @@ class DatabaseManager {
 
   deleteTricountExpense(id, userId = "Romain") {
     const db = this.getDatabase();
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const result = db
       .prepare(
-        "DELETE FROM tricount_expenses WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+        `DELETE FROM tricount_expenses WHERE id = ? AND (user_id IN (${placeholders}) OR user_id IS NULL)`,
       )
-      .run(id, userId || "Romain");
+      .run(id, ...members);
     return result.changes > 0;
   }
 
   getAllTricountIncomes(userId = "Romain") {
     const db = this.getDatabase();
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const rows = db
       .prepare(
-        "SELECT * FROM tricount_incomes WHERE user_id = ? OR user_id IS NULL ORDER BY date DESC, created_at DESC",
+        `SELECT * FROM tricount_incomes WHERE user_id IN (${placeholders}) OR user_id IS NULL ORDER BY date DESC, created_at DESC`,
       )
-      .all(userId || "Romain");
+      .all(...members);
     return rows.map((r) => ({
       id: r.id,
       month: r.month,
@@ -746,21 +782,25 @@ class DatabaseManager {
 
   deleteTricountIncome(id, userId = "Romain") {
     const db = this.getDatabase();
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const result = db
       .prepare(
-        "DELETE FROM tricount_incomes WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+        `DELETE FROM tricount_incomes WHERE id = ? AND (user_id IN (${placeholders}) OR user_id IS NULL)`,
       )
-      .run(id, userId || "Romain");
+      .run(id, ...members);
     return result.changes > 0;
   }
 
   getAllTricountConfigs(userId = "Romain") {
     const db = this.getDatabase();
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const rows = db
       .prepare(
-        "SELECT * FROM tricount_configs WHERE user_id = ? OR user_id IS NULL",
+        `SELECT * FROM tricount_configs WHERE user_id IN (${placeholders}) OR user_id IS NULL`,
       )
-      .all(userId || "Romain");
+      .all(...members);
     const map = {};
     for (const r of rows) {
       map[r.month] = {
@@ -778,7 +818,7 @@ class DatabaseManager {
 
   saveTricountConfig(conf, userId = "Romain") {
     const db = this.getDatabase();
-    const id = `${userId || "Romain"}_${conf.month}`;
+    const members = this.getHouseholdMembers(userId);
     const stmt = db.prepare(`
       INSERT INTO tricount_configs (
         id, month, user_id, p1_income, p2_income, is_strategy_applied,
@@ -793,26 +833,31 @@ class DatabaseManager {
         notes = excluded.notes
     `);
 
-    stmt.run(
-      id,
-      conf.month,
-      userId || "Romain",
-      conf.p1Income || 0,
-      conf.p2Income || 0,
-      conf.isStrategyApplied ? 1 : 0,
-      conf.appliedStrategyDate || null,
-      conf.targetSavingsRate || null,
-      conf.notes || null,
-    );
-    return id;
+    for (const m of members) {
+      const id = `${m}_${conf.month}`;
+      stmt.run(
+        id,
+        conf.month,
+        m,
+        conf.p1Income || 0,
+        conf.p2Income || 0,
+        conf.isStrategyApplied ? 1 : 0,
+        conf.appliedStrategyDate || null,
+        conf.targetSavingsRate || null,
+        conf.notes || null,
+      );
+    }
+    return `${userId || "Romain"}_${conf.month}`;
   }
 
-  // ===== GESTION DE LA STRATÉGIE D'ÉPARGNE =====
+  // ===== GESTION DE LA STRATÉGIE D'ÉPARGNE (FOYER COMMUN) =====
   getSavingsStrategy(userId = "Romain") {
     const db = this.getDatabase();
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const row = db
-      .prepare("SELECT strategy_json FROM savings_strategies WHERE user_id = ?")
-      .get(userId || "Romain");
+      .prepare(`SELECT strategy_json FROM savings_strategies WHERE user_id IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`)
+      .get(...members);
     if (!row) return null;
     try {
       return JSON.parse(row.strategy_json);
@@ -827,6 +872,7 @@ class DatabaseManager {
     const db = this.getDatabase();
     const jsonStr = typeof strategy === "string" ? strategy : JSON.stringify(strategy);
     const now = new Date().toISOString();
+    const members = this.getHouseholdMembers(userId);
     const stmt = db.prepare(`
       INSERT INTO savings_strategies (user_id, strategy_json, updated_at)
       VALUES (?, ?, ?)
@@ -834,15 +880,22 @@ class DatabaseManager {
         strategy_json = excluded.strategy_json,
         updated_at = excluded.updated_at
     `);
-    stmt.run(userId || "Romain", jsonStr, now);
+    const runAll = db.transaction((list) => {
+      for (const m of list) {
+        stmt.run(m, jsonStr, now);
+      }
+    });
+    runAll(members);
     return true;
   }
 
   getAllSavingsMonthlyStrategies(userId = "Romain") {
     const db = this.getDatabase();
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const rows = db
-      .prepare("SELECT month, strategy_json FROM savings_monthly_strategies WHERE user_id = ?")
-      .all(userId || "Romain");
+      .prepare(`SELECT month, strategy_json FROM savings_monthly_strategies WHERE user_id IN (${placeholders}) ORDER BY updated_at ASC`)
+      .all(...members);
     const result = {};
     for (const r of rows) {
       try {
@@ -857,10 +910,11 @@ class DatabaseManager {
   getSavingsStrategyForMonth(userId = "Romain", month) {
     if (!month) return null;
     const db = this.getDatabase();
-    const id = `${userId || "Romain"}_${month}`;
+    const members = this.getHouseholdMembers(userId);
+    const placeholders = members.map(() => "?").join(", ");
     const row = db
-      .prepare("SELECT strategy_json FROM savings_monthly_strategies WHERE id = ?")
-      .get(id);
+      .prepare(`SELECT strategy_json FROM savings_monthly_strategies WHERE month = ? AND user_id IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`)
+      .get(month, ...members);
     if (!row) return null;
     try {
       return JSON.parse(row.strategy_json);
@@ -872,7 +926,7 @@ class DatabaseManager {
   saveSavingsStrategyForMonth(userId = "Romain", month, strategy) {
     if (!strategy || !month) return false;
     const db = this.getDatabase();
-    const id = `${userId || "Romain"}_${month}`;
+    const members = this.getHouseholdMembers(userId);
     const jsonStr = typeof strategy === "string" ? strategy : JSON.stringify(strategy);
     const now = new Date().toISOString();
     const stmt = db.prepare(`
@@ -882,7 +936,12 @@ class DatabaseManager {
         strategy_json = excluded.strategy_json,
         updated_at = excluded.updated_at
     `);
-    stmt.run(id, userId || "Romain", month, jsonStr, now);
+    const runAll = db.transaction((list) => {
+      for (const m of list) {
+        stmt.run(`${m}_${month}`, m, month, jsonStr, now);
+      }
+    });
+    runAll(members);
     return true;
   }
 

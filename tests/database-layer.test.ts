@@ -246,3 +246,43 @@ describe("épargne et paramètres (couche SQLite)", () => {
     expect(stats.tricountIncomes).toBe(1);
   });
 });
+
+describe("partage multi-compte au sein du foyer (Romain & Sophie)", () => {
+  it("les dépenses, revenus, configs et stratégies créés par un partenaire sont partagés avec l'autre", () => {
+    // Romain enregistre une dépense commune
+    dbManager.saveTricountExpense(
+      { id: "e-shared-1", month: "2026-10", date: "2026-10-05", label: "Courses Leclerc", amount: 85 },
+      "Romain",
+    );
+    // Sophie consulte les dépenses et la retrouve
+    const sophieExpenses = dbManager.getAllTricountExpenses("Sophie");
+    expect(sophieExpenses.some((e) => e.id === "e-shared-1")).toBe(true);
+    expect(sophieExpenses.find((e) => e.id === "e-shared-1")?.amount).toBe(85);
+
+    // Sophie enregistre un revenu commun
+    dbManager.saveTricountIncome(
+      { id: "i-shared-1", month: "2026-10", date: "2026-10-01", label: "Salaire Sophie", amount: 2100 },
+      "Sophie",
+    );
+    // Romain consulte les revenus et le retrouve
+    const romainIncomes = dbManager.getAllTricountIncomes("Romain");
+    expect(romainIncomes.some((i) => i.id === "i-shared-1")).toBe(true);
+
+    // Sophie modifie une config mensuelle
+    dbManager.saveTricountConfig({ month: "2026-10", p1Income: 2000, p2Income: 2100 }, "Sophie");
+    const romainConfigs = dbManager.getAllTricountConfigs("Romain");
+    expect(romainConfigs["2026-10"].p2Income).toBe(2100);
+
+    // Romain enregistre une stratégie d'épargne
+    dbManager.saveSavingsStrategy("Romain", {
+      household: { enabled: true, person1: { name: "Romain" }, person2: { name: "Sophie" } },
+    });
+    const sophieStrat = dbManager.getSavingsStrategy("Sophie");
+    expect(sophieStrat?.household?.enabled).toBe(true);
+
+    // Nettoyage
+    expect(dbManager.deleteTricountExpense("e-shared-1", "Sophie")).toBe(true);
+    expect(dbManager.deleteTricountIncome("i-shared-1", "Romain")).toBe(true);
+  });
+});
+
