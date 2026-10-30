@@ -366,7 +366,7 @@ export class PortfolioRepository {
       clauses.push("t.date <= ?");
       values.push(to);
     }
-    values.push(Math.min(Math.max(Number(limit) || 500, 1), 5000));
+    values.push(Math.min(Math.max(Number(limit) || 500, 1), 20000));
     return this.db
       .prepare(
         `SELECT DISTINCT t.* FROM transactions t WHERE ${clauses.join(" AND ")}

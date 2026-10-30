@@ -4,16 +4,14 @@ import { useUser } from "../contexts/UserContext";
 import {
   Save,
   ArrowLeft,
-  ChevronDown,
-  ChevronRight,
-  Pencil,
-  Trash2,
   Eye,
   EyeOff,
   Copy,
   Check,
   Wallet,
   Loader2,
+  ShieldCheck,
+  Zap,
 } from "lucide-react";
 import { ACCENT_COLORS, applyUserTheme, getAccentColorDef } from "../utils/theme";
 import {
@@ -21,26 +19,8 @@ import {
   saveUserSettings,
   UserSettings,
 } from "../utils/userSettings";
-import { sumNumericColumn } from "../utils/csvAnalytics";
 import { getBinanceAccountInfo } from "../utils/binanceService";
-import {
-  addWallet,
-  deleteBankCsvUpload,
-  getBankCsvUploadById,
-  getStoredBankCsvUploads,
-  getStoredWallets,
-} from "../utils/storage";
-import { fetchBoursoAccounts } from "../utils/boursoService";
-import { parseCsv } from "../utils/csv";
-import type {
-  AccountSectionConfig,
-  AccountSectionKind,
-  BankCsvColumnMapping,
-  BoursoAccount,
-  BoursoAccountMapping,
-  BoursoAccountSection,
-  InvestmentCsvColumnMapping,
-} from "../types";
+import { addWallet, getStoredWallets } from "../utils/storage";
 
 type StringSettingKeys = {
   [K in keyof UserSettings]-?: UserSettings[K] extends string ? K : never;
@@ -93,91 +73,12 @@ const Settings: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  // Bourso account detection
-  const [showBoursoModal, setShowBoursoModal] = useState(false);
-  const [boursoPassword, setBoursoPassword] = useState("");
-  const [boursoLoading, setBoursoLoading] = useState(false);
-  const [boursoError, setBoursoError] = useState("");
-  const [showBoursoAccountsDetails, setShowBoursoAccountsDetails] =
-    useState(false);
-  const [detectedBoursoAccounts, setDetectedBoursoAccounts] = useState<
-    BoursoAccountMapping[]
-  >([]);
-
-  const [sectionLabelDraft, setSectionLabelDraft] = useState("");
-  const [sectionKindDraft, setSectionKindDraft] =
-    useState<AccountSectionKind>("bank");
-  const [sectionError, setSectionError] = useState("");
-  const [csvUploadsBySection, setCsvUploadsBySection] = useState<
-    Record<string, Awaited<ReturnType<typeof getStoredBankCsvUploads>>>
-  >({});
-  const [csvHeadersByUpload, setCsvHeadersByUpload] = useState<
-    Record<string, string[]>
-  >({});
-  const [csvContentByUpload, setCsvContentByUpload] = useState<
-    Record<string, string>
-  >({});
-  const [calcOpenBySection, setCalcOpenBySection] = useState<
-    Record<string, boolean>
-  >({});
-
   useEffect(() => {
-    loadSettings();
-  }, [username]);
-
-  useEffect(() => {
-    const loadCsvUploads = async () => {
-      if (!username) return;
-      try {
-        const nextUploads: Record<
-          string,
-          Awaited<ReturnType<typeof getStoredBankCsvUploads>>
-        > = {};
-        const nextHeaders: Record<string, string[]> = {};
-        const nextContents: Record<string, string> = {};
-
-        for (const section of settings.accountSections) {
-          const metas = await getStoredBankCsvUploads(
-            username || currentUser,
-            section.id,
-          );
-          nextUploads[section.id] = metas;
-
-          const contents = await Promise.all(
-            metas.map(async (meta) => {
-              const upload = await getBankCsvUploadById(
-                meta.id,
-                username || currentUser,
-              );
-              const content = upload?.content || "";
-              nextContents[meta.id] = content;
-              if (!content) return [] as string[];
-              return parseCsv(content).headers;
-            }),
-          );
-
-          metas.forEach((meta, idx) => {
-            nextHeaders[meta.id] = contents[idx] || [];
-          });
-        }
-
-        setCsvUploadsBySection(nextUploads);
-        setCsvHeadersByUpload(nextHeaders);
-        setCsvContentByUpload(nextContents);
-      } catch (error) {
-        console.error("Erreur lors du chargement des CSV:", error);
-      }
-    };
-
-    loadCsvUploads();
-  }, [username, currentUser, settings.accountSections]);
-
-  const loadSettings = () => {
     if (username) {
       const userSettings = getUserSettings(username);
       setSettings(userSettings);
     }
-  };
+  }, [username]);
 
   const saveSettings = async () => {
     if (!username) return;
@@ -276,7 +177,6 @@ const Settings: React.FC = () => {
       if (username) {
         try {
           saveUserSettings(username, settings);
-          console.log("✅ Paramètres utilisateur sauvegardés automatiquement");
         } catch (error) {
           console.error(
             "❌ Erreur lors de la sauvegarde automatique des paramètres:",
@@ -335,7 +235,7 @@ const Settings: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowState(!showState)}
-                className="p-1 text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
+                className="p-1 text-[#555555] hover:text-[#f5f5f5] transition-colors"
                 title={showState ? "Masquer" : "Afficher"}
               >
                 {showState ? (
@@ -348,7 +248,7 @@ const Settings: React.FC = () => {
             <button
               type="button"
               onClick={() => copyToClipboard(value, fieldName)}
-              className="p-1 text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
+              className="p-1 text-[#555555] hover:text-[#f5f5f5] transition-colors"
               title="Copier"
             >
               {copiedField === fieldName ? (
@@ -363,250 +263,6 @@ const Settings: React.FC = () => {
     );
   };
 
-  const inferBoursoSection = (account: BoursoAccount): BoursoAccountSection => {
-    const name = account.name.toLowerCase();
-    const kind = account.kind.toLowerCase();
-
-    // Chercher une section correspondante dans les sections configurées
-    for (const section of settings.accountSections) {
-      const sectionLabel = section.label.toLowerCase();
-      const sectionId = section.id.toLowerCase();
-
-      // Si le nom du compte ou son type contient le label/id de la section
-      if (
-        name.includes(sectionLabel) ||
-        name.includes(sectionId) ||
-        kind.includes(sectionLabel) ||
-        kind.includes(sectionId)
-      ) {
-        return section.id;
-      }
-    }
-
-    // Vérifier si c'est un PEA ou trading
-    if (name.includes("pea") || kind.includes("trading")) {
-      const peaSection = settings.accountSections.find(
-        (s) =>
-          s.id.toLowerCase().includes("pea") ||
-          s.label.toLowerCase().includes("pea") ||
-          s.kind === "investment",
-      );
-      if (peaSection) return peaSection.id;
-    }
-
-    // Par défaut, retourner la première section bancaire ou la première section
-    const bankSection = settings.accountSections.find((s) => s.kind === "bank");
-    return bankSection?.id || settings.accountSections[0]?.id || "bank";
-  };
-
-  const handleDetectBoursoAccounts = async () => {
-    if (!settings.boursoClientId) {
-      setBoursoError("Veuillez renseigner votre identifiant client.");
-      return;
-    }
-    if (!boursoPassword) {
-      setBoursoError("Veuillez saisir votre mot de passe.");
-      return;
-    }
-
-    setBoursoLoading(true);
-    setBoursoError("");
-    try {
-      const accounts = await fetchBoursoAccounts({
-        customerId: settings.boursoClientId,
-        password: boursoPassword,
-      });
-
-      const existingById = new Map(
-        settings.boursoAccountMappings.map((mapping) => [
-          mapping.accountId,
-          mapping,
-        ]),
-      );
-
-      const nextMappings: BoursoAccountMapping[] = accounts.map((account) => {
-        const existing = existingById.get(account.id);
-        return {
-          accountId: account.id,
-          accountName: account.name,
-          kind: account.kind,
-          section: existing?.section ?? inferBoursoSection(account),
-        };
-      });
-
-      setDetectedBoursoAccounts(nextMappings);
-      setSettings((prev) => ({
-        ...prev,
-        boursoAccountMappings: nextMappings,
-      }));
-    } catch (error: any) {
-      setBoursoError(
-        error?.message || "Impossible de récupérer les comptes Bourso.",
-      );
-    } finally {
-      setBoursoLoading(false);
-    }
-  };
-
-  const updateBoursoMappingSection = (
-    accountId: string,
-    section: BoursoAccountSection,
-  ) => {
-    setDetectedBoursoAccounts((prev) =>
-      prev.map((mapping) =>
-        mapping.accountId === accountId ? { ...mapping, section } : mapping,
-      ),
-    );
-    setSettings((prev) => ({
-      ...prev,
-      boursoAccountMappings: prev.boursoAccountMappings.map((mapping) =>
-        mapping.accountId === accountId ? { ...mapping, section } : mapping,
-      ),
-    }));
-  };
-
-  const normalizeSectionId = (label: string) => {
-    const base = label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "");
-    return base || `section-${Date.now()}`;
-  };
-
-  const handleAddSection = () => {
-    setSectionError("");
-    const label = sectionLabelDraft.trim();
-    if (!label) {
-      setSectionError("Nom requis.");
-      return;
-    }
-    const id = normalizeSectionId(label);
-    if (settings.accountSections.some((s) => s.id === id)) {
-      setSectionError("Identifiant déjà utilisé.");
-      return;
-    }
-    const nextSections: AccountSectionConfig[] = [
-      ...settings.accountSections,
-      { id, label, kind: sectionKindDraft },
-    ];
-    setSettings((prev) => ({ ...prev, accountSections: nextSections }));
-    setSectionLabelDraft("");
-  };
-
-  const handleDeleteSection = async (section: AccountSectionConfig) => {
-    if (!username) return;
-    if (settings.accountSections.length <= 1) {
-      setSectionError("Au moins un type doit rester actif.");
-      return;
-    }
-    const confirmDelete = window.confirm(
-      `Supprimer "${section.label}" ? Tous les CSV associés seront supprimés.`,
-    );
-    if (!confirmDelete) return;
-
-    try {
-      const uploads = await getStoredBankCsvUploads(
-        username || currentUser,
-        section.id,
-      );
-      await Promise.all(
-        uploads.map((u) => deleteBankCsvUpload(u.id, username || currentUser)),
-      );
-    } catch (error) {
-      console.error("Erreur lors de la suppression des CSV:", error);
-    }
-
-    const nextSections = settings.accountSections.filter(
-      (s) => s.id !== section.id,
-    );
-    const nextMappings = { ...settings.csvColumnMappings };
-    delete nextMappings[section.id];
-    const nextSettings = {
-      ...settings,
-      accountSections: nextSections,
-      csvColumnMappings: nextMappings,
-    };
-    setSettings(nextSettings);
-    saveUserSettings(username, nextSettings);
-  };
-
-  const handleRenameSection = (section: AccountSectionConfig) => {
-    const nextLabel = window
-      .prompt("Nouveau nom pour ce type", section.label)
-      ?.trim();
-    if (!nextLabel || nextLabel === section.label) return;
-
-    setSettings((prev) => ({
-      ...prev,
-      accountSections: prev.accountSections.map((s) =>
-        s.id === section.id ? { ...s, label: nextLabel } : s,
-      ),
-    }));
-  };
-
-  const getSectionColumns = (sectionId: string) => {
-    const metas = csvUploadsBySection[sectionId] || [];
-    const columns = new Set<string>();
-    metas.forEach((meta) => {
-      (csvHeadersByUpload[meta.id] || []).forEach((h) => columns.add(h));
-    });
-    return Array.from(columns).sort((a, b) => a.localeCompare(b));
-  };
-
-  const getSectionContents = (sectionId: string) => {
-    const metas = csvUploadsBySection[sectionId] || [];
-    return metas
-      .map((meta) => csvContentByUpload[meta.id] || "")
-      .filter((content) => content.length > 0);
-  };
-
-  const sumFromContents = (
-    csvContents: string[],
-    column?: string,
-    multiplierColumn?: string,
-  ): number | null => {
-    if (!column) return null;
-    let total = 0;
-    let used = false;
-    for (const content of csvContents) {
-      const value = sumNumericColumn(content, column, multiplierColumn);
-      if (value == null) continue;
-      total += value;
-      used = true;
-    }
-    return used ? total : null;
-  };
-
-  const updateSectionMapping = (
-    sectionId: string,
-    updates: Partial<BankCsvColumnMapping & InvestmentCsvColumnMapping>,
-  ) => {
-    setSettings((prev) => {
-      const prevMappings = prev.csvColumnMappings || {};
-      const current =
-        (prevMappings[sectionId] as
-          | (BankCsvColumnMapping & InvestmentCsvColumnMapping)
-          | undefined) || {};
-      const next = { ...current, ...updates } as Record<
-        string,
-        string | number | undefined
-      >;
-      Object.keys(next).forEach((key) => {
-        const value = next[key];
-        if (value === "" || value === undefined || value === null) {
-          delete next[key];
-        }
-      });
-      return {
-        ...prev,
-        csvColumnMappings: { ...prevMappings, [sectionId]: next },
-      };
-    });
-  };
-
   if (!username) {
     return <div>Utilisateur non trouvé</div>;
   }
@@ -618,7 +274,7 @@ const Settings: React.FC = () => {
         <div className="flex items-center space-x-4">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 text-[#8a8a8a] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors duration-200"
+            className="p-2 text-[#8a8a8a] hover:text-[#f5f5f5] transition-colors duration-200"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -627,14 +283,14 @@ const Settings: React.FC = () => {
               Paramètres de {username}
             </h1>
             <p className="text-[#8a8a8a]">
-              Configurez vos clés API et préférences
+              Configurez vos clés API et préférences d'application
             </p>
           </div>
         </div>
         <button
           onClick={saveSettings}
           disabled={isLoading}
-          className="flex items-center space-x-2 px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+          className="flex items-center space-x-2 px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 shadow-sm"
         >
           <Save className="h-4 w-4" />
           <span>{isLoading ? "Sauvegarde..." : "Sauvegarder"}</span>
@@ -658,12 +314,12 @@ const Settings: React.FC = () => {
         {/* Colonne de gauche */}
         <div className="space-y-6">
           {/* Section Couleur du profil */}
-          <div className="bg-[#111111] rounded-lg p-6">
+          <div className="bg-[#111111] rounded-lg p-6 border border-[rgba(255,255,255,0.06)]">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-[#f5f5f5]">
                 Couleur du profil
               </h2>
-              <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-[#1a1a1a] bg-[#161616] text-[#8a8a8a]">
+              <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-[#1a1a1a] text-[#8a8a8a]">
                 {getAccentColorDef(settings.accentColor).name}
               </span>
             </div>
@@ -692,7 +348,7 @@ const Settings: React.FC = () => {
                     title={color.name}
                     className={`w-9 h-9 rounded-full transition-all flex items-center justify-center ${
                       isSelected
-                        ? "ring-2 ring-offset-2 ring-primary-500 dark:ring-offset-[#111111] scale-110 "
+                        ? "ring-2 ring-offset-2 ring-[#c8a55e] dark:ring-offset-[#111111] scale-110"
                         : "hover:scale-105 opacity-80 hover:opacity-100"
                     }`}
                     style={{ backgroundColor: color.hex }}
@@ -707,9 +363,9 @@ const Settings: React.FC = () => {
           </div>
 
           {/* Section Compte CEX */}
-          <div className="bg-[#111111] rounded-lg p-6">
+          <div className="bg-[#111111] rounded-lg p-6 border border-[rgba(255,255,255,0.06)]">
             <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
-              Compte CEX
+              Compte Binance (CEX)
             </h2>
 
             <div className="space-y-4">
@@ -773,27 +429,30 @@ const Settings: React.FC = () => {
               )}
             </div>
           </div>
+        </div>
 
+        {/* Colonne de droite */}
+        <div className="space-y-6">
           {/* Section IA et API Personnalisée */}
-          <div className="bg-[#111111] rounded-lg p-6">
+          <div className="bg-[#111111] rounded-lg p-6 border border-[rgba(255,255,255,0.06)]">
             <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
-              IA et API Personnalisée
+              IA & Conseiller Financier
             </h2>
 
             <div className="space-y-4">
               {/* Gemini API Key */}
               {renderApiKeyField(
-                "Clé API Gemini",
+                "Clé API Google Gemini",
                 "geminiApiKey",
                 showGeminiApi,
                 setShowGeminiApi,
-                "Votre clé API Gemini",
+                "Votre clé API Gemini (pour l'assistant IA)",
               )}
 
               {/* Custom API Endpoint */}
               <div>
                 <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
-                  Endpoint API personnalisé
+                  Endpoint API personnalisé (optionnel)
                 </label>
                 <div className="relative">
                   <input
@@ -813,7 +472,7 @@ const Settings: React.FC = () => {
                         "customApiEndpoint",
                       )
                     }
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-[#555555] hover:text-[#f5f5f5] transition-colors"
                     title="Copier"
                   >
                     {copiedField === "customApiEndpoint" ? (
@@ -827,99 +486,10 @@ const Settings: React.FC = () => {
             </div>
           </div>
 
-          {/* Section BoursoBank */}
-          <div className="bg-[#111111] rounded-lg p-6">
+          {/* Clés API Web3 & Marchés */}
+          <div className="bg-[#111111] rounded-lg p-6 border border-[rgba(255,255,255,0.06)]">
             <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
-              BoursoBank
-            </h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
-                  Identifiant client
-                </label>
-                <input
-                  type="text"
-                  value={settings.boursoClientId}
-                  onChange={(e) =>
-                    handleInputChange("boursoClientId", e.target.value)
-                  }
-                  placeholder="Votre identifiant client BoursoBank"
-                  className="input-field"
-                />
-              </div>
-
-              <div className="text-sm text-[#8a8a8a]">
-                {settings.boursoAccountMappings.length ? (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShowBoursoAccountsDetails(!showBoursoAccountsDetails)
-                      }
-                      className="flex items-center gap-1 hover:text-[#f5f5f5] hover:text-[#f5f5f5] transition-colors"
-                    >
-                      {showBoursoAccountsDetails ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                      <span>
-                        {settings.boursoAccountMappings.length} compte(s)
-                        configuré(s)
-                      </span>
-                    </button>
-                    {showBoursoAccountsDetails && (
-                      <div className="mt-2 pl-5 space-y-1 text-xs">
-                        {settings.boursoAccountMappings.map((mapping) => {
-                          const sectionLabel =
-                            mapping.section === "ignore"
-                              ? "ignorer"
-                              : settings.accountSections.find(
-                                  (s) => s.id === mapping.section,
-                                )?.label || mapping.section;
-                          return (
-                            <div
-                              key={mapping.accountId}
-                              className="text-[#555555]"
-                            >
-                              {mapping.accountName} → {sectionLabel}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  "Aucun compte configuré"
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setDetectedBoursoAccounts([]);
-                  setBoursoPassword("");
-                  setBoursoError("");
-                  setShowBoursoModal(true);
-                }}
-                className="w-full px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] transition-colors"
-              >
-                Détecter et mapper les comptes
-              </button>
-              <p className="text-xs text-[#555555]">
-                Le mot de passe n'est jamais stocké. Pensez à sauvegarder vos
-                paramètres après la détection.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Colonne de droite - Clé API Etherscan */}
-        <div className="space-y-6">
-          <div className="bg-[#111111] rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
-              Clé API Etherscan
+              Données Marchés & Web3
             </h2>
 
             <div className="space-y-4">
@@ -929,7 +499,7 @@ const Settings: React.FC = () => {
                 "etherscanApiKey",
                 showEtherscanApi,
                 setShowEtherscanApi,
-                "Votre clé API Etherscan (pour toutes les chaînes)",
+                "Votre clé API Etherscan (optionnel)",
               )}
 
               {/* CoinGecko API Key */}
@@ -938,7 +508,7 @@ const Settings: React.FC = () => {
                 "coinGeckoApiKey",
                 showCoinGeckoApi,
                 setShowCoinGeckoApi,
-                "Votre clé API CoinGecko (optionnel)",
+                "Votre clé API CoinGecko Pro (optionnel)",
               )}
 
               {/* OpenSea API Key */}
@@ -952,382 +522,27 @@ const Settings: React.FC = () => {
             </div>
           </div>
 
-          {/* Section Gestion */}
-          <div className="bg-[#111111] rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-[#f5f5f5] mb-4">
-              Gestion
-            </h2>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
-                    Nom du type
-                  </label>
-                  <input
-                    type="text"
-                    value={sectionLabelDraft}
-                    onChange={(e) => setSectionLabelDraft(e.target.value)}
-                    placeholder="Ex: Livret A"
-                    className="input-field"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
-                    Type
-                  </label>
-                  <select
-                    value={sectionKindDraft}
-                    onChange={(e) =>
-                      setSectionKindDraft(e.target.value as AccountSectionKind)
-                    }
-                    className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] text-[#f5f5f5]"
-                  >
-                    <option value="bank">Compte bancaire</option>
-                    <option value="investment">Investissement</option>
-                  </select>
-                </div>
-              </div>
-
-              {sectionError && (
-                <div className="text-sm text-red-600 dark:text-red-400">
-                  {sectionError}
-                </div>
-              )}
-
+          {/* Information Connexions Bancaires */}
+          <div className="rounded-lg border border-[rgba(200,165,94,0.2)] bg-[rgba(200,165,94,0.04)] p-4 text-xs text-[#c8a55e]">
+            <div className="flex items-center gap-2 font-medium mb-1 text-[#f5f5f5]">
+              <ShieldCheck className="h-4 w-4 text-[#c8a55e]" />
+              Connexions Bancaires & Sidecar BoursoBank
+            </div>
+            <p className="text-[#a0a0a0] leading-relaxed">
+              Vos accès bancaires, y compris le Sidecar BoursoBank (comptes, livrets, PEA, CTO et transactions historiques),
+              sont désormais gérés et chiffrés directement dans l'onglet{" "}
               <button
                 type="button"
-                onClick={handleAddSection}
-                className="w-full px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] transition-colors"
+                onClick={() => navigate("/patrimoine?tab=connections")}
+                className="underline text-[#c8a55e] hover:text-[#d4b06a]"
               >
-                Ajouter un type
+                Patrimoine &gt; Connexions
               </button>
-
-              <div className="space-y-2">
-                {settings.accountSections.map((section) => {
-                  const sectionColumns = getSectionColumns(section.id);
-                  const sectionMapping =
-                    (settings.csvColumnMappings?.[section.id] as
-                      | (BankCsvColumnMapping & InvestmentCsvColumnMapping)
-                      | undefined) || {};
-                  const isBank = section.kind === "bank";
-                  const isCalcOpen = calcOpenBySection[section.id] ?? false;
-                  const previewContents = isBank
-                    ? []
-                    : getSectionContents(section.id);
-                  const previewCurrent = isBank
-                    ? null
-                    : sumFromContents(
-                        previewContents,
-                        sectionMapping.currentValueColumn,
-                        sectionMapping.currentValueMultiplierColumn,
-                      );
-                  const previewInitial = isBank
-                    ? null
-                    : sumFromContents(
-                        previewContents,
-                        sectionMapping.initialValueColumn,
-                        sectionMapping.initialValueMultiplierColumn,
-                      );
-                  const previewPnl = isBank
-                    ? null
-                    : sectionMapping.pnlColumn
-                      ? sumFromContents(
-                          previewContents,
-                          sectionMapping.pnlColumn,
-                        )
-                      : previewCurrent != null && previewInitial != null
-                        ? previewCurrent - previewInitial
-                        : null;
-
-                  const renderColumnSelect = (
-                    label: string,
-                    key: keyof (BankCsvColumnMapping &
-                      InvestmentCsvColumnMapping),
-                  ) => (
-                    <div className="space-y-1">
-                      <label className="block text-xs font-medium text-[#8a8a8a]">
-                        {label}
-                      </label>
-                      <select
-                        value={(sectionMapping[key] as string) || ""}
-                        onChange={(e) =>
-                          updateSectionMapping(section.id, {
-                            [key]: e.target.value || undefined,
-                          })
-                        }
-                        disabled={sectionColumns.length === 0}
-                        className="w-full px-2 py-1.5 text-sm rounded-md border border-[rgba(255,255,255,0.06)] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] text-[#f5f5f5]"
-                      >
-                        <option value="">
-                          Auto{" "}
-                          {sectionColumns.length === 0
-                            ? "(aucune colonne)"
-                            : ""}
-                        </option>
-                        {sectionColumns.map((col) => (
-                          <option key={col} value={col}>
-                            {col}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  );
-
-                  return (
-                    <div
-                      key={section.id}
-                      className="rounded-md border border-[rgba(255,255,255,0.06)] p-3 space-y-3"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="font-medium text-[#f5f5f5]">
-                            {section.label}
-                          </div>
-                          <div className="text-xs text-[#555555]">
-                            {section.kind === "investment"
-                              ? "Investissement"
-                              : "Compte bancaire"}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {!isBank && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCalcOpenBySection((prev) => ({
-                                  ...prev,
-                                  [section.id]: !isCalcOpen,
-                                }))
-                              }
-                              className="p-1 rounded-md text-[#555555] hover:text-[#8a8a8a] text-[#555555] hover:text-[#f5f5f5]"
-                              title={
-                                isCalcOpen
-                                  ? "Masquer le calcul"
-                                  : "Afficher le calcul"
-                              }
-                            >
-                              {isCalcOpen ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
-                              )}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleRenameSection(section)}
-                            className="p-1 rounded-md text-[#555555] hover:text-[#8a8a8a] text-[#555555] hover:text-[#f5f5f5]"
-                            title="Renommer"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteSection(section)}
-                            className="p-1 rounded-md text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                            title="Supprimer"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {isBank || !isCalcOpen ? null : (
-                        <div className="border-t border-[rgba(255,255,255,0.06)] pt-3 space-y-2">
-                          <div className="text-sm font-medium text-[#f5f5f5]">
-                            Calcul solde (valeur actuelle)
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {renderColumnSelect(
-                              "Colonne valeur actuelle",
-                              "currentValueColumn",
-                            )}
-                            {renderColumnSelect(
-                              "Multiplier par colonne",
-                              "currentValueMultiplierColumn",
-                            )}
-                            {renderColumnSelect(
-                              "Colonne investi initial",
-                              "initialValueColumn",
-                            )}
-                            {renderColumnSelect(
-                              "Multiplier initial par colonne",
-                              "initialValueMultiplierColumn",
-                            )}
-                            {renderColumnSelect(
-                              "Colonne performance (optionnel)",
-                              "pnlColumn",
-                            )}
-                          </div>
-                          <div className="text-[11px] text-[#555555]">
-                            Choisis une colonne et, si besoin, une colonne de
-                            multiplication (ex: prix de revient × nombre de
-                            parts).
-                          </div>
-                          <div className="rounded-md border border-[rgba(255,255,255,0.06)] bg-[#0a0a0a] dark:bg-[#1a1a1a] p-2 text-xs text-[#8a8a8a]">
-                            <div className="font-medium text-[#f5f5f5] mb-1">
-                              Aperçu calculé
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                              <div>
-                                <div className="text-[11px] text-[#555555]">
-                                  Valeur actuelle
-                                </div>
-                                <div>
-                                  {previewCurrent != null
-                                    ? previewCurrent.toLocaleString("fr-FR")
-                                    : "—"}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-[11px] text-[#555555]">
-                                  Investi initial
-                                </div>
-                                <div>
-                                  {previewInitial != null
-                                    ? previewInitial.toLocaleString("fr-FR")
-                                    : "—"}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-[11px] text-[#555555]">
-                                  P&L
-                                </div>
-                                <div>
-                                  {previewPnl != null
-                                    ? previewPnl.toLocaleString("fr-FR")
-                                    : "—"}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+              .
+            </p>
           </div>
         </div>
       </div>
-
-      {showBoursoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-2xl bg-[#111111] rounded-lg ">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[rgba(255,255,255,0.06)]">
-              <h3 className="text-lg font-semibold text-[#f5f5f5]">
-                Détection des comptes Bourso
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowBoursoModal(false)}
-                className="text-sm text-[#555555] hover:text-[#8a8a8a] text-[#555555] hover:text-[#f5f5f5]"
-              >
-                Fermer
-              </button>
-            </div>
-
-            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
-                  Mot de passe
-                </label>
-                <input
-                  type="password"
-                  value={boursoPassword}
-                  onChange={(e) => setBoursoPassword(e.target.value)}
-                  placeholder="Votre mot de passe BoursoBank"
-                  className="input-field"
-                />
-                <p className="text-xs text-[#555555] mt-2">
-                  Le mot de passe sert uniquement à la détection et n'est pas
-                  conservé.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleDetectBoursoAccounts}
-                disabled={boursoLoading}
-                className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-[#c8a55e] text-white rounded-md hover:bg-[#d4b06a] disabled:opacity-50"
-              >
-                {boursoLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Détection en cours...</span>
-                  </>
-                ) : (
-                  <span>Détecter les comptes</span>
-                )}
-              </button>
-
-              {boursoError && (
-                <div className="rounded-md bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 p-3 text-sm">
-                  {boursoError}
-                </div>
-              )}
-
-              <div className="space-y-3">
-                {detectedBoursoAccounts.length === 0 && (
-                  <div className="text-sm text-[#555555]">
-                    Cliquez sur "Détecter les comptes" pour lancer la détection.
-                  </div>
-                )}
-
-                {detectedBoursoAccounts.map((mapping) => (
-                  <div
-                    key={mapping.accountId}
-                    className="flex flex-col gap-2 rounded-md border border-[rgba(255,255,255,0.06)] p-3"
-                  >
-                    <div>
-                      <div className="font-medium text-[#f5f5f5]">
-                        {mapping.accountName}
-                      </div>
-                      <div className="text-xs text-[#555555]">
-                        {mapping.kind}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-[#8a8a8a] mb-1">
-                        Rubrique
-                      </label>
-                      <select
-                        value={mapping.section}
-                        onChange={(e) =>
-                          updateBoursoMappingSection(
-                            mapping.accountId,
-                            e.target.value as BoursoAccountSection,
-                          )
-                        }
-                        className="w-full px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2f2f2f] text-[#f5f5f5]"
-                      >
-                        {settings.accountSections.map((section) => (
-                          <option key={section.id} value={section.id}>
-                            {section.label}
-                          </option>
-                        ))}
-                        <option value="ignore">Ignorer</option>
-                      </select>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="px-4 py-3 border-t border-[rgba(255,255,255,0.06)] flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowBoursoModal(false)}
-                className="px-4 py-2 rounded-md bg-[#1a1a1a] text-[#8a8a8a] hover:bg-[#1a1a1a] dark:bg-[#1a1a1a]  dark:hover:bg-[#222222]"
-              >
-                Terminer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

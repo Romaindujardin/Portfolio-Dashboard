@@ -133,6 +133,9 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [txLoading, setTxLoading] = useState(false);
   const [txSearch, setTxSearch] = useState("");
+  const [txLimit, setTxLimit] = useState(500);
+  const [hasMoreTx, setHasMoreTx] = useState(false);
+  const [txLoadingMore, setTxLoadingMore] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [csvTargetAccountId, setCsvTargetAccountId] = useState<string | null>(null);
 
@@ -340,15 +343,37 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
     setTxAccount(account);
     setTxLoading(true);
     setTxSearch("");
+    setTxLimit(500);
     try {
       const data = await getTransactions(account.id, userId, { limit: 500 });
-      setTransactions(data || []);
+      const list = data || [];
+      setTransactions(list);
+      setHasMoreTx(list.length >= 500);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Impossible de charger les transactions";
       notify("error", message);
       setTransactions([]);
+      setHasMoreTx(false);
     } finally {
       setTxLoading(false);
+    }
+  };
+
+  const loadMoreTransactions = async () => {
+    if (!txAccount || txLoadingMore) return;
+    setTxLoadingMore(true);
+    try {
+      const nextLimit = txLimit + 500;
+      const data = await getTransactions(txAccount.id, userId, { limit: nextLimit });
+      const list = data || [];
+      setTransactions(list);
+      setTxLimit(nextLimit);
+      setHasMoreTx(list.length >= nextLimit);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Impossible de charger plus de transactions";
+      notify("error", message);
+    } finally {
+      setTxLoadingMore(false);
     }
   };
 
@@ -905,7 +930,8 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         footer={
           <div className="flex w-full items-center justify-between">
             <span className="text-xs text-[#8a8a8a]">
-              {transactions.length} transaction(s)
+              {transactions.length} transaction(s) affichée(s)
+              {hasMoreTx && !txSearch && " · d'autres transactions disponibles"}
             </span>
             <div className="flex items-center gap-2">
               {transactions.length > 0 && (
@@ -1011,6 +1037,20 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                   );
                 })}
             </div>
+            {hasMoreTx && !txSearch && (
+              <div className="pt-2 text-center border-t border-[rgba(255,255,255,0.06)]">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={loadMoreTransactions}
+                  loading={txLoadingMore}
+                  className="border border-[rgba(200,165,94,0.3)] text-[#c8a55e] hover:bg-[rgba(200,165,94,0.1)] text-xs"
+                >
+                  <ChevronDown className="h-3.5 w-3.5 mr-1" />
+                  Afficher plus (+500 transactions)
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </Modal>

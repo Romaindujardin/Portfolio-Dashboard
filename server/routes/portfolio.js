@@ -489,7 +489,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const transactions = repository.listTransactions(account.id, userId, {
         from: asDate(req.query.from),
         to: asDate(req.query.to),
-        limit: asOptionalInteger(req.query.limit, { min: 1, max: 5000 }) || 500,
+        limit: asOptionalInteger(req.query.limit, { min: 1, max: 20000 }) || 500,
       });
       res.json({ transactions });
     }),
