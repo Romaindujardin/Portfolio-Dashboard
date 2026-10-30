@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Eye, EyeOff, Plus, Sun, Moon, Euro, DollarSign } from "lucide-react";
+import { Search, Eye, EyeOff, Plus, Sun, Moon, Euro, DollarSign, Lock } from "lucide-react";
 import { toggleThemeWithTransition } from "../utils/themeToggle";
 import { useCurrency } from "../contexts/CurrencyContext";
+import { useUser } from "../contexts/UserContext";
 
 interface TopHeaderProps {
   onSearch?: (query: string) => void;
@@ -11,6 +12,7 @@ interface TopHeaderProps {
 const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
+  const { currentUser, lockUser } = useUser();
   const { isMasked, toggleMasked, currency, toggleCurrency, rateEurToUsd } = useCurrency();
   const [isDark, setIsDark] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -99,6 +101,17 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
           ) : (
             <DollarSign className="w-4 h-4 text-[#c8a55e] transition-transform duration-200 group-hover:scale-110" />
           )}
+        </button>
+
+        {/* Verrouiller la session */}
+        <button
+          type="button"
+          onClick={() => lockUser(currentUser)}
+          title={`Verrouiller la session (${currentUser})`}
+          className="p-2 rounded-full text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.06)] transition-all duration-200 group flex items-center justify-center"
+          aria-label={`Verrouiller la session de ${currentUser}`}
+        >
+          <Lock className="w-4 h-4 text-[#8a8a8a] group-hover:text-[#c8a55e] transition-colors duration-200" />
         </button>
 
         {/* Add Asset Pill Button */}

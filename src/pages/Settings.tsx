@@ -10,7 +10,6 @@ import {
   Check,
   Wallet,
   Loader2,
-  ShieldCheck,
   Lock,
   AlertCircle,
 } from "lucide-react";
@@ -751,26 +750,6 @@ const Settings: React.FC = () => {
                 "Votre clé API OpenSea (pour les NFTs)",
               )}
             </div>
-          </div>
-
-          {/* Information Connexions Bancaires */}
-          <div className="rounded-lg border border-[rgba(200,165,94,0.2)] bg-[rgba(200,165,94,0.04)] p-4 text-xs text-[#c8a55e]">
-            <div className="flex items-center gap-2 font-medium mb-1 text-[#f5f5f5]">
-              <ShieldCheck className="h-4 w-4 text-[#c8a55e]" />
-              Connexions Bancaires & Sidecar BoursoBank
-            </div>
-            <p className="text-[#a0a0a0] leading-relaxed">
-              Vos accès bancaires, y compris le Sidecar BoursoBank (comptes, livrets, PEA, CTO et transactions historiques),
-              sont désormais gérés et chiffrés directement dans l'onglet{" "}
-              <button
-                type="button"
-                onClick={() => navigate("/patrimoine?tab=connections")}
-                className="underline text-[#c8a55e] hover:text-[#d4b06a]"
-              >
-                Patrimoine &gt; Connexions
-              </button>
-              .
-            </p>
           </div>
         </div>
       </div>
