@@ -26,7 +26,6 @@ interface NavItem {
   name: string;
   path: string;
   icon: LucideIcon;
-  badge?: string;
   children?: NavChild[];
 }
 
@@ -50,14 +49,12 @@ const navItems: NavItem[] = [
     name: "Budget",
     path: "/budget",
     icon: Receipt,
-    badge: "Foyer",
     children: [{ name: "Stratégie", path: "/strategy" }],
   },
   {
     name: "Épargne",
     path: "/savings",
     icon: PiggyBank,
-    badge: "Foyer",
   },
   {
     name: "Conseiller IA",
@@ -147,12 +144,7 @@ const Sidebar: React.FC = () => {
                   className={`sidebar-link flex-1 min-w-0 ${isActive ? "active" : ""}`}
                 >
                   <Icon className="w-[18px] h-[18px] flex-shrink-0" />
-                  <span className="flex-1 truncate">{item.name}</span>
-                  {item.badge && (
-                    <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-[rgba(200,165,94,0.12)] text-[#c8a55e] border border-[rgba(200,165,94,0.25)] flex-shrink-0">
-                      {item.badge}
-                    </span>
-                  )}
+                  <span>{item.name}</span>
                 </Link>
                 {hasChildren && (
                   <button
@@ -245,7 +237,6 @@ const Sidebar: React.FC = () => {
               </div>
               <div className="flex-1 text-left min-w-0">
                 <p className="text-sm font-medium text-[#f5f5f5] truncate">{currentUser}</p>
-                <p className="text-[11px] text-[#8a8a8a] truncate">Profil individuel</p>
               </div>
               <ChevronDown className={`w-4 h-4 text-[#8a8a8a] transition-transform duration-200 ${isUserMenuOpen ? 'rotate-180' : ''}`} />
             </button>
