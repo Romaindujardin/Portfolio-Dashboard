@@ -58,6 +58,12 @@ import {
   ETF_CATALOG,
   resolveHoldingProfile,
 } from "../services/etfService.js";
+import {
+  hasUserPassword,
+  setUserPassword,
+  verifyUserPassword,
+  changeUserPassword,
+} from "../services/authService.js";
 
 const toBool = (value, fallback = false) => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -115,6 +121,84 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         counts: overview.counts,
         timestamp: nowIso(),
       });
+    }),
+  );
+
+  // ─── Authentification & Sécurité des profils ──────────────────────────────
+
+  router.get(
+    "/auth/status",
+    asyncHandler(async (req, res) => {
+      const username = String(req.query.username || "").trim();
+      if (!username) {
+        throw new HttpError(400, "Nom d'utilisateur requis");
+      }
+      const hasPassword = hasUserPassword(db, username);
+      res.json({ username, hasPassword });
+    }),
+  );
+
+  router.post(
+    "/auth/setup",
+    asyncHandler(async (req, res) => {
+      const { username, password } = req.body || {};
+      const cleanUsername = String(username || "").trim();
+      if (!cleanUsername) {
+        throw new HttpError(400, "Nom d'utilisateur requis");
+      }
+      if (!password || typeof password !== "string" || password.length < 4) {
+        throw new HttpError(
+          400,
+          "Le mot de passe doit comporter au moins 4 caractères",
+        );
+      }
+      try {
+        const result = setUserPassword(db, cleanUsername, password);
+        res.status(201).json(result);
+      } catch (err) {
+        throw new HttpError(400, err.message);
+      }
+    }),
+  );
+
+  router.post(
+    "/auth/verify",
+    asyncHandler(async (req, res) => {
+      const { username, password } = req.body || {};
+      const cleanUsername = String(username || "").trim();
+      if (!cleanUsername) {
+        throw new HttpError(400, "Nom d'utilisateur requis");
+      }
+      const isValid = verifyUserPassword(db, cleanUsername, password || "");
+      if (!isValid) {
+        throw new HttpError(401, "Mot de passe incorrect");
+      }
+      res.json({ success: true, username: cleanUsername });
+    }),
+  );
+
+  router.post(
+    "/auth/change-password",
+    asyncHandler(async (req, res) => {
+      const { username, currentPassword, newPassword } = req.body || {};
+      const cleanUsername = String(username || "").trim();
+      if (!cleanUsername) {
+        throw new HttpError(400, "Nom d'utilisateur requis");
+      }
+      try {
+        const result = changeUserPassword(
+          db,
+          cleanUsername,
+          currentPassword,
+          newPassword,
+        );
+        res.json(result);
+      } catch (err) {
+        const status = err.message?.toLowerCase().includes("incorrect")
+          ? 401
+          : 400;
+        throw new HttpError(status, err.message);
+      }
     }),
   );
 

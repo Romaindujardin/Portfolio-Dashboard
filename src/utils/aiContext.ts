@@ -8,13 +8,11 @@ import type {
   PocketCategory,
   PocketOwnership,
   SavingsPocket,
-  TricountExpense,
 } from "../types";
 import type {
   Property,
   Loan,
   Quote,
-  PortfolioAccount,
   PortfolioEtfBreakdown,
 } from "../types/portfolio";
 import {
@@ -48,7 +46,6 @@ import { getUserSettings } from "./userSettings";
 import {
   getProperties,
   getLoans,
-  getOverview,
   getEtfBreakdown,
   getMarketIndices,
 } from "../services/portfolioApi";
@@ -383,13 +380,13 @@ export const buildPropertiesAndLoansContext = async (
   if (properties.length > 0) {
     const pLines: string[] = [];
     for (const prop of properties) {
-      const val = prop.estimatedValue ?? prop.purchasePrice ?? 0;
+      const val = prop.currentValue ?? prop.purchasePrice ?? 0;
       totalPropertiesValue += val;
       const bits: string[] = [prop.name || "Bien immobilier"];
       if (prop.city) bits.push(prop.city);
       if (val > 0) bits.push(`estimation ${formatEur(val)}`);
       if (prop.purchasePrice) bits.push(`achat ${formatEur(prop.purchasePrice)}`);
-      if (prop.rentalStatus) bits.push(`statut : ${prop.rentalStatus}`);
+      if (prop.rentalIncome) bits.push(`loyer ${formatEur(prop.rentalIncome)}/mois`);
       pLines.push(`- ${bits.join(" · ")}`);
     }
     parts.push(
@@ -400,13 +397,12 @@ export const buildPropertiesAndLoansContext = async (
   if (loans.length > 0) {
     const lLines: string[] = [];
     for (const loan of loans) {
-      const remaining = loan.remainingPrincipal ?? loan.initialAmount ?? 0;
+      const remaining = loan.principal ?? 0;
       totalDebt += remaining;
       const bits: string[] = [loan.name || "Crédit"];
       if (remaining > 0) bits.push(`capital restant dû ${formatEur(remaining)}`);
-      if (loan.initialAmount) bits.push(`montant initial ${formatEur(loan.initialAmount)}`);
       if (loan.monthlyPayment) bits.push(`mensualité ${formatEur(loan.monthlyPayment)}/mois`);
-      if (loan.interestRate != null) bits.push(`taux ${formatPercent(loan.interestRate)}`);
+      if (loan.annualRate != null) bits.push(`taux ${formatPercent(loan.annualRate)}`);
       lLines.push(`- ${bits.join(" · ")}`);
     }
     parts.push(
@@ -775,13 +771,19 @@ export const buildBudgetContext = (
   if (strategy.household?.enabled) {
     const p1Name = strategy.household.person1?.name || "Personne 1";
     const p2Name = strategy.household.person2?.name || "Personne 2";
-    parts.push(
-      `- Dépenses payées : ${p1Name} ${formatEur(summary.p1Expenses)} · ${p2Name} ${formatEur(summary.p2Expenses)}`,
-    );
-    if (summary.balanceSummary) {
+    if (summary.balance) {
       parts.push(
-        `- Équilibre des comptes : ${summary.balanceSummary.statusMessage || "Comptes à l'équilibre"}`,
+        `- Dépenses payées : ${p1Name} ${formatEur(summary.balance.totalP1Paid)} · ${p2Name} ${formatEur(summary.balance.totalP2Paid)}`,
       );
+      if (summary.balance.transferAmount > 0) {
+        const debtorName = summary.balance.debtor === "person1" ? p1Name : p2Name;
+        const creditorName = summary.balance.creditor === "person1" ? p1Name : p2Name;
+        parts.push(
+          `- Équilibre des comptes : ${debtorName} doit ${formatEur(summary.balance.transferAmount)} à ${creditorName}`,
+        );
+      } else {
+        parts.push("- Équilibre des comptes : Comptes à l'équilibre");
+      }
     }
   }
 
@@ -812,7 +814,7 @@ export interface SavingsRealContextResult {
 }
 
 export const buildSavingsRealContext = (
-  userId: string,
+  _userId: string,
 ): SavingsRealContextResult => {
   const allExpenses = getStoredExpenses();
   const placements = allExpenses.filter(
@@ -886,10 +888,10 @@ export const buildMarketLookthroughContext = async (
     "### Décomposition Look-Through des ETF du portefeuille (méthode Picsou)",
   );
 
-  if (breakdown && breakdown.etfs && breakdown.etfs.length > 0) {
+  if (breakdown && breakdown.assets && breakdown.assets.length > 0) {
     parts.push(
-      `- ETF détectés dans vos portefeuilles : ${breakdown.etfs
-        .map((e) => `${e.name} (${e.ticker}) · valeur ${formatEur(e.value)}`)
+      `- ETF détectés dans vos portefeuilles : ${breakdown.assets
+        .map((e) => `${e.name} (${e.ticker || ""}) · valeur ${formatEur(e.value)}`)
         .join(", ")}`,
     );
     if (breakdown.sectors && breakdown.sectors.length > 0) {
@@ -936,7 +938,7 @@ export const buildMarketLookthroughContext = async (
 
   return {
     text: parts.join("\n\n"),
-    etfs: breakdown?.etfs?.length || 0,
+    etfs: breakdown?.assets?.length || 0,
   };
 };
 
@@ -1137,7 +1139,7 @@ export const getAiContextPreview = async (
 
   try {
     const breakdown = await getEtfBreakdown(userId).catch(() => null);
-    const etfCount = breakdown?.etfs?.length || 0;
+    const etfCount = breakdown?.assets?.length || 0;
     market_lookthrough =
       etfCount > 0 ? `${etfCount} ETF analysé(s)` : "Indices & ETF marché";
   } catch (error) {

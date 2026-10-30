@@ -6,7 +6,6 @@
 import {
   getEtfProfile,
   getMarketIndices,
-  getOverview,
   getQuote,
   searchSymbols,
 } from "../services/portfolioApi";
@@ -315,7 +314,7 @@ export const calculateRebalancing = (
 export const executeAdvisorTool = async (
   name: string,
   args: Record<string, any>,
-  userId: string,
+  _userId: string,
 ): Promise<any> => {
   try {
     switch (name) {
@@ -358,24 +357,27 @@ export const executeAdvisorTool = async (
         if (!query) return { error: "Veuillez fournir un ticker ou ISIN d'ETF." };
         const profile = await getEtfProfile(query);
         return {
+          id: profile.id,
           name: profile.name,
-          ticker: profile.ticker,
-          isin: profile.isin,
-          expenseRatio: profile.expenseRatio,
-          aumEur: profile.aumEur,
+          type: profile.type,
+          benchmark: profile.benchmark,
           topHoldings: (profile.topHoldings || []).slice(0, 10).map((h) => ({
             name: h.name,
             weight: h.weight,
             ticker: h.ticker,
           })),
-          sectors: (profile.sectors || []).slice(0, 8).map((s) => ({
-            sector: s.sector,
-            weight: s.weight,
-          })),
-          countries: (profile.countries || []).slice(0, 8).map((c) => ({
-            country: c.country,
-            weight: c.weight,
-          })),
+          sectors: Object.entries(profile.sectors || {})
+            .slice(0, 8)
+            .map(([sector, weight]) => ({
+              sector,
+              weight,
+            })),
+          countries: Object.entries(profile.countries || {})
+            .slice(0, 8)
+            .map(([country, weight]) => ({
+              country,
+              weight,
+            })),
         };
       }
 

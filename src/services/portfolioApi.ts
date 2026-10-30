@@ -602,4 +602,31 @@ export const importAccountCsv = (
     ...json({ user_id: userId, ...payload }),
   });
 
+// ─── Authentification & Sécurité des profils ────────────────────────────────
+
+export const getAuthStatus = (username: string) =>
+  request<{ username: string; hasPassword: boolean }>("/auth/status", {
+    query: { username },
+  });
+
+export const setupPassword = (username: string, password: string) =>
+  request<{ success: boolean; username: string }>("/auth/setup", {
+    ...json({ username, password }),
+  });
+
+export const verifyPassword = (username: string, password: string) =>
+  request<{ success: boolean; username: string }>("/auth/verify", {
+    ...json({ username, password }),
+  });
+
+export const changePassword = (
+  username: string,
+  currentPassword: string,
+  newPassword: string,
+) =>
+  request<{ success: boolean; message: string }>("/auth/change-password", {
+    ...json({ username, currentPassword, newPassword }),
+  });
+
+
 

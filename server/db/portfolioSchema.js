@@ -278,6 +278,15 @@ export function initializePortfolioSchema(db) {
       currency   TEXT,
       updated_at TEXT NOT NULL
     );
+
+    -- Identifiants & mots de passe sécurisés par profil (scrypt + timing-safe)
+    CREATE TABLE IF NOT EXISTS user_credentials (
+      username      TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      salt          TEXT NOT NULL,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
   `);
 
   // Colonnes ajoutées après coup (bases déjà créées par une version antérieure).

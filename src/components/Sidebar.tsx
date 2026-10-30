@@ -13,6 +13,7 @@ import {
   Menu,
   Wallet2,
   TrendingUp,
+  Lock,
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import type { LucideIcon } from "lucide-react";
@@ -65,8 +66,14 @@ const navItems: NavItem[] = [
 
 const Sidebar: React.FC = () => {
   const location = useLocation();
-  const { currentUser, setCurrentUser, availableUsers, addUser, deleteUser } =
-    useUser();
+  const {
+    currentUser,
+    availableUsers,
+    addUser,
+    deleteUser,
+    lockUser,
+    requestUserSwitch,
+  } = useUser();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState("");
@@ -251,7 +258,7 @@ const Sidebar: React.FC = () => {
                     >
                       <button
                         onClick={() => {
-                          setCurrentUser(user);
+                          requestUserSwitch(user);
                           setIsUserMenuOpen(false);
                         }}
                         className={`flex items-center gap-2 flex-1 text-left text-sm transition-colors duration-200 ${
@@ -293,6 +300,20 @@ const Sidebar: React.FC = () => {
                       </div>
                     </div>
                   ))}
+
+                  {/* Option Verrouiller la session */}
+                  <div className="border-t border-[rgba(255,255,255,0.06)] pt-1">
+                    <button
+                      onClick={() => {
+                        lockUser(currentUser);
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex items-center w-full px-3 py-2 text-sm text-[#8a8a8a] hover:text-[#f5f5f5] hover:bg-[rgba(255,255,255,0.04)] transition-colors duration-200"
+                    >
+                      <Lock className="h-3.5 w-3.5 mr-2 text-[#c8a55e]" />
+                      Verrouiller la session
+                    </button>
+                  </div>
 
                   {/* Bouton pour ajouter un utilisateur (limité à 2 utilisateurs max) */}
                   {availableUsers.length < 2 && (

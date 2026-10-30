@@ -4,17 +4,32 @@ import React, {
   useState,
   ReactNode,
   useEffect,
+  useCallback,
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { deleteUserData } from "../utils/storage";
 import { applyUserTheme, getUserAccentColor } from "../utils/theme";
+import { getAuthStatus } from "../services/portfolioApi";
 
-interface UserContextType {
+export interface UserContextType {
   currentUser: string;
   setCurrentUser: (user: string) => void;
   availableUsers: string[];
   addUser: (userName: string) => void;
   deleteUser: (userName: string) => void;
+
+  // Sécurité et verrouillage de session
+  isLocked: boolean;
+  isUnlocked: boolean;
+  authTargetUser: string;
+  authMode: "setup" | "unlock" | null;
+  isCheckingAuth: boolean;
+  unlockUser: (user: string) => void;
+  lockUser: (user?: string) => void;
+  lockAll: () => void;
+  requestUserSwitch: (targetUser: string) => Promise<void>;
+  openAuthModal: (user: string, mode: "setup" | "unlock") => void;
+  cancelAuthModal: () => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -30,6 +45,35 @@ export const useUser = () => {
 interface UserProviderProps {
   children: ReactNode;
 }
+
+const isSessionUnlocked = (username: string): boolean => {
+  try {
+    return sessionStorage.getItem(`portfolio_auth_unlocked_${username}`) === "true";
+  } catch {
+    return false;
+  }
+};
+
+const markSessionUnlocked = (username: string) => {
+  try {
+    sessionStorage.setItem(`portfolio_auth_unlocked_${username}`, "true");
+  } catch {}
+};
+
+const clearSessionUnlocked = (username?: string) => {
+  try {
+    if (username) {
+      sessionStorage.removeItem(`portfolio_auth_unlocked_${username}`);
+    } else {
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const key = sessionStorage.key(i);
+        if (key && key.startsWith("portfolio_auth_unlocked_")) {
+          sessionStorage.removeItem(key);
+        }
+      }
+    }
+  } catch {}
+};
 
 export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const location = useLocation();
@@ -58,6 +102,53 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   const [availableUsers, setAvailableUsers] =
     useState<string[]>(getInitialUsers);
+
+  // États de sécurité & authentification
+  const [isLocked, setIsLocked] = useState<boolean>(() => !isSessionUnlocked(currentUser));
+  const [authTargetUser, setAuthTargetUser] = useState<string>(currentUser);
+  const [authMode, setAuthMode] = useState<"setup" | "unlock" | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+
+  // Vérification de l'état d'authentification pour un utilisateur donné
+  const checkUserAuth = useCallback(async (user: string) => {
+    if (isSessionUnlocked(user)) {
+      setIsLocked(false);
+      setAuthMode(null);
+      setIsCheckingAuth(false);
+      return;
+    }
+
+    setIsCheckingAuth(true);
+    try {
+      const status = await getAuthStatus(user);
+      if (!status.hasPassword) {
+        // Premier accès ou aucun mot de passe configuré
+        setIsLocked(true);
+        setAuthTargetUser(user);
+        setAuthMode("setup");
+      } else {
+        // Mot de passe configuré : session verrouillée
+        setIsLocked(true);
+        setAuthTargetUser(user);
+        setAuthMode("unlock");
+      }
+    } catch (err) {
+      console.warn("Impossible de vérifier l'état d'authentification:", err);
+      // En cas d'erreur réseau, ne pas bloquer si la session est déjà ouverte
+      if (!isSessionUnlocked(user)) {
+        setIsLocked(true);
+        setAuthTargetUser(user);
+        setAuthMode("unlock");
+      }
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  }, []);
+
+  // Vérifier l'authentification au démarrage de l'app ou si currentUser change
+  useEffect(() => {
+    checkUserAuth(currentUser);
+  }, [currentUser, checkUserAuth]);
 
   // Sauvegarder les utilisateurs dans le localStorage quand ils changent (toujours borné à 2)
   useEffect(() => {
@@ -97,11 +188,75 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     if (settingsMatch) {
       const settingsUser = settingsMatch[1];
       if (settingsUser !== currentUser) {
-        // Rediriger vers les paramètres de l'utilisateur actuel
         navigate(`/settings/${currentUser}`, { replace: true });
       }
     }
   }, [currentUser, location.pathname, navigate]);
+
+  const unlockUser = (user: string) => {
+    markSessionUnlocked(user);
+    setCurrentUser(user);
+    setAuthTargetUser(user);
+    setIsLocked(false);
+    setAuthMode(null);
+  };
+
+  const lockUser = (user?: string) => {
+    const target = user || currentUser;
+    clearSessionUnlocked(target);
+    if (target === currentUser) {
+      setIsLocked(true);
+      setAuthTargetUser(target);
+      setAuthMode("unlock");
+    }
+  };
+
+  const lockAll = () => {
+    clearSessionUnlocked();
+    setIsLocked(true);
+    setAuthTargetUser(currentUser);
+    setAuthMode("unlock");
+  };
+
+  const requestUserSwitch = async (targetUser: string) => {
+    if (targetUser === currentUser) {
+      if (isLocked) {
+        await checkUserAuth(currentUser);
+      }
+      return;
+    }
+
+    if (isSessionUnlocked(targetUser)) {
+      // Déjà déverrouillé dans l'onglet
+      setCurrentUser(targetUser);
+      setAuthTargetUser(targetUser);
+      setIsLocked(false);
+      setAuthMode(null);
+      return;
+    }
+
+    // Demander le mot de passe pour targetUser
+    setAuthTargetUser(targetUser);
+    try {
+      const status = await getAuthStatus(targetUser);
+      setAuthMode(status.hasPassword ? "unlock" : "setup");
+    } catch {
+      setAuthMode("unlock");
+    }
+  };
+
+  const openAuthModal = (user: string, mode: "setup" | "unlock") => {
+    setAuthTargetUser(user);
+    setAuthMode(mode);
+  };
+
+  const cancelAuthModal = () => {
+    if (authTargetUser !== currentUser) {
+      // Annule la bascule vers l'autre utilisateur
+      setAuthTargetUser(currentUser);
+      setAuthMode(isSessionUnlocked(currentUser) ? null : "unlock");
+    }
+  };
 
   const addUser = (userName: string) => {
     if (availableUsers.length >= 2) return;
@@ -115,6 +270,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     if (availableUsers.length > 1) {
       // Supprimer toutes les données de l'utilisateur
       await deleteUserData(userName);
+      clearSessionUnlocked(userName);
 
       // Supprimer l'utilisateur de la liste
       setAvailableUsers((prev) => prev.filter((user) => user !== userName));
@@ -122,10 +278,12 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       // Si l'utilisateur supprimé était l'utilisateur actuel, changer vers le premier utilisateur disponible
       if (currentUser === userName) {
         const remainingUsers = availableUsers.filter(
-          (user) => user !== userName
+          (user) => user !== userName,
         );
         if (remainingUsers.length > 0) {
-          setCurrentUser(remainingUsers[0]);
+          const nextUser = remainingUsers[0];
+          setCurrentUser(nextUser);
+          checkUserAuth(nextUser);
         }
       }
     }
@@ -139,6 +297,17 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
         availableUsers,
         addUser,
         deleteUser,
+        isLocked,
+        isUnlocked: !isLocked,
+        authTargetUser,
+        authMode,
+        isCheckingAuth,
+        unlockUser,
+        lockUser,
+        lockAll,
+        requestUserSwitch,
+        openAuthModal,
+        cancelAuthModal,
       }}
     >
       {children}

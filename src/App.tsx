@@ -11,6 +11,7 @@ import Settings from "./pages/Settings";
 import Patrimoine from "./pages/Patrimoine";
 import Market from "./pages/Market";
 import ErrorBoundary from "./components/ErrorBoundary";
+import AuthModal from "./components/AuthModal";
 import { UserProvider } from "./contexts/UserContext";
 import { CurrencyProvider } from "./contexts/CurrencyContext";
 import { initializeCryptoDatabase } from "./utils/cryptoDatabase";
@@ -61,6 +62,7 @@ function App() {
     <Router>
       <UserProvider>
         <CurrencyProvider>
+          <AuthModal />
           <div className="min-h-screen bg-[#0a0a0a]">
             <Sidebar />
             <main className="main-content">
