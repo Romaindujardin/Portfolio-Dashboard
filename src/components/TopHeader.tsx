@@ -4,13 +4,8 @@ import { Eye, EyeOff, Plus, Sun, Moon, Euro, DollarSign, Lock } from "lucide-rea
 import { toggleThemeWithTransition } from "../utils/themeToggle";
 import { useCurrency } from "../contexts/CurrencyContext";
 import { useUser } from "../contexts/UserContext";
-import GlobalSearch from "./GlobalSearch";
 
-interface TopHeaderProps {
-  onSearch?: (query: string) => void;
-}
-
-const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
+const TopHeader: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser, lockUser } = useUser();
   const { isMasked, toggleMasked, currency, toggleCurrency, rateEurToUsd } = useCurrency();
@@ -36,9 +31,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({ onSearch }) => {
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-[rgba(255,255,255,0.06)]">
-      {/* Search Bar avec Omnisearch, recherche d'actifs et cotations directes */}
-      <GlobalSearch onSearchChange={onSearch} />
+    <header className="sticky top-0 z-30 flex items-center justify-end px-6 py-4 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-[rgba(255,255,255,0.06)]">
 
       {/* Right Actions */}
       <div className="flex items-center gap-2 sm:gap-3">
