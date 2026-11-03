@@ -52,6 +52,31 @@ const formatEur = (val: number | null | undefined): string => {
   return formatMoney(val, { fallback: "0,00 €" });
 };
 
+export const getBankBadgeInfo = (
+  bankAccount?: string,
+  payerOrBeneficiary?: string,
+): { label: string; className: string } => {
+  const b = (bankAccount || "").toLowerCase();
+  const isBnp =
+    b.includes("bnp") ||
+    b.includes("delporte") ||
+    (payerOrBeneficiary === "person2" && !b.includes("bourso"));
+
+  if (isBnp) {
+    return {
+      label: "BNP Paribas",
+      className:
+        "text-[9px] px-1.5 py-0.5 rounded font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-500/20",
+    };
+  }
+
+  return {
+    label: "BoursoBank",
+    className:
+      "text-[9px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-500/20",
+  };
+};
+
 const BudgetTricount: React.FC = () => {
   const { currentUser, availableUsers } = useUser();
   useCurrency();
@@ -207,11 +232,40 @@ const BudgetTricount: React.FC = () => {
     return summary.totalIncome;
   }, [strategy.incomes, monthlyConfig, summary.totalIncome]);
 
-  const togglePocket = (pocketId: string) => {
-    setExpandedPockets((prev) => ({
-      ...prev,
-      [pocketId]: !prev[pocketId],
-    }));
+  const togglePocket = (pocketId: string, defaultExpanded: boolean = false) => {
+    setExpandedPockets((prev) => {
+      const current = prev[pocketId] !== undefined ? prev[pocketId] : defaultExpanded;
+      return {
+        ...prev,
+        [pocketId]: !current,
+      };
+    });
+  };
+
+  const allPocketIds = useMemo(() => {
+    const ids: string[] = ["incomes"];
+    summary.expenseComparisons.forEach((c) => ids.push(c.pocketId));
+    summary.placementComparisons.forEach((c) => ids.push(c.pocketId));
+    return ids;
+  }, [summary]);
+
+  const areAllExpanded =
+    allPocketIds.length > 0 && allPocketIds.every((id) => expandedPockets[id] === true);
+
+  const toggleAllPockets = () => {
+    if (areAllExpanded) {
+      const next: Record<string, boolean> = {};
+      allPocketIds.forEach((id) => {
+        next[id] = false;
+      });
+      setExpandedPockets(next);
+    } else {
+      const next: Record<string, boolean> = {};
+      allPocketIds.forEach((id) => {
+        next[id] = true;
+      });
+      setExpandedPockets(next);
+    }
   };
 
   // Ouvrir modale ajout opération (avec poche et nature optionnelles)
@@ -343,12 +397,20 @@ const BudgetTricount: React.FC = () => {
 
     addOrUpdateExpense(newExpense);
     setIsExpenseModalOpen(false);
+
+    if (expenseMonth !== selectedMonth) {
+      setSelectedMonth(expenseMonth);
+    }
+    if (newExpense.pocketId) {
+      setExpandedPockets((prev) => ({ ...prev, [newExpense.pocketId]: true }));
+    }
+
     showToast(
       editingExpense
         ? "Opération mise à jour !"
         : formNature === "placement"
-          ? "Placement ajouté avec succès !"
-          : "Dépense ajoutée avec succès !",
+          ? `Placement ajouté avec succès (${formatMonthLabel(expenseMonth)}) !`
+          : `Dépense ajoutée avec succès (${formatMonthLabel(expenseMonth)}) !`,
     );
   };
 
@@ -420,8 +482,16 @@ const BudgetTricount: React.FC = () => {
 
     addOrUpdateIncome(newIncome);
     setIsIncomeItemModalOpen(false);
+
+    if (incomeMonth !== selectedMonth) {
+      setSelectedMonth(incomeMonth);
+    }
+    setExpandedPockets((prev) => ({ ...prev, incomes: true }));
+
     showToast(
-      editingIncome ? "Revenu mis à jour !" : "Revenu ajouté avec succès !",
+      editingIncome
+        ? "Revenu mis à jour !"
+        : `Revenu ajouté avec succès (${formatMonthLabel(incomeMonth)}) !`,
     );
   };
 
@@ -850,6 +920,15 @@ const BudgetTricount: React.FC = () => {
                 <option value="person2">{p2Name}</option>
               </select>
             )}
+
+            {/* Bouton Tout déplier / Tout replier */}
+            <button
+              type="button"
+              onClick={toggleAllPockets}
+              className="text-xs px-2.5 py-1 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#141414] text-[#a0a0a0] hover:text-[#f5f5f5] hover:border-[rgba(255,255,255,0.15)] transition whitespace-nowrap"
+            >
+              {areAllExpanded ? "Tout replier" : "Tout déplier"}
+            </button>
           </div>
         </div>
 
@@ -858,8 +937,8 @@ const BudgetTricount: React.FC = () => {
           <div className="card p-4 sm:p-5 space-y-4">
             {/* ===== 1. POCHE REVENUS DU MOIS ===== */}
             {(() => {
-              const isIncomeExpanded =
-                !!expandedPockets["incomes"] ||
+              const defaultIncomeExpanded =
+                (incomes.length > 0 && incomes.length <= 5) ||
                 (searchTerm.trim().length > 0 &&
                   incomes.some(
                     (i) =>
@@ -870,6 +949,10 @@ const BudgetTricount: React.FC = () => {
                         .toLowerCase()
                         .includes(searchTerm.toLowerCase()),
                   ));
+              const isIncomeExpanded =
+                expandedPockets["incomes"] !== undefined
+                  ? !!expandedPockets["incomes"]
+                  : defaultIncomeExpanded;
 
               const percentIncomeReceived =
                 plannedIncome > 0
@@ -909,7 +992,7 @@ const BudgetTricount: React.FC = () => {
                   {/* Ligne d'en-tête cliquable */}
                   <div
                     className="flex items-center justify-between cursor-pointer select-none"
-                    onClick={() => togglePocket("incomes")}
+                    onClick={() => togglePocket("incomes", defaultIncomeExpanded)}
                   >
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-emerald-500" />
@@ -936,7 +1019,7 @@ const BudgetTricount: React.FC = () => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          togglePocket("incomes");
+                          togglePocket("incomes", defaultIncomeExpanded);
                         }}
                         className="p-1 rounded-lg text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] hover:bg-[#1a1a1a]/60 hover:bg-[rgba(255,255,255,0.04)] transition"
                         aria-label={
@@ -1071,11 +1154,14 @@ const BudgetTricount: React.FC = () => {
                                     <td className="px-3 py-2 font-medium text-[#f5f5f5]">
                                       <div className="flex items-center gap-1.5">
                                         <span>{inc.label}</span>
-                                        {inc.source === "bank_import" && (
-                                          <span className="text-[9px] px-1 py-0.2 rounded font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                                            BoursoBank
-                                          </span>
-                                        )}
+                                        {inc.source === "bank_import" && (() => {
+                                          const badge = getBankBadgeInfo(inc.bankAccount, inc.beneficiaryPersonId);
+                                          return (
+                                            <span className={badge.className}>
+                                              {badge.label}
+                                            </span>
+                                          );
+                                        })()}
                                       </div>
                                       {inc.notes && (
                                         <div className="text-[10px] text-[#555555] truncate max-w-xs">
@@ -1203,9 +1289,13 @@ const BudgetTricount: React.FC = () => {
                 })
                 .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
-              const isExpanded =
-                !!expandedPockets[comp.pocketId] ||
+              const defaultExpanded =
+                (pocketExpenses.length > 0 && pocketExpenses.length <= 5) ||
                 (searchTerm.trim().length > 0 && pocketExpenses.length > 0);
+              const isExpanded =
+                expandedPockets[comp.pocketId] !== undefined
+                  ? !!expandedPockets[comp.pocketId]
+                  : defaultExpanded;
 
               const percentConsumed =
                 comp.plannedAmount > 0
@@ -1227,7 +1317,7 @@ const BudgetTricount: React.FC = () => {
                   {/* Ligne d'en-tête cliquable */}
                   <div
                     className="flex items-center justify-between cursor-pointer select-none"
-                    onClick={() => togglePocket(comp.pocketId)}
+                    onClick={() => togglePocket(comp.pocketId, defaultExpanded)}
                   >
                     <div className="flex items-center gap-2">
                       <span
@@ -1284,7 +1374,7 @@ const BudgetTricount: React.FC = () => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          togglePocket(comp.pocketId);
+                          togglePocket(comp.pocketId, defaultExpanded);
                         }}
                         className="p-1 rounded-lg text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)] transition"
                         aria-label={
@@ -1444,11 +1534,14 @@ const BudgetTricount: React.FC = () => {
                                             ↳ {exp.subPocketName}
                                           </span>
                                         )}
-                                        {exp.source === "bank_import" && (
-                                          <span className="text-[9px] px-1 py-0.2 rounded font-medium bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
-                                            BoursoBank
-                                          </span>
-                                        )}
+                                        {exp.source === "bank_import" && (() => {
+                                          const badge = getBankBadgeInfo(exp.bankAccount, exp.payerPersonId);
+                                          return (
+                                            <span className={badge.className}>
+                                              {badge.label}
+                                            </span>
+                                          );
+                                        })()}
                                       </div>
                                       {exp.notes && (
                                         <div className="text-[10px] text-[#555555] truncate max-w-xs">
@@ -1608,9 +1701,13 @@ const BudgetTricount: React.FC = () => {
                   })
                   .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
-                const isExpanded =
-                  !!expandedPockets[comp.pocketId] ||
+                const defaultExpanded =
+                  (placementOps.length > 0 && placementOps.length <= 5) ||
                   (searchTerm.trim().length > 0 && placementOps.length > 0);
+                const isExpanded =
+                  expandedPockets[comp.pocketId] !== undefined
+                    ? !!expandedPockets[comp.pocketId]
+                    : defaultExpanded;
 
                 const allocatedFromReal = comp.allocatedFromReal ?? 0;
                 const percentPlaced =
@@ -1628,7 +1725,7 @@ const BudgetTricount: React.FC = () => {
                     {/* Ligne d'en-tête cliquable */}
                     <div
                       className="flex items-center justify-between cursor-pointer select-none"
-                      onClick={() => togglePocket(comp.pocketId)}
+                      onClick={() => togglePocket(comp.pocketId, defaultExpanded)}
                     >
                       <div className="flex items-center gap-2">
                         <span
@@ -1679,7 +1776,7 @@ const BudgetTricount: React.FC = () => {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            togglePocket(comp.pocketId);
+                            togglePocket(comp.pocketId, defaultExpanded);
                           }}
                           className="p-1 rounded-lg text-[#555555] hover:text-[#f5f5f5] hover:text-[#f5f5f5] hover:bg-[#1a1a1a] hover:bg-[rgba(255,255,255,0.04)] transition"
                           aria-label={
@@ -1976,11 +2073,14 @@ const BudgetTricount: React.FC = () => {
                                                     ? "Investissement"
                                                     : "Épargne"}
                                           </span>
-                                          {exp.source === "bank_import" && (
-                                            <span className="text-[9px] px-1 py-0.2 rounded font-medium bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
-                                              BoursoBank
-                                            </span>
-                                          )}
+                                          {exp.source === "bank_import" && (() => {
+                                            const badge = getBankBadgeInfo(exp.bankAccount, exp.payerPersonId);
+                                            return (
+                                              <span className={badge.className}>
+                                                {badge.label}
+                                              </span>
+                                            );
+                                          })()}
                                         </div>
                                         {exp.notes && (
                                           <div className="text-[10px] text-[#555555] truncate max-w-xs">

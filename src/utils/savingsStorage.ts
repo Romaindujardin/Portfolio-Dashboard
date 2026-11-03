@@ -549,11 +549,8 @@ export const getCurrentMonthKey = (): string => {
 export const STORAGE_KEY_MONTHLY_STRATEGIES = "portfolio_monthly_savings_strategies";
 
 export const getStoredMonthlyStrategies = (): Record<string, SavingsStrategy> => {
-  const currentMonth = getCurrentMonthKey();
   if (typeof window === "undefined") {
-    return {
-      [currentMonth]: DEFAULT_SAVINGS_STRATEGY,
-    };
+    return {};
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY_MONTHLY_STRATEGIES);
@@ -566,9 +563,7 @@ export const getStoredMonthlyStrategies = (): Record<string, SavingsStrategy> =>
   } catch (e) {
     console.error("Erreur lors de la lecture des stratégies mensuelles:", e);
   }
-  return {
-    [currentMonth]: DEFAULT_SAVINGS_STRATEGY,
-  };
+  return {};
 };
 
 export const saveStoredMonthlyStrategies = (

@@ -34,6 +34,8 @@ import type {
   TricountPayer,
   TricountBeneficiary,
   TricountSplitMethod,
+  SavingsPocket,
+  PocketSubItem,
 } from "../../types";
 import {
   createAccount,
@@ -54,6 +56,7 @@ import {
   deleteIncome,
   getStoredExpenses,
   getStoredIncomes,
+  syncTricountWithDatabase,
 } from "../../utils/tricountStorage";
 import { getSavingsStrategy } from "../../utils/savingsStorage";
 import { useUser } from "../../contexts/UserContext";
@@ -102,6 +105,49 @@ const defaultAccountForm = {
   balance: "",
   cash_balance: "",
   currency: "EUR",
+};
+
+const computeSplitMethodForPocket = (
+  pocket: SavingsPocket | undefined,
+  subItem: PocketSubItem | undefined,
+  p1Name: string,
+  p2Name: string,
+): TricountSplitMethod => {
+  const p1Lower = p1Name.toLowerCase().trim();
+  const p2Lower = p2Name.toLowerCase().trim();
+
+  if (subItem) {
+    const subName = (subItem.name || "").toLowerCase().trim();
+    if (subItem.personId === "person1" || subName === p1Lower || subName.includes(p1Lower)) {
+      return "100_person1";
+    }
+    if (subItem.personId === "person2" || subName === p2Lower || subName.includes(p2Lower)) {
+      return "100_person2";
+    }
+  }
+
+  if (pocket) {
+    if (pocket.ownership === "person1") return "100_person1";
+    if (pocket.ownership === "person2") return "100_person2";
+    if (pocket.splitMethod === "proportional") return "proportional";
+    if (pocket.splitMethod === "50_50") return "50_50";
+  }
+
+  return "50_50";
+};
+
+const resolveBankName = (account: PortfolioAccount | null): string | undefined => {
+  if (!account) return undefined;
+  const aspsp = (account.metadata?.aspspName as string) || (account.metadata?.connectionLabel as string);
+  if (aspsp) return aspsp;
+  const lower = (account.name || "").toLowerCase();
+  if (account.provider === "bourso-sidecar" || lower.includes("bourso")) {
+    return "BoursoBank";
+  }
+  if (lower.includes("bnp") || lower.includes("delporte") || account.userId === "Sophie") {
+    return "BNP Paribas";
+  }
+  return account.name || undefined;
 };
 
 const AccountsTab: React.FC<AccountsTabProps> = ({
@@ -177,6 +223,9 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
       setTricountExpenses(getStoredExpenses());
       setTricountIncomes(getStoredIncomes());
     };
+    syncTricountWithDatabase(effectiveUserId).then(() => {
+      loadTricount();
+    });
     loadTricount();
     window.addEventListener("tricount_data_updated", loadTricount);
     window.addEventListener("storage", loadTricount);
@@ -184,7 +233,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
       window.removeEventListener("tricount_data_updated", loadTricount);
       window.removeEventListener("storage", loadTricount);
     };
-  }, []);
+  }, [effectiveUserId]);
 
   const findTricountItem = (t: Transaction): TricountExpense | TricountIncome | null => {
     const expense = tricountExpenses.find(
@@ -276,7 +325,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         amount: Math.round(amt * 100) / 100,
         beneficiaryPersonId: tricountForm.beneficiary,
         source: "bank_import",
-        bankAccount: txAccount?.name || undefined,
+        bankAccount: resolveBankName(txAccount) || txAccount?.name || undefined,
         bankReference: t.externalId || t.dedupKey || undefined,
         bankRowId: t.id,
         createdAt: matchedTricountItem?.createdAt || Date.now(),
@@ -308,7 +357,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         splitMethod: tricountForm.splitMethod,
         nature: tricountForm.type === "placement" ? "placement" : "expense",
         source: "bank_import",
-        bankAccount: txAccount?.name || undefined,
+        bankAccount: resolveBankName(txAccount) || txAccount?.name || undefined,
         bankReference: t.externalId || t.dedupKey || undefined,
         bankRowId: t.id,
         createdAt: matchedTricountItem?.createdAt || Date.now(),
@@ -1146,7 +1195,15 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
               <Input
                 type="date"
                 value={tricountForm.date}
-                onChange={(e) => setTricountForm({ ...tricountForm, date: e.target.value })}
+                onChange={(e) => {
+                  const d = e.target.value;
+                  const newM = d ? d.slice(0, 7) : tricountForm.month;
+                  setTricountForm({
+                    ...tricountForm,
+                    date: d,
+                    month: newM,
+                  });
+                }}
               />
             </Field>
           </div>
@@ -1190,12 +1247,42 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                 <Field label="Payeur de la dépense" required>
                   <select
                     value={tricountForm.payer}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const newPayer = e.target.value as TricountPayer;
+                      const strat = getSavingsStrategy(effectiveUserId);
+                      const selectedPoc = strat.pockets.find(
+                        (p) => p.id === tricountForm.pocketId,
+                      );
+                      let newSubId = tricountForm.subPocketId;
+                      if (selectedPoc?.subItems && selectedPoc.subItems.length > 0) {
+                        const match = selectedPoc.subItems.find(
+                          (s) =>
+                            s.personId === newPayer ||
+                            (newPayer === "person1" &&
+                              s.name.toLowerCase().includes(p1Name.toLowerCase())) ||
+                            (newPayer === "person2" &&
+                              s.name.toLowerCase().includes(p2Name.toLowerCase())),
+                        );
+                        if (match) {
+                          newSubId = match.id;
+                        }
+                      }
+                      const selectedSub = selectedPoc?.subItems?.find(
+                        (s) => s.id === newSubId,
+                      );
+                      const nextSplit = computeSplitMethodForPocket(
+                        selectedPoc,
+                        selectedSub,
+                        p1Name,
+                        p2Name,
+                      );
                       setTricountForm({
                         ...tricountForm,
-                        payer: e.target.value as TricountPayer,
-                      })
-                    }
+                        payer: newPayer,
+                        subPocketId: newSubId,
+                        splitMethod: nextSplit,
+                      });
+                    }}
                     className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
                   >
                     <option value="person1">{p1Name}</option>
@@ -1225,17 +1312,48 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
               <Field label="Poche de budget associée">
                 <select
                   value={tricountForm.pocketId}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const pid = e.target.value;
+                    const strat = getSavingsStrategy(effectiveUserId);
+                    const selectedPoc = strat.pockets.find((p) => p.id === pid);
+
+                    let newSubId = "";
+                    if (selectedPoc?.subItems && selectedPoc.subItems.length > 0) {
+                      const curPayer = tricountForm.payer;
+                      const match = selectedPoc.subItems.find(
+                        (s) =>
+                          s.personId === curPayer ||
+                          (curPayer === "person1" &&
+                            s.name.toLowerCase().includes(p1Name.toLowerCase())) ||
+                          (curPayer === "person2" &&
+                            s.name.toLowerCase().includes(p2Name.toLowerCase())),
+                      );
+                      if (match) {
+                        newSubId = match.id;
+                      }
+                    }
+
+                    const selectedSub = selectedPoc?.subItems?.find(
+                      (s) => s.id === newSubId,
+                    );
+                    const nextSplit = computeSplitMethodForPocket(
+                      selectedPoc,
+                      selectedSub,
+                      p1Name,
+                      p2Name,
+                    );
+
                     setTricountForm({
                       ...tricountForm,
-                      pocketId: e.target.value,
-                      subPocketId: "",
-                    })
-                  }
+                      pocketId: pid,
+                      subPocketId: newSubId,
+                      splitMethod: nextSplit,
+                    });
+                  }}
                   className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
                 >
                   <option value="unallocated">Non alloué / Autre</option>
-                  {getSavingsStrategy(userId).pockets.map((p) => (
+                  {getSavingsStrategy(effectiveUserId).pockets.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
@@ -1244,7 +1362,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
               </Field>
 
               {(() => {
-                const selectedPocket = getSavingsStrategy(userId).pockets.find(
+                const selectedPocket = getSavingsStrategy(effectiveUserId).pockets.find(
                   (p) => p.id === tricountForm.pocketId,
                 );
                 if (selectedPocket?.subItems && selectedPocket.subItems.length > 0) {
@@ -1252,9 +1370,24 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                     <Field label="Sous-poste / Sous-poche">
                       <select
                         value={tricountForm.subPocketId}
-                        onChange={(e) =>
-                          setTricountForm({ ...tricountForm, subPocketId: e.target.value })
-                        }
+                        onChange={(e) => {
+                          const sid = e.target.value;
+                          const selectedSub = selectedPocket.subItems?.find(
+                            (s) => s.id === sid,
+                          );
+                          const nextSplit = computeSplitMethodForPocket(
+                            selectedPocket,
+                            selectedSub,
+                            p1Name,
+                            p2Name,
+                          );
+
+                          setTricountForm({
+                            ...tricountForm,
+                            subPocketId: sid,
+                            splitMethod: nextSplit,
+                          });
+                        }}
                         className="w-full rounded-lg border border-[rgba(255,255,255,0.1)] bg-[#0d0d0d] px-2.5 py-2 text-xs text-[#f5f5f5] outline-none focus:border-[#c8a55e]"
                       >
                         <option value="">Aucun sous-poste</option>
