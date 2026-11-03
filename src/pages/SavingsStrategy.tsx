@@ -1757,12 +1757,24 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                     </div>
                   )}
                 </div>
+                <div className="flex justify-between text-[#8a8a8a]">
+                  <span>Investissement :</span>
+                  <strong className="text-[#f5f5f5]">
+                    {formatEur(p1.investmentsEur)}
+                  </strong>
+                </div>
                 <div className="pt-2 border-t border-[rgba(255,255,255,0.06)] flex justify-between font-bold text-sm">
                   <span className="text-[#f5f5f5]">
-                    Investissement :
+                    Total :
                   </span>
-                  <span className="text-emerald-600 dark:text-emerald-400">
-                    {formatEur(p1.investmentsEur)}
+                  <span
+                    className={
+                      p1.remainingEur >= -0.005
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    }
+                  >
+                    {formatEur(p1.remainingEur)}
                   </span>
                 </div>
               </div>
@@ -1811,12 +1823,24 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                     </div>
                   )}
                 </div>
+                <div className="flex justify-between text-[#8a8a8a]">
+                  <span>Investissement :</span>
+                  <strong className="text-[#f5f5f5]">
+                    {formatEur(p2.investmentsEur)}
+                  </strong>
+                </div>
                 <div className="pt-2 border-t border-[rgba(255,255,255,0.06)] flex justify-between font-bold text-sm">
                   <span className="text-[#f5f5f5]">
-                    Investissement :
+                    Total :
                   </span>
-                  <span className="text-emerald-600 dark:text-emerald-400">
-                    {formatEur(p2.investmentsEur)}
+                  <span
+                    className={
+                      p2.remainingEur >= -0.005
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    }
+                  >
+                    {formatEur(p2.remainingEur)}
                   </span>
                 </div>
               </div>
