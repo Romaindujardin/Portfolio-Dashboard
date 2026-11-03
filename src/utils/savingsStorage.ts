@@ -933,6 +933,10 @@ export interface PersonSummary {
   remainingPercent: number; // % du salaire personnel restant
   savingsAmountEur: number; // Épargne personnelle + quote-part d'épargne commune
   savingsRate: number; // Taux d'épargne personnel (%)
+  fixedExpensesEur: number; // Total des dépenses fixes (communes + perso)
+  sharedFixedEur: number; // Dont charges fixes communes
+  personalFixedEur: number; // Dont charges fixes perso
+  investmentsEur: number; // Total investissements & épargne (Section 3)
 }
 
 export interface HouseholdSummary {
@@ -1038,6 +1042,10 @@ export const calculateHouseholdSummary = (
   // ÉTAPE 1 : Calcul prioritaire des charges fixes (Loyer, alimentation, charges...)
   let fixedChargesP1 = 0;
   let fixedChargesP2 = 0;
+  let sharedFixedP1 = 0;
+  let sharedFixedP2 = 0;
+  let personalFixedP1 = 0;
+  let personalFixedP2 = 0;
 
   strategy.pockets.forEach((pocket) => {
     if (pocket.category === "fixed_expense") {
@@ -1056,14 +1064,17 @@ export const calculateHouseholdSummary = (
         paidByP1 = monthlyAmt;
         paidByP2 = 0;
         personalContributionP1 = roundCents(personalContributionP1 + monthlyAmt);
+        personalFixedP1 = roundCents(personalFixedP1 + monthlyAmt);
       } else if (ownership === "person1") {
         paidByP1 = monthlyAmt;
         paidByP2 = 0;
         personalContributionP1 = roundCents(personalContributionP1 + monthlyAmt);
+        personalFixedP1 = roundCents(personalFixedP1 + monthlyAmt);
       } else if (ownership === "person2") {
         paidByP1 = 0;
         paidByP2 = monthlyAmt;
         personalContributionP2 = roundCents(personalContributionP2 + monthlyAmt);
+        personalFixedP2 = roundCents(personalFixedP2 + monthlyAmt);
       } else if (ownership === "dossier") {
         const dossierSplitMode: SplitMode = pocket.splitMethod || "50_50";
         if (dossierSplitMode === "50_50") {
@@ -1078,12 +1089,16 @@ export const calculateHouseholdSummary = (
         }
         personalContributionP1 = roundCents(personalContributionP1 + paidByP1);
         personalContributionP2 = roundCents(personalContributionP2 + paidByP2);
+        personalFixedP1 = roundCents(personalFixedP1 + paidByP1);
+        personalFixedP2 = roundCents(personalFixedP2 + paidByP2);
       } else {
         // Shared pocket
         paidByP1 = roundCents(monthlyAmt * pocketRatioP1);
         paidByP2 = roundCents(monthlyAmt - paidByP1);
         sharedContributionP1 = roundCents(sharedContributionP1 + paidByP1);
         sharedContributionP2 = roundCents(sharedContributionP2 + paidByP2);
+        sharedFixedP1 = roundCents(sharedFixedP1 + paidByP1);
+        sharedFixedP2 = roundCents(sharedFixedP2 + paidByP2);
       }
 
       fixedChargesP1 = roundCents(fixedChargesP1 + paidByP1);
@@ -1235,6 +1250,10 @@ export const calculateHouseholdSummary = (
     remainingPercent: remainingPctP1,
     savingsAmountEur: savingsP1,
     savingsRate: savingsRateP1,
+    fixedExpensesEur: fixedChargesP1,
+    sharedFixedEur: sharedFixedP1,
+    personalFixedEur: personalFixedP1,
+    investmentsEur: savingsP1,
   };
 
   const p2Summary: PersonSummary = {
@@ -1250,6 +1269,10 @@ export const calculateHouseholdSummary = (
     remainingPercent: remainingPctP2,
     savingsAmountEur: savingsP2,
     savingsRate: savingsRateP2,
+    fixedExpensesEur: fixedChargesP2,
+    sharedFixedEur: sharedFixedP2,
+    personalFixedEur: personalFixedP2,
+    investmentsEur: savingsP2,
   };
 
   return {

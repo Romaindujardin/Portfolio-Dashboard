@@ -1737,37 +1737,32 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                 </span>
               </div>
 
-              <div className="space-y-1.5 text-xs">
+              <div className="space-y-2 text-xs">
                 <div className="flex justify-between text-[#8a8a8a]">
-                  <span>Revenu net mensuel :</span>
+                  <span>Revenu mensuel :</span>
                   <strong className="text-[#f5f5f5]">
                     {formatEur(p1.monthlyIncome)}
                   </strong>
                 </div>
-                <div className="flex justify-between text-[#8a8a8a]">
-                  <span>Quote-part charges & poches communes :</span>
-                  <strong style={p1Theme.textStyle}>
-                    {formatEur(p1.sharedContributionEur)}
-                  </strong>
-                </div>
-                <div className="flex justify-between text-[#8a8a8a]">
-                  <span>Épargne & poches personnelles :</span>
-                  <strong className="text-[#f5f5f5]">
-                    {formatEur(p1.personalContributionEur)}
-                  </strong>
+                <div className="space-y-0.5">
+                  <div className="flex justify-between text-[#8a8a8a]">
+                    <span>Dépenses fixes :</span>
+                    <strong style={p1Theme.textStyle}>
+                      {formatEur(p1.fixedExpensesEur)}
+                    </strong>
+                  </div>
+                  {(p1.sharedFixedEur > 0 || p1.personalFixedEur > 0) && (
+                    <div className="text-[10px] text-[#6a6a6a] text-right">
+                      dont {formatEur(p1.sharedFixedEur)} communes · {formatEur(p1.personalFixedEur)} perso
+                    </div>
+                  )}
                 </div>
                 <div className="pt-2 border-t border-[rgba(255,255,255,0.06)] flex justify-between font-bold text-sm">
-                  <span className="text-[#f5f5f5] ">
-                    Reste à vivre personnel :
+                  <span className="text-[#f5f5f5]">
+                    Investissement :
                   </span>
-                  <span
-                    className={
-                      p1.remainingEur >= -0.005
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-rose-600 dark:text-rose-400"
-                    }
-                  >
-                    {formatEur(p1.remainingEur)}
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    {formatEur(p1.investmentsEur)}
                   </span>
                 </div>
               </div>
@@ -1796,37 +1791,32 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
                 </span>
               </div>
 
-              <div className="space-y-1.5 text-xs">
+              <div className="space-y-2 text-xs">
                 <div className="flex justify-between text-[#8a8a8a]">
-                  <span>Revenu net mensuel :</span>
+                  <span>Revenu mensuel :</span>
                   <strong className="text-[#f5f5f5]">
                     {formatEur(p2.monthlyIncome)}
                   </strong>
                 </div>
-                <div className="flex justify-between text-[#8a8a8a]">
-                  <span>Quote-part charges & poches communes :</span>
-                  <strong style={p2Theme.textStyle}>
-                    {formatEur(p2.sharedContributionEur)}
-                  </strong>
-                </div>
-                <div className="flex justify-between text-[#8a8a8a]">
-                  <span>Épargne & poches personnelles :</span>
-                  <strong className="text-[#f5f5f5]">
-                    {formatEur(p2.personalContributionEur)}
-                  </strong>
+                <div className="space-y-0.5">
+                  <div className="flex justify-between text-[#8a8a8a]">
+                    <span>Dépenses fixes :</span>
+                    <strong style={p2Theme.textStyle}>
+                      {formatEur(p2.fixedExpensesEur)}
+                    </strong>
+                  </div>
+                  {(p2.sharedFixedEur > 0 || p2.personalFixedEur > 0) && (
+                    <div className="text-[10px] text-[#6a6a6a] text-right">
+                      dont {formatEur(p2.sharedFixedEur)} communes · {formatEur(p2.personalFixedEur)} perso
+                    </div>
+                  )}
                 </div>
                 <div className="pt-2 border-t border-[rgba(255,255,255,0.06)] flex justify-between font-bold text-sm">
-                  <span className="text-[#f5f5f5] ">
-                    Reste à vivre personnel :
+                  <span className="text-[#f5f5f5]">
+                    Investissement :
                   </span>
-                  <span
-                    className={
-                      p2.remainingEur >= -0.005
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-rose-600 dark:text-rose-400"
-                    }
-                  >
-                    {formatEur(p2.remainingEur)}
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    {formatEur(p2.investmentsEur)}
                   </span>
                 </div>
               </div>

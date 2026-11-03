@@ -938,17 +938,16 @@ const BudgetTricount: React.FC = () => {
             {/* ===== 1. POCHE REVENUS DU MOIS ===== */}
             {(() => {
               const defaultIncomeExpanded =
-                (incomes.length > 0 && incomes.length <= 5) ||
-                (searchTerm.trim().length > 0 &&
-                  incomes.some(
-                    (i) =>
-                      (i.label || "")
-                        .toLowerCase()
-                        .includes(searchTerm.toLowerCase()) ||
-                      (i.notes || "")
-                        .toLowerCase()
-                        .includes(searchTerm.toLowerCase()),
-                  ));
+                searchTerm.trim().length > 0 &&
+                incomes.some(
+                  (i) =>
+                    (i.label || "")
+                      .toLowerCase()
+                      .includes(searchTerm.toLowerCase()) ||
+                    (i.notes || "")
+                      .toLowerCase()
+                      .includes(searchTerm.toLowerCase()),
+                );
               const isIncomeExpanded =
                 expandedPockets["incomes"] !== undefined
                   ? !!expandedPockets["incomes"]
@@ -1290,8 +1289,7 @@ const BudgetTricount: React.FC = () => {
                 .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
               const defaultExpanded =
-                (pocketExpenses.length > 0 && pocketExpenses.length <= 5) ||
-                (searchTerm.trim().length > 0 && pocketExpenses.length > 0);
+                searchTerm.trim().length > 0 && pocketExpenses.length > 0;
               const isExpanded =
                 expandedPockets[comp.pocketId] !== undefined
                   ? !!expandedPockets[comp.pocketId]
@@ -1702,8 +1700,7 @@ const BudgetTricount: React.FC = () => {
                   .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
                 const defaultExpanded =
-                  (placementOps.length > 0 && placementOps.length <= 5) ||
-                  (searchTerm.trim().length > 0 && placementOps.length > 0);
+                  searchTerm.trim().length > 0 && placementOps.length > 0;
                 const isExpanded =
                   expandedPockets[comp.pocketId] !== undefined
                     ? !!expandedPockets[comp.pocketId]

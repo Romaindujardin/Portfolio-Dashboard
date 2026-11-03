@@ -639,7 +639,10 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
             const isBankChecking = account.type === "CHECKING";
             return (
               <Card key={account.id} className="overflow-hidden">
-                <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <div
+                  className="flex flex-wrap items-center gap-3 px-4 py-3 cursor-pointer select-none hover:bg-[rgba(255,255,255,0.02)] transition"
+                  onClick={() => setExpanded(isOpen ? null : account.id)}
+                >
                   <div
                     className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg overflow-hidden border border-white/5"
                     style={{
@@ -714,7 +717,14 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
                     )}
                   </div>
                   <div className="flex items-center gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => setExpanded(isOpen ? null : account.id)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpanded(isOpen ? null : account.id);
+                      }}
+                    >
                       {isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                     </Button>
                   </div>
