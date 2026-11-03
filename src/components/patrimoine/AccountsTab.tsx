@@ -236,6 +236,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
   }, [effectiveUserId]);
 
   const findTricountItem = (t: Transaction): TricountExpense | TricountIncome | null => {
+    // 1. Correspondance exacte par identifiant bancaire ou référence
     const expense = tricountExpenses.find(
       (e) =>
         e.bankRowId === t.id ||
@@ -250,7 +251,45 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         (t.externalId && i.bankReference === t.externalId) ||
         (t.dedupKey && i.bankReference === t.dedupKey),
     );
-    return income || null;
+    if (income) return income;
+
+    // 2. Rapprochement heuristique si l'autorisation ou l'opération temporaire a été consolidée
+    const tAmt = Math.abs(t.amount);
+    const tTime = Date.parse(t.date) || 0;
+    const tLabel = (t.label || "").toLowerCase();
+
+    if (t.amount < 0) {
+      const expCandidate = tricountExpenses.find((e) => {
+        if (Math.abs(Number(e.amount) - tAmt) > 0.01) return false;
+        const eTime = Date.parse(e.date) || 0;
+        if (tTime && eTime && Math.abs(tTime - eTime) > 7 * 86400000) return false;
+        const eLabel = (e.label || "").toLowerCase();
+        const eTokens = eLabel.replace(/[^a-z0-9]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
+        const tTokens = tLabel.replace(/[^a-z0-9]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
+        const sharesToken = eTokens.some((tok) => tTokens.some((st) => st.includes(tok) || tok.includes(st)));
+        const specialMatch =
+          (eLabel.includes("tgtg") && tLabel.includes("too good to go")) ||
+          (tLabel.includes("tgtg") && eLabel.includes("too good to go")) ||
+          (eLabel.includes("leclerc") && tLabel.includes("leclerc")) ||
+          (eLabel.includes("sanef") && tLabel.includes("sanef"));
+        return sharesToken || specialMatch;
+      });
+      if (expCandidate) return expCandidate;
+    } else {
+      const incCandidate = tricountIncomes.find((i) => {
+        if (Math.abs(Number(i.amount) - tAmt) > 0.01) return false;
+        const iTime = Date.parse(i.date) || 0;
+        if (tTime && iTime && Math.abs(tTime - iTime) > 7 * 86400000) return false;
+        const iLabel = (i.label || "").toLowerCase();
+        return (
+          (iLabel.includes("travail") && tLabel.includes("travail")) ||
+          (iLabel.includes("france") && tLabel.includes("france"))
+        );
+      });
+      if (incCandidate) return incCandidate;
+    }
+
+    return null;
   };
 
   const openTricountForTx = (t: Transaction) => {
@@ -439,29 +478,36 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
     }
   };
 
-  // Filtrage intelligent des autorisations de paiement CB remplacées par leur débit réel
+  // Filtrage intelligent des doublons : autorisations CB ou opérations Base64 temporaires remplacées par le débit réel
   const displayTransactions = useMemo(() => {
-    const isAuth = (t: Transaction) => {
+    const isCandidate = (t: Transaction) => {
       const cat = (t.category || "").toLowerCase();
       const label = (t.label || "").toLowerCase();
+      const isBase64 = Boolean(
+        (t.externalId && t.externalId.startsWith("eyJ")) ||
+        (t.dedupKey && t.dedupKey.startsWith("bourso:eyJ"))
+      );
       return (
         cat.includes("autorisation") ||
         cat.includes("authorization") ||
         label.includes("autorisation") ||
-        Boolean(t.pending)
+        label.includes("authorization") ||
+        Boolean(t.pending) ||
+        isBase64
       );
     };
 
-    const auths = transactions.filter(isAuth);
-    if (auths.length === 0) return transactions;
+    const candidates = transactions.filter(isCandidate);
+    if (candidates.length === 0) return transactions;
 
-    const settled = transactions.filter((t) => !isAuth(t));
+    const settled = transactions.filter((t) => !isCandidate(t));
     const supersededIds = new Set<string>();
 
-    for (const auth of auths) {
-      const authAmount = Math.abs(Number(auth.amount) || 0);
-      const authDate = Date.parse(auth.date) || 0;
-      const authTokens = (auth.label || "")
+    for (const cand of candidates) {
+      const candAmount = Math.abs(Number(cand.amount) || 0);
+      const candDate = Date.parse(cand.date) || 0;
+      const candIsIncome = Number(cand.amount) > 0;
+      const candTokens = (cand.label || "")
         .toLowerCase()
         .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
         .replace(/cb\*\d+/gi, " ")
@@ -469,23 +515,26 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         .filter((w) => w.length >= 3);
 
       for (const s of settled) {
-        if (Math.abs(authAmount - Math.abs(Number(s.amount) || 0)) > 0.01) continue;
+        if (Math.abs(candAmount - Math.abs(Number(s.amount) || 0)) > 0.01) continue;
+        if ((Number(s.amount) > 0) !== candIsIncome) continue;
         const sDate = Date.parse(s.date) || 0;
-        if (authDate && sDate && Math.abs(sDate - authDate) / (1000 * 3600 * 24) > 14) continue;
+        if (candDate && sDate && Math.abs(sDate - candDate) / (1000 * 3600 * 24) > 14) continue;
         const sTokens = (s.label || "")
           .toLowerCase()
           .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
           .replace(/cb\*\d+/gi, " ")
           .split(/[\s\-_/.,;:!?'"()]+/)
           .filter((w) => w.length >= 3);
-        const hasCommon = authTokens.some((at) => sTokens.some((st) => st.includes(at) || at.includes(st)));
-        const compactAuth = (auth.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const hasCommon = candTokens.some((at) => sTokens.some((st) => st.includes(at) || at.includes(st)));
+        const compactCand = (cand.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
         const compactSettled = (s.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
         const match =
           hasCommon ||
-          Boolean(compactAuth && compactSettled && (compactAuth.includes(compactSettled) || compactSettled.includes(compactAuth)));
+          Boolean(compactCand && compactSettled && (compactCand.includes(compactSettled) || compactSettled.includes(compactCand))) ||
+          ((cand.label || "").toLowerCase().includes("tgtg") && (s.label || "").toLowerCase().includes("too good to go")) ||
+          ((cand.label || "").toLowerCase().includes("travail") && (s.label || "").toLowerCase().includes("travail"));
         if (match) {
-          supersededIds.add(auth.id);
+          supersededIds.add(cand.id);
           break;
         }
       }

@@ -2,6 +2,8 @@
 // Toutes les écritures passent par better-sqlite3 (synchrone), avec des
 // transactions pour les imports de transactions et les valorisations.
 
+import fs from "fs";
+import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { nowIso, round2 } from "../lib/validate.js";
 
@@ -486,8 +488,12 @@ export class PortfolioRepository {
   }
 
   /**
-   * Nettoie automatiquement les autorisations de paiement CB en cours qui ont été
-   * confirmées et débitées (même montant, dates proches <= 14j, libellé correspondant).
+   * Purge les doublons de transactions générés par BoursoBank :
+   * 1. Les autorisations de paiement CB temporaires ("Autorisation paiement en cours...")
+   *    remplacées par les débits réels confirmés (même montant, dates proches <= 14j, libellé correspondant).
+   * 2. Les transactions temporaires avec référence Base64 ("bourso:eyJ...") remplacées par
+   *    les transactions définitives catégorisées (ObjectId "bourso:6ae...").
+   * Transfère automatiquement les liens Tricount (dépenses et revenus) vers la transaction définitive.
    */
   cleanAuthorizationDuplicates(accountId, userId) {
     const isAuthorization = (r) => {
@@ -501,6 +507,15 @@ export class PortfolioRepository {
         Boolean(r.pending)
       );
     };
+
+    const isBase64Temp = (r) => {
+      return Boolean(
+        (r.external_id && r.external_id.startsWith("eyJ")) ||
+        (r.dedup_key && r.dedup_key.startsWith("bourso:eyJ"))
+      );
+    };
+
+    const isCandidate = (r) => isAuthorization(r) || isBase64Temp(r);
 
     const extractSignificantTokens = (label) => {
       return (label || "")
@@ -529,50 +544,72 @@ export class PortfolioRepository {
 
     const allTx = this.db
       .prepare(
-        `SELECT id, date, amount, label, category, subcategory, pending, external_id 
+        `SELECT id, date, amount, label, category, subcategory, pending, external_id, dedup_key 
          FROM transactions 
          WHERE account_id = ? AND user_id = ?`,
       )
       .all(accountId, userId);
 
-    const authRows = allTx.filter(isAuthorization);
-    if (!authRows.length) return 0;
+    const candidateRows = allTx.filter(isCandidate);
+    if (!candidateRows.length) return 0;
 
-    const settledRows = allTx.filter((r) => !isAuthorization(r));
+    const settledRows = allTx.filter((r) => !isCandidate(r));
     const idsToDelete = [];
     const reassignments = [];
 
-    for (const auth of authRows) {
-      const authAmount = Math.abs(Number(auth.amount) || 0);
-      const authDate = Date.parse(auth.date) || 0;
-      const authTokens = extractSignificantTokens(auth.label);
+    for (const cand of candidateRows) {
+      const candAmount = Math.abs(Number(cand.amount) || 0);
+      const candDate = Date.parse(cand.date) || 0;
+      const candTokens = extractSignificantTokens(cand.label);
+      const candIsIncome = Number(cand.amount) > 0;
+      const candLabel = (cand.label || "").toLowerCase();
 
-      for (const settled of settledRows) {
+      // Trier les transactions définitives par proximité temporelle avec la candidate
+      const sortedSettled = [...settledRows].sort((a, b) => {
+        const da = Math.abs((Date.parse(a.date) || 0) - candDate);
+        const db = Math.abs((Date.parse(b.date) || 0) - candDate);
+        return da - db;
+      });
+
+      for (const settled of sortedSettled) {
         const settledAmount = Math.abs(Number(settled.amount) || 0);
-        if (Math.abs(authAmount - settledAmount) > 0.01) continue;
+        if (Math.abs(candAmount - settledAmount) > 0.01) continue;
+        if ((Number(settled.amount) > 0) !== candIsIncome) continue;
 
         const settledDate = Date.parse(settled.date) || 0;
-        if (authDate && settledDate) {
-          const diffDays = Math.abs(settledDate - authDate) / (1000 * 3600 * 24);
+        if (candDate && settledDate) {
+          const diffDays = Math.abs(settledDate - candDate) / (1000 * 3600 * 24);
           if (diffDays > 14) continue;
         }
 
         const settledTokens = extractSignificantTokens(settled.label);
-        const hasCommonToken = authTokens.some((t) =>
+        const hasCommonToken = candTokens.some((t) =>
           settledTokens.some((st) => st.includes(t) || t.includes(st)),
         );
 
-        const compactAuth = (auth.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const compactCand = candLabel.replace(/[^a-z0-9]/g, "");
         const compactSettled = (settled.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
         const stringMatch = Boolean(
-          compactAuth &&
+          compactCand &&
             compactSettled &&
-            (compactAuth.includes(compactSettled) || compactSettled.includes(compactAuth)),
+            (compactCand.includes(compactSettled) || compactSettled.includes(compactCand)),
         );
 
-        if (hasCommonToken || stringMatch) {
-          idsToDelete.push(auth.id);
-          reassignments.push({ oldId: auth.id, newId: settled.id });
+        const specialMatch =
+          (candLabel.includes("tgtg") && compactSettled.includes("toogoodtogo")) ||
+          (compactCand.includes("toogoodtogo") && settled.label.toLowerCase().includes("tgtg")) ||
+          (candLabel.includes("travail") && settled.label.toLowerCase().includes("travail")) ||
+          (isBase64Temp(cand) && Math.abs(settledDate - candDate) <= 86400000 * 2);
+
+        if (hasCommonToken || stringMatch || specialMatch) {
+          idsToDelete.push(cand.id);
+          reassignments.push({
+            oldId: cand.id,
+            oldRef: cand.external_id || cand.dedup_key,
+            newId: settled.id,
+            newRef: settled.external_id || settled.dedup_key,
+            newLabel: settled.label,
+          });
           break;
         }
       }
@@ -581,13 +618,25 @@ export class PortfolioRepository {
     if (idsToDelete.length === 0) return 0;
 
     const deleteTx = this.db.transaction(() => {
-      for (const { oldId, newId } of reassignments) {
+      for (const { oldId, oldRef, newId, newRef } of reassignments) {
         try {
           this.db
             .prepare(
-              `UPDATE tricount_expenses SET bank_row_id = ? WHERE bank_row_id = ?`,
+              `UPDATE tricount_expenses 
+               SET bank_row_id = ?, bank_reference = ? 
+               WHERE bank_row_id = ? OR (bank_reference IS NOT NULL AND ? IS NOT NULL AND bank_reference = ?)`,
             )
-            .run(newId, oldId);
+            .run(newId, newRef, oldId, oldRef, oldRef);
+        } catch (_) {}
+
+        try {
+          this.db
+            .prepare(
+              `UPDATE tricount_incomes 
+               SET bank_row_id = ?, bank_reference = ? 
+               WHERE bank_row_id = ? OR (bank_reference IS NOT NULL AND ? IS NOT NULL AND bank_reference = ?)`,
+            )
+            .run(newId, newRef, oldId, oldRef, oldRef);
         } catch (_) {}
       }
       const deleteStmt = this.db.prepare(`DELETE FROM transactions WHERE id = ?`);
@@ -597,7 +646,56 @@ export class PortfolioRepository {
     });
 
     deleteTx();
+
+    try {
+      this.syncDiskBackupsAfterReassignment(userId, reassignments);
+    } catch (_) {}
+
     return idsToDelete.length;
+  }
+
+  syncDiskBackupsAfterReassignment(userId, reassignments) {
+    if (!reassignments || reassignments.length === 0) return;
+    const members = [userId, "Romain", "Sophie"];
+    const reassignMap = new Map();
+    for (const r of reassignments) {
+      if (r.oldId) reassignMap.set(r.oldId, r);
+      if (r.oldRef) reassignMap.set(r.oldRef, r);
+    }
+
+    for (const m of new Set(members)) {
+      if (!m) continue;
+      const backupPath = path.resolve(process.cwd(), `data/tricount_${m}.json`);
+      if (fs.existsSync(backupPath)) {
+        try {
+          const content = JSON.parse(fs.readFileSync(backupPath, "utf8"));
+          let dirty = false;
+          if (Array.isArray(content.expenses)) {
+            for (const exp of content.expenses) {
+              const r = reassignMap.get(exp.bankRowId) || reassignMap.get(exp.bankReference);
+              if (r) {
+                exp.bankRowId = r.newId;
+                exp.bankReference = r.newRef;
+                dirty = true;
+              }
+            }
+          }
+          if (Array.isArray(content.incomes)) {
+            for (const inc of content.incomes) {
+              const r = reassignMap.get(inc.bankRowId) || reassignMap.get(inc.bankReference);
+              if (r) {
+                inc.bankRowId = r.newId;
+                inc.bankReference = r.newRef;
+                dirty = true;
+              }
+            }
+          }
+          if (dirty) {
+            fs.writeFileSync(backupPath, JSON.stringify(content, null, 2), "utf8");
+          }
+        } catch (_) {}
+      }
+    }
   }
 
   cleanAllAuthorizationDuplicates(userId) {

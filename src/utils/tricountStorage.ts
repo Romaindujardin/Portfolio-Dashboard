@@ -94,52 +94,97 @@ export const syncTricountWithDatabase = async (userId: string = "Romain") => {
     const localIncomes = getStoredIncomes();
     const localConfigs = getStoredConfigs();
 
-    // Si le client a des données locales, on les envoie toujours vers le serveur pour les sauvegarder
-    if (localExpenses.length > 0 || localIncomes.length > 0) {
-      pushTricountToDatabase(userId);
+    if (!serverData) {
+      if (localExpenses.length > 0 || localIncomes.length > 0) {
+        pushTricountToDatabase(userId);
+      }
+      return;
     }
-
-    if (!serverData) return;
 
     const serverExpenses = serverData.expenses || [];
     const serverIncomes = serverData.incomes || [];
 
     let changed = false;
 
-    // Si le local est vide mais que le serveur a des données, restaurer depuis le serveur
+    // 1. Fusion des dépenses : prise en compte des mises à jour serveur (rattachement bancaire)
     if (localExpenses.length === 0 && serverExpenses.length > 0) {
       localStorage.setItem(
         STORAGE_KEY_EXPENSES,
         JSON.stringify(serverExpenses),
       );
       changed = true;
-    } else if (localExpenses.length > 0 && serverExpenses.length > 0) {
-      // Fusionner sans jamais écraser les dépenses locales existantes
-      const existingIds = new Set(localExpenses.map((e) => e.id));
+    } else if (serverExpenses.length > 0) {
+      const serverMap = new Map(serverExpenses.map((e) => [e.id, e]));
+      let expensesUpdated = false;
+
+      const updatedLocal = localExpenses.map((loc) => {
+        const srv = serverMap.get(loc.id);
+        if (srv) {
+          if (
+            (srv.bankRowId && srv.bankRowId !== loc.bankRowId) ||
+            (srv.bankReference && srv.bankReference !== loc.bankReference)
+          ) {
+            expensesUpdated = true;
+            return {
+              ...loc,
+              bankRowId: srv.bankRowId || loc.bankRowId,
+              bankReference: srv.bankReference || loc.bankReference,
+            };
+          }
+        }
+        return loc;
+      });
+
+      const existingIds = new Set(updatedLocal.map((e) => e.id));
       const newFromServer = serverExpenses.filter((e) => !existingIds.has(e.id));
-      if (newFromServer.length > 0) {
-        const merged = [...localExpenses, ...newFromServer];
+
+      if (newFromServer.length > 0 || expensesUpdated) {
+        const merged = [...updatedLocal, ...newFromServer];
         localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(merged));
         changed = true;
       }
     }
 
+    // 2. Fusion des revenus : prise en compte des mises à jour serveur (rattachement bancaire)
     if (localIncomes.length === 0 && serverIncomes.length > 0) {
       localStorage.setItem(
         STORAGE_KEY_INCOMES,
         JSON.stringify(serverIncomes),
       );
       changed = true;
-    } else if (localIncomes.length > 0 && serverIncomes.length > 0) {
-      const existingIds = new Set(localIncomes.map((i) => i.id));
-      const newFromServer = serverIncomes.filter((i) => !existingIds.has(i.id));
-      if (newFromServer.length > 0) {
-        const merged = [...localIncomes, ...newFromServer];
+    } else if (serverIncomes.length > 0) {
+      const serverIncMap = new Map(serverIncomes.map((i) => [i.id, i]));
+      let incomesUpdated = false;
+
+      const updatedLocalInc = localIncomes.map((loc) => {
+        const srv = serverIncMap.get(loc.id);
+        if (srv) {
+          if (
+            (srv.bankRowId && srv.bankRowId !== loc.bankRowId) ||
+            (srv.bankReference && srv.bankReference !== loc.bankReference)
+          ) {
+            incomesUpdated = true;
+            return {
+              ...loc,
+              bankRowId: srv.bankRowId || loc.bankRowId,
+              bankReference: srv.bankReference || loc.bankReference,
+            };
+          }
+        }
+        return loc;
+      });
+
+      const existingIncIds = new Set(updatedLocalInc.map((i) => i.id));
+      const newIncFromServer = serverIncomes.filter((i) => !existingIncIds.has(i.id));
+
+      if (newIncFromServer.length > 0 || incomesUpdated) {
+        const merged = [...updatedLocalInc, ...newIncFromServer];
         localStorage.setItem(STORAGE_KEY_INCOMES, JSON.stringify(merged));
         changed = true;
       }
     }
 
+    // 3. Fusion des configurations
     if (serverData.configs && Object.keys(serverData.configs).length > 0) {
       const mergedConfigs = { ...serverData.configs, ...localConfigs };
       localStorage.setItem(
@@ -152,6 +197,9 @@ export const syncTricountWithDatabase = async (userId: string = "Romain") => {
     if (changed && typeof window !== "undefined") {
       window.dispatchEvent(new Event("tricount_data_updated"));
     }
+
+    // Sauvegarde miroir après fusion pour garantir la parité client-serveur
+    pushTricountToDatabase(userId);
   } catch (e) {
     console.error("Erreur lors de la synchronisation Tricount:", e);
   }
