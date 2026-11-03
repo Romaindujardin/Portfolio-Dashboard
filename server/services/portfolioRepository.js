@@ -485,6 +485,130 @@ export class PortfolioRepository {
     return inserted;
   }
 
+  /**
+   * Nettoie automatiquement les autorisations de paiement CB en cours qui ont été
+   * confirmées et débitées (même montant, dates proches <= 14j, libellé correspondant).
+   */
+  cleanAuthorizationDuplicates(accountId, userId) {
+    const isAuthorization = (r) => {
+      const cat = `${r.category || ""} ${r.subcategory || ""}`.toLowerCase();
+      const label = (r.label || "").toLowerCase();
+      return (
+        cat.includes("autorisation") ||
+        cat.includes("authorization") ||
+        label.includes("autorisation") ||
+        label.includes("authorization") ||
+        Boolean(r.pending)
+      );
+    };
+
+    const extractSignificantTokens = (label) => {
+      return (label || "")
+        .toLowerCase()
+        .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
+        .replace(/cb\*\d+/gi, " ")
+        .split(/[\s\-_/.,;:!?'"()]+/)
+        .filter((w) => w.length >= 3)
+        .filter(
+          (w) =>
+            ![
+              "les",
+              "des",
+              "une",
+              "par",
+              "pour",
+              "sur",
+              "dans",
+              "eur",
+              "avec",
+              "cedex",
+              "france",
+            ].includes(w),
+        );
+    };
+
+    const allTx = this.db
+      .prepare(
+        `SELECT id, date, amount, label, category, subcategory, pending, external_id 
+         FROM transactions 
+         WHERE account_id = ? AND user_id = ?`,
+      )
+      .all(accountId, userId);
+
+    const authRows = allTx.filter(isAuthorization);
+    if (!authRows.length) return 0;
+
+    const settledRows = allTx.filter((r) => !isAuthorization(r));
+    const idsToDelete = [];
+    const reassignments = [];
+
+    for (const auth of authRows) {
+      const authAmount = Math.abs(Number(auth.amount) || 0);
+      const authDate = Date.parse(auth.date) || 0;
+      const authTokens = extractSignificantTokens(auth.label);
+
+      for (const settled of settledRows) {
+        const settledAmount = Math.abs(Number(settled.amount) || 0);
+        if (Math.abs(authAmount - settledAmount) > 0.01) continue;
+
+        const settledDate = Date.parse(settled.date) || 0;
+        if (authDate && settledDate) {
+          const diffDays = Math.abs(settledDate - authDate) / (1000 * 3600 * 24);
+          if (diffDays > 14) continue;
+        }
+
+        const settledTokens = extractSignificantTokens(settled.label);
+        const hasCommonToken = authTokens.some((t) =>
+          settledTokens.some((st) => st.includes(t) || t.includes(st)),
+        );
+
+        const compactAuth = (auth.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const compactSettled = (settled.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const stringMatch = Boolean(
+          compactAuth &&
+            compactSettled &&
+            (compactAuth.includes(compactSettled) || compactSettled.includes(compactAuth)),
+        );
+
+        if (hasCommonToken || stringMatch) {
+          idsToDelete.push(auth.id);
+          reassignments.push({ oldId: auth.id, newId: settled.id });
+          break;
+        }
+      }
+    }
+
+    if (idsToDelete.length === 0) return 0;
+
+    const deleteTx = this.db.transaction(() => {
+      for (const { oldId, newId } of reassignments) {
+        try {
+          this.db
+            .prepare(
+              `UPDATE tricount_expenses SET bank_row_id = ? WHERE bank_row_id = ?`,
+            )
+            .run(newId, oldId);
+        } catch (_) {}
+      }
+      const deleteStmt = this.db.prepare(`DELETE FROM transactions WHERE id = ?`);
+      for (const id of idsToDelete) {
+        deleteStmt.run(id);
+      }
+    });
+
+    deleteTx();
+    return idsToDelete.length;
+  }
+
+  cleanAllAuthorizationDuplicates(userId) {
+    const accounts = this.listAccounts(userId);
+    let total = 0;
+    for (const acc of accounts) {
+      total += this.cleanAuthorizationDuplicates(acc.id, userId);
+    }
+    return total;
+  }
+
   // ─── Snapshots ────────────────────────────────────────────────────────────
 
   saveSnapshot(userId, accountId, date, balance, currency = "EUR", source = "sync") {

@@ -555,6 +555,9 @@ export const syncBoursoSidecar = async ({
               items,
             );
             transactionsImported += inserted;
+
+            // Nettoyage automatique des autorisations en cours remplacées par un débit réel
+            repository.cleanAuthorizationDuplicates(syncedAccount.id, userId);
           } catch (txErr) {
             console.warn(`Transactions non extraites pour le compte ${rawAcc.name}:`, txErr.message);
           }

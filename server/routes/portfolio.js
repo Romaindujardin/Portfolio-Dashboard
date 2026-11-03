@@ -548,12 +548,14 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       if (accountId) {
         const account = repository.getAccount(accountId, userId);
         if (!account) throw new HttpError(404, "Compte introuvable");
+        repository.cleanAuthorizationDuplicates(account.id, userId);
         transactions = repository.listTransactions(account.id, userId, {
           from: asDate(req.query.from),
           to: asDate(req.query.to),
           limit: asOptionalInteger(req.query.limit, { min: 1, max: 10000 }) || 2000,
         });
       } else {
+        repository.cleanAllAuthorizationDuplicates(userId);
         transactions = repository.listAllTransactions(userId, {
           from: asDate(req.query.from),
           to: asDate(req.query.to),
@@ -570,6 +572,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const userId = queryUserId(req);
       const account = repository.getAccount(req.params.id, userId);
       if (!account) throw new HttpError(404, "Compte introuvable");
+      repository.cleanAuthorizationDuplicates(account.id, userId);
       const transactions = repository.listTransactions(account.id, userId, {
         from: asDate(req.query.from),
         to: asDate(req.query.to),

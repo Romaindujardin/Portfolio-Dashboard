@@ -439,10 +439,66 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
     }
   };
 
+  // Filtrage intelligent des autorisations de paiement CB remplacées par leur débit réel
+  const displayTransactions = useMemo(() => {
+    const isAuth = (t: Transaction) => {
+      const cat = (t.category || "").toLowerCase();
+      const label = (t.label || "").toLowerCase();
+      return (
+        cat.includes("autorisation") ||
+        cat.includes("authorization") ||
+        label.includes("autorisation") ||
+        Boolean(t.pending)
+      );
+    };
+
+    const auths = transactions.filter(isAuth);
+    if (auths.length === 0) return transactions;
+
+    const settled = transactions.filter((t) => !isAuth(t));
+    const supersededIds = new Set<string>();
+
+    for (const auth of auths) {
+      const authAmount = Math.abs(Number(auth.amount) || 0);
+      const authDate = Date.parse(auth.date) || 0;
+      const authTokens = (auth.label || "")
+        .toLowerCase()
+        .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
+        .replace(/cb\*\d+/gi, " ")
+        .split(/[\s\-_/.,;:!?'"()]+/)
+        .filter((w) => w.length >= 3);
+
+      for (const s of settled) {
+        if (Math.abs(authAmount - Math.abs(Number(s.amount) || 0)) > 0.01) continue;
+        const sDate = Date.parse(s.date) || 0;
+        if (authDate && sDate && Math.abs(sDate - authDate) / (1000 * 3600 * 24) > 14) continue;
+        const sTokens = (s.label || "")
+          .toLowerCase()
+          .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
+          .replace(/cb\*\d+/gi, " ")
+          .split(/[\s\-_/.,;:!?'"()]+/)
+          .filter((w) => w.length >= 3);
+        const hasCommon = authTokens.some((at) => sTokens.some((st) => st.includes(at) || at.includes(st)));
+        const compactAuth = (auth.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const compactSettled = (s.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const match =
+          hasCommon ||
+          Boolean(compactAuth && compactSettled && (compactAuth.includes(compactSettled) || compactSettled.includes(compactAuth)));
+        if (match) {
+          supersededIds.add(auth.id);
+          break;
+        }
+      }
+    }
+
+    if (supersededIds.size === 0) return transactions;
+    return transactions.filter((t) => !supersededIds.has(t.id));
+  }, [transactions]);
+
   const exportTransactionsCsv = () => {
-    if (!txAccount || transactions.length === 0) return;
+    if (!txAccount || displayTransactions.length === 0) return;
     const header = "Date;Libellé;Montant;Devise;Catégorie\n";
-    const rows = transactions
+    const rows = displayTransactions
       .map(
         (t) =>
           `"${t.date}";"${(t.label || "").replace(/"/g, '""')}";"${t.amount}";"${t.currency || "EUR"}";"${(t.category || "").replace(/"/g, '""')}"`,
@@ -1002,11 +1058,11 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
         footer={
           <div className="flex w-full items-center justify-between">
             <span className="text-xs text-[#8a8a8a]">
-              {transactions.length} transaction(s) affichée(s)
+              {displayTransactions.length} transaction(s) affichée(s)
               {hasMoreTx && !txSearch && " · d'autres transactions disponibles"}
             </span>
             <div className="flex items-center gap-2">
-              {transactions.length > 0 && (
+              {displayTransactions.length > 0 && (
                 <Button size="sm" onClick={exportTransactionsCsv}>
                   <Download className="h-3.5 w-3.5" /> Exporter CSV
                 </Button>
@@ -1022,7 +1078,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
           <div className="py-12 text-center text-sm text-[#8a8a8a]">
             Chargement des transactions...
           </div>
-        ) : transactions.length === 0 ? (
+        ) : displayTransactions.length === 0 ? (
           <EmptyState
             title="Aucune transaction"
             description="Aucune transaction n'a été trouvée pour ce compte."
@@ -1040,7 +1096,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
               />
             </div>
             <div className="max-h-[50vh] overflow-y-auto divide-y divide-[rgba(255,255,255,0.04)] pr-1">
-              {transactions
+              {displayTransactions
                 .filter(
                   (t) =>
                     !txSearch ||
