@@ -47,6 +47,22 @@ if (fs.existsSync(destination)) {
     );
   }
 }
+if (
+  !force &&
+  (fs.existsSync(`${destination}-wal`) || fs.existsSync(`${destination}-shm`))
+) {
+  fail(
+    `Des fichiers -wal/-shm existent pour ${destination} : un conteneur ou un ` +
+      "serveur utilise probablement cette base. Arrêtez-le, puis relancez. " +
+      "Utilisez --force uniquement si vous êtes certain que personne n'écrit dedans.",
+  );
+}
+if (fs.existsSync(`${source}-wal`) || fs.existsSync(`${source}-shm`)) {
+  console.warn(
+    "⚠️  La base source a des fichiers -wal/-shm : la copie SQLite reste " +
+      "cohérente, mais arrêtez l'application locale pour une sauvegarde au repos.",
+  );
+}
 
 fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
 try {
