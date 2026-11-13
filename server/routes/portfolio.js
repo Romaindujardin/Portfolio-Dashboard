@@ -3,9 +3,10 @@
 // modifiée : les pages historiques continuent d'utiliser leurs endpoints.
 
 import express from "express";
+import fetch from "node-fetch";
 import { PortfolioRepository } from "../services/portfolioRepository.js";
 import { EnableBankingConnector } from "../connectors/enableBanking.js";
-import { SyncService } from "../services/syncService.js";
+import { SyncService, parseOAuthState } from "../services/syncService.js";
 import {
   MarketDataService,
   isIsin,
@@ -39,11 +40,25 @@ import {
   asyncHandler,
   nowIso,
   oneOf,
-  requireUserId,
   round2,
   todayIso,
 } from "../lib/validate.js";
+import {
+  clearSessionCookie,
+  resolveRequestUserId,
+  setSessionCookie,
+} from "../lib/session.js";
+import { createRateLimiter } from "../lib/rateLimit.js";
 import { encryptJson } from "../lib/secrets.js";
+import {
+  SECRET_KEYS,
+  deleteUserSecret,
+  getUserSecret,
+  getUserSecretStatuses,
+  isSecretKey,
+  setUserSecret,
+} from "../services/userSecretsService.js";
+import { deleteUserData } from "../services/userDataService.js";
 import {
   syncCryptoAccount,
   syncAllCryptoAccounts,
@@ -59,10 +74,12 @@ import {
   resolveHoldingProfile,
 } from "../services/etfService.js";
 import {
+  changeUserPasswordAsync,
+  getUserCredential,
   hasUserPassword,
-  setUserPassword,
-  verifyUserPassword,
-  changeUserPassword,
+  setUserPasswordAsync,
+  validateUsername,
+  verifyUserPasswordAsync,
 } from "../services/authService.js";
 
 const toBool = (value, fallback = false) => {
@@ -70,11 +87,121 @@ const toBool = (value, fallback = false) => {
   return value === true || value === 1 || value === "1" || value === "true";
 };
 
-const bodyUserId = (req) => requireUserId(req.body?.user_id ?? req.query.user_id);
-const queryUserId = (req) => requireUserId(req.query.user_id);
+const requireSessionUserId = (req) => {
+  if (!req.sessionUser) {
+    throw new HttpError(401, "Authentification requise");
+  }
+  return req.sessionUser;
+};
+
+const bodyUserId = (req) => {
+  const userId = resolveRequestUserId(
+    req,
+    req.body?.user_id ?? req.body?.userId ?? req.query.user_id,
+  );
+  if (!userId) throw new HttpError(400, "user_id invalide");
+  return userId || requireSessionUserId(req);
+};
+
+const queryUserId = (req) => {
+  const userId = resolveRequestUserId(req, req.query.user_id);
+  if (!userId) throw new HttpError(400, "user_id invalide");
+  return userId || requireSessionUserId(req);
+};
 
 const buildPropertyAccountName = (property) =>
   property.name || property.address || "Bien immobilier";
+
+const SENSITIVE_ACCOUNT_METADATA = new Set([
+  "credentialsEncrypted",
+  "apiKeyMasked",
+  "apiKey",
+  "apiSecret",
+  "binanceApiKey",
+  "binanceSecretKey",
+  "password",
+  "customerId",
+  "privateKey",
+  "sessionId",
+  "accessToken",
+  "refreshToken",
+]);
+
+/** Ne jamais exposer les métadonnées secrètes d'un compte dans une réponse API. */
+const sanitizeAccountMetadata = (metadata) => {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return metadata;
+  }
+  const clean = { ...metadata };
+  for (const key of SENSITIVE_ACCOUNT_METADATA) delete clean[key];
+  return clean;
+};
+
+const publicAccount = (account) =>
+  account && typeof account === "object" && !Array.isArray(account)
+    ? { ...account, metadata: sanitizeAccountMetadata(account.metadata) }
+    : account;
+
+const SENSITIVE_CONNECTION_METADATA = new Set([
+  "customerId",
+  "password",
+  "credentialsEncrypted",
+  "apiKey",
+  "apiSecret",
+  "privateKey",
+  "state",
+  "authorizationId",
+  "sessionId",
+]);
+
+/** Ne jamais exposer les identifiants d'une connexion dans une réponse API. */
+const publicConnection = (connection) => {
+  if (
+    !connection ||
+    typeof connection !== "object" ||
+    Array.isArray(connection)
+  ) {
+    return connection;
+  }
+  // Le sessionId Enable Banking permet d'interroger la banque : il reste côté
+  // serveur, comme les identifiants stockés dans les métadonnées.
+  const { sessionId: _sessionId, ...safeConnection } = connection;
+  const metadata = safeConnection.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return safeConnection;
+  }
+  const clean = { ...metadata };
+  for (const key of SENSITIVE_CONNECTION_METADATA) delete clean[key];
+  return { ...safeConnection, metadata: clean };
+};
+
+/**
+ * Nettoie récursivement tout résultat de synchronisation avant réponse API :
+ * connexions, comptes (y compris listes imbriquées) et sous-résultats.
+ */
+export const publicSyncResult = (result, seen = new WeakSet()) => {
+  if (!result || typeof result !== "object") return result;
+  if (seen.has(result)) return result;
+  seen.add(result);
+  if (Array.isArray(result)) {
+    return result.map((entry) => publicSyncResult(entry, seen));
+  }
+  const clean = { ...result };
+  if (clean.connection) clean.connection = publicConnection(clean.connection);
+  if (clean.account) clean.account = publicAccount(clean.account);
+  if (Array.isArray(clean.accounts)) {
+    clean.accounts = clean.accounts.map(publicAccount);
+  }
+  if (Array.isArray(clean.results)) {
+    clean.results = clean.results.map((entry) => publicSyncResult(entry, seen));
+  }
+  for (const key of ["sync", "result"]) {
+    if (clean[key] && typeof clean[key] === "object") {
+      clean[key] = publicSyncResult(clean[key], seen);
+    }
+  }
+  return clean;
+};
 
 export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) {
   if (!db) throw new Error("Base de données requise pour le routeur patrimoine");
@@ -126,34 +253,64 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
 
   // ─── Authentification & Sécurité des profils ──────────────────────────────
 
+  const authKey = (req) =>
+    `${req.ip || req.socket?.remoteAddress || "unknown"}:${String(
+      req.body?.username || req.query?.username || "",
+    )
+      .trim()
+      .slice(0, 64)
+      .toLowerCase()}`;
+  const authLimiter = createRateLimiter({
+    windowMs: 5 * 60 * 1000,
+    max: 12,
+    keyPrefix: "auth",
+    keyGenerator: authKey,
+  });
+  const statusLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyPrefix: "auth-status",
+  });
+
   router.get(
     "/auth/status",
+    statusLimiter,
     asyncHandler(async (req, res) => {
       const username = String(req.query.username || "").trim();
       if (!username) {
         throw new HttpError(400, "Nom d'utilisateur requis");
       }
-      const hasPassword = hasUserPassword(db, username);
-      res.json({ username, hasPassword });
+      let cleanUsername;
+      try {
+        cleanUsername = validateUsername(username);
+      } catch (err) {
+        throw new HttpError(400, err.message);
+      }
+      const hasPassword = hasUserPassword(db, cleanUsername);
+      res.json({ username: cleanUsername, hasPassword });
     }),
   );
 
   router.post(
     "/auth/setup",
+    authLimiter,
     asyncHandler(async (req, res) => {
       const { username, password } = req.body || {};
-      const cleanUsername = String(username || "").trim();
-      if (!cleanUsername) {
-        throw new HttpError(400, "Nom d'utilisateur requis");
-      }
-      if (!password || typeof password !== "string" || password.length < 4) {
-        throw new HttpError(
-          400,
-          "Le mot de passe doit comporter au moins 4 caractères",
-        );
+      let cleanUsername;
+      try {
+        cleanUsername = validateUsername(username);
+      } catch (err) {
+        throw new HttpError(400, err.message);
       }
       try {
-        const result = setUserPassword(db, cleanUsername, password);
+        const result = await setUserPasswordAsync(db, cleanUsername, password);
+        const credential = getUserCredential(db, cleanUsername);
+        setSessionCookie(
+          req,
+          res,
+          cleanUsername,
+          credential?.session_version,
+        );
         res.status(201).json(result);
       } catch (err) {
         throw new HttpError(400, err.message);
@@ -163,34 +320,79 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
 
   router.post(
     "/auth/verify",
+    authLimiter,
     asyncHandler(async (req, res) => {
       const { username, password } = req.body || {};
-      const cleanUsername = String(username || "").trim();
-      if (!cleanUsername) {
-        throw new HttpError(400, "Nom d'utilisateur requis");
+      let cleanUsername;
+      try {
+        cleanUsername = validateUsername(username);
+      } catch (err) {
+        throw new HttpError(400, err.message);
       }
-      const isValid = verifyUserPassword(db, cleanUsername, password || "");
+      const isValid = await verifyUserPasswordAsync(
+        db,
+        cleanUsername,
+        typeof password === "string" ? password : "",
+      );
       if (!isValid) {
         throw new HttpError(401, "Mot de passe incorrect");
       }
+      const credential = getUserCredential(db, cleanUsername);
+      setSessionCookie(
+        req,
+        res,
+        cleanUsername,
+        credential?.session_version,
+      );
       res.json({ success: true, username: cleanUsername });
+    }),
+  );
+
+  router.get(
+    "/auth/me",
+    asyncHandler(async (req, res) => {
+      res.json({
+        authenticated: Boolean(req.sessionUser),
+        username: req.sessionUser || null,
+      });
+    }),
+  );
+
+  router.post(
+    "/auth/logout",
+    asyncHandler(async (req, res) => {
+      clearSessionCookie(req, res);
+      res.json({ success: true });
     }),
   );
 
   router.post(
     "/auth/change-password",
+    authLimiter,
     asyncHandler(async (req, res) => {
+      if (!req.sessionUser) {
+        throw new HttpError(401, "Authentification requise");
+      }
       const { username, currentPassword, newPassword } = req.body || {};
       const cleanUsername = String(username || "").trim();
       if (!cleanUsername) {
         throw new HttpError(400, "Nom d'utilisateur requis");
       }
+      if (cleanUsername !== req.sessionUser) {
+        throw new HttpError(403, "Accès interdit à ce profil");
+      }
       try {
-        const result = changeUserPassword(
+        const result = await changeUserPasswordAsync(
           db,
           cleanUsername,
           currentPassword,
           newPassword,
+        );
+        setSessionCookie(
+          req,
+          res,
+          cleanUsername,
+          result.sessionVersion,
         );
         res.json(result);
       } catch (err) {
@@ -198,6 +400,246 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
           ? 401
           : 400;
         throw new HttpError(status, err.message);
+      }
+    }),
+  );
+
+  // ─── Coffre de secrets d'intégration (chiffré, jamais renvoyé en clair) ───
+
+  const secretLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 30,
+    keyPrefix: "secrets",
+  });
+
+  router.get(
+    "/secrets",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      res.json({
+        secrets: getUserSecretStatuses(db, userId),
+        keys: SECRET_KEYS,
+      });
+    }),
+  );
+
+  router.put(
+    "/secrets/:key",
+    secretLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const keyName = String(req.params.key || "");
+      if (!isSecretKey(keyName)) {
+        throw new HttpError(400, "Clé de secret inconnue");
+      }
+      try {
+        const result = setUserSecret(db, userId, keyName, req.body?.value);
+        res.json(result);
+      } catch (err) {
+        throw new HttpError(400, err.message);
+      }
+    }),
+  );
+
+  router.delete(
+    "/secrets/:key",
+    secretLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const keyName = String(req.params.key || "");
+      if (!isSecretKey(keyName)) {
+        throw new HttpError(400, "Clé de secret inconnue");
+      }
+      const deleted = deleteUserSecret(db, userId, keyName);
+      res.json({ success: true, key: keyName, deleted });
+    }),
+  );
+
+  router.delete(
+    "/users/:username",
+    asyncHandler(async (req, res) => {
+      const sessionUser = requireSessionUserId(req);
+      const username = String(req.params.username || "").trim();
+      if (username !== sessionUser) {
+        throw new HttpError(403, "Accès interdit à ce profil");
+      }
+      const result = deleteUserData(db, username);
+      clearSessionCookie(req, res);
+      res.json(result);
+    }),
+  );
+
+  // ─── Proxy Gemini (la clé reste exclusivement côté serveur) ───────────────
+
+  const aiLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 20,
+    keyPrefix: "ai-gemini",
+  });
+
+  router.post(
+    "/ai/gemini",
+    aiLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const model = String(req.body?.model || req.query?.model || "").trim();
+      const payload = req.body?.payload;
+      if (!/^gemini-[A-Za-z0-9._-]{1,80}$/.test(model)) {
+        throw new HttpError(400, "Modèle Gemini invalide");
+      }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new HttpError(400, "Payload Gemini invalide");
+      }
+      let serialized;
+      try {
+        serialized = JSON.stringify(payload);
+      } catch {
+        throw new HttpError(400, "Payload Gemini non sérialisable");
+      }
+      if (serialized.length > 2_000_000) {
+        throw new HttpError(413, "Payload Gemini trop volumineux");
+      }
+      const apiKey = getUserSecret(db, userId, "geminiApiKey");
+      if (!apiKey) {
+        throw new HttpError(
+          400,
+          "Clé API Gemini non configurée. Renseignez-la dans les paramètres pour utiliser le Conseiller IA.",
+        );
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60_000);
+      try {
+        const upstream = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+            model,
+          )}:generateContent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": apiKey,
+            },
+            body: serialized,
+            signal: controller.signal,
+          },
+        );
+        const text = await upstream.text();
+        res.status(upstream.status);
+        res.type(upstream.headers.get("content-type") || "application/json");
+        return res.send(text);
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          throw new HttpError(504, "Gemini n'a pas répondu à temps");
+        }
+        throw new HttpError(502, "Impossible de joindre Gemini");
+      } finally {
+        clearTimeout(timer);
+      }
+    }),
+  );
+
+  // ─── Proxies de données de marché (clés côté serveur) ─────────────────────
+
+  const marketLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 120,
+    keyPrefix: "market",
+  });
+
+  router.get(
+    "/crypto/etherscan",
+    marketLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const moduleName = String(req.query.module || "");
+      const action = String(req.query.action || "");
+      const allowedActions = new Set([
+        "balance",
+        "tokentx",
+        "tokenbalance",
+      ]);
+      if (moduleName !== "account" || !allowedActions.has(action)) {
+        throw new HttpError(400, "Requête Etherscan non autorisée");
+      }
+      const apiKey = getUserSecret(db, userId, "etherscanApiKey");
+      if (!apiKey) {
+        throw new HttpError(
+          400,
+          "Clé API Etherscan non configurée. Renseignez-la dans les paramètres.",
+        );
+      }
+      const url = new URL("https://api.etherscan.io/v2/api");
+      url.searchParams.set("module", moduleName);
+      url.searchParams.set("action", action);
+      for (const key of [
+        "address",
+        "chainid",
+        "contractaddress",
+        "startblock",
+        "endblock",
+        "sort",
+      ]) {
+        if (req.query[key] != null) {
+          url.searchParams.set(key, String(req.query[key]));
+        }
+      }
+      url.searchParams.set("apikey", apiKey);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const upstream = await fetch(url.toString(), {
+          signal: controller.signal,
+        });
+        const data = await upstream.json();
+        res.status(upstream.status).json(data);
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          throw new HttpError(504, "Etherscan n'a pas répondu à temps");
+        }
+        throw new HttpError(502, "Impossible de joindre Etherscan");
+      } finally {
+        clearTimeout(timer);
+      }
+    }),
+  );
+
+  router.get(
+    "/market/coingecko",
+    marketLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const endpoint = String(req.query.endpoint || "");
+      const allowed = new Set([
+        "simple/price",
+        "simple/token_price/ethereum",
+      ]);
+      if (!allowed.has(endpoint)) {
+        throw new HttpError(400, "Endpoint CoinGecko non autorisé");
+      }
+      const url = new URL(`https://api.coingecko.com/api/v3/${endpoint}`);
+      for (const key of ["ids", "contract_addresses", "vs_currencies"]) {
+        if (req.query[key] != null) {
+          url.searchParams.set(key, String(req.query[key]));
+        }
+      }
+      const apiKey = getUserSecret(db, userId, "coinGeckoApiKey");
+      if (apiKey) url.searchParams.set("x_cg_demo_api_key", apiKey);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const upstream = await fetch(url.toString(), {
+          signal: controller.signal,
+        });
+        const data = await upstream.json();
+        res.status(upstream.status).json(data);
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          throw new HttpError(504, "CoinGecko n'a pas répondu à temps");
+        }
+        throw new HttpError(502, "Impossible de joindre CoinGecko");
+      } finally {
+        clearTimeout(timer);
       }
     }),
   );
@@ -216,7 +658,11 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
           // Un prêt incomplet ne doit pas bloquer toute la synthèse.
         }
       }
-      res.json(repository.getOverview(userId));
+      const overview = repository.getOverview(userId);
+      res.json({
+        ...overview,
+        accounts: (overview.accounts || []).map(publicAccount),
+      });
     }),
   );
 
@@ -330,7 +776,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         repository.listConnectors(userId).map((c) => [c.id, c]),
       );
       const accounts = rawAccounts.map((account) => ({
-        ...account,
+        ...publicAccount(account),
         logo: resolveAccountLogo(account, connectors),
       }));
       res.json({ accounts });
@@ -348,7 +794,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       );
       res.json({
         account: {
-          ...account,
+          ...publicAccount(account),
           logo: resolveAccountLogo(account, connectors),
         },
         holdings: repository.listHoldings(account.id, userId),
@@ -392,14 +838,14 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         color: asOptionalString(req.body?.color, 20),
         isManual: true,
         metadata: {
-          ...(req.body?.metadata || {}),
+          ...(sanitizeAccountMetadata(req.body?.metadata || {}) || {}),
           ...(logo ? { logo } : {}),
         },
       });
       repository.saveSnapshot(userId, account.id, todayIso(), balance, account.currency, "manual");
       res.status(201).json({
         account: {
-          ...account,
+          ...publicAccount(account),
           logo: resolveAccountLogo(account, null),
         },
       });
@@ -440,7 +886,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         result.account.logo = resolveAccountLogo(result.account, connectors);
       }
 
-      res.status(201).json(result);
+      res.status(201).json(publicSyncResult(result));
     }),
   );
 
@@ -490,9 +936,11 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       }
       if (req.body.color !== undefined) patch.color = asOptionalString(req.body.color, 20);
       if (req.body.is_archived !== undefined) patch.isArchived = Boolean(req.body.is_archived);
-      if (req.body.metadata !== undefined) patch.metadata = req.body.metadata;
+      if (req.body.metadata !== undefined) {
+        patch.metadata = sanitizeAccountMetadata(req.body.metadata);
+      }
       const account = repository.updateAccount(req.params.id, userId, patch);
-      res.json({ account });
+      res.json({ account: publicAccount(account) });
     }),
   );
 
@@ -525,15 +973,24 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       if (!account) throw new HttpError(404, "Compte introuvable");
       if (account.connectionId) {
         const result = await syncService.syncConnection(account.connectionId, userId, { force: true });
-        return res.json({ result, account: repository.getAccount(account.id, userId) });
+        return res.json({
+          result: publicSyncResult(result),
+          account: publicAccount(repository.getAccount(account.id, userId)),
+        });
       }
       if (account.provider === "bourso-sidecar" || account.provider === "bourso") {
         const result = await syncBoursoSidecar({ repository, userId });
-        return res.json({ result, account: repository.getAccount(account.id, userId) });
+        return res.json({
+          result: publicSyncResult(result),
+          account: publicAccount(repository.getAccount(account.id, userId)),
+        });
       }
       if (account.provider === "crypto" || account.type === "CRYPTO") {
-        const result = await syncCryptoAccount(repository, account, userId);
-        return res.json({ result, account: repository.getAccount(account.id, userId) });
+        const result = await syncCryptoAccount(repository, account.id, userId);
+        return res.json({
+          result: publicSyncResult(result),
+          account: publicAccount(repository.getAccount(account.id, userId)),
+        });
       }
       throw new HttpError(400, "Ce compte ne supporte pas la synchronisation directe.");
     }),
@@ -705,7 +1162,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       market.recomputeInvestmentAccount(account.id, userId);
       res.status(201).json({
         holding,
-        account: repository.getAccount(account.id, userId),
+        account: publicAccount(repository.getAccount(account.id, userId)),
       });
     }),
   );
@@ -755,7 +1212,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     asyncHandler(async (req, res) => {
       const userId = queryUserId(req);
       const connections = repository.listConnectors(userId).map((connection) => ({
-        ...connection,
+        ...publicConnection(connection),
         logo: resolveConnectionLogo(connection),
         accountCount: repository
           .listAccounts(userId)
@@ -845,7 +1302,10 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         institutionId,
         label: asOptionalString(req.body?.label, 120),
       });
-      res.status(201).json(result);
+      res.status(201).json({
+        ...result,
+        connection: publicConnection(result.connection),
+      });
     }),
   );
 
@@ -855,24 +1315,26 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       String(req.headers.accept || "").includes("application/json");
     const appUrl = (process.env.APP_URL || "https://localhost:5173").replace(/\/+$/, "");
     const redirectBase = `${appUrl}/patrimoine`;
+    const parsedState = parseOAuthState(req.query.state);
 
     console.log("[Enable Banking OAuth Callback] Paramètres reçus :", {
       error: req.query.error,
       error_description: req.query.error_description,
-      state: req.query.state,
+      hasState: Boolean(parsedState),
       hasCode: Boolean(req.query.code),
     });
 
     if (req.query.error) {
       const message =
         req.query.error_description || req.query.error || "Autorisation refusée";
-      const state = req.query.state ? asString(req.query.state, { max: 200 }) : null;
-      if (state) {
+      if (parsedState) {
         try {
-          const userIdFromState = state.split(".")[0];
-          const pending = repository.findPendingConnectorByState(state, userIdFromState);
+          const pending = repository.findPendingConnectorByState(
+            parsedState.state,
+            parsedState.userId,
+          );
           if (pending) {
-            repository.updateConnector(pending.id, userIdFromState, {
+            repository.updateConnector(pending.id, parsedState.userId, {
               status: "error",
               lastError: `Échec d'autorisation (${message})`,
             });
@@ -887,17 +1349,25 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       );
     }
 
-    const state = asString(req.query.state, { max: 200 });
+    if (!parsedState) {
+      const message = "État OAuth manquant ou invalide";
+      if (wantsJson) {
+        return res.status(400).json({ error: message, code: "INVALID_STATE" });
+      }
+      return res.redirect(
+        `${redirectBase}?connection=error&message=${encodeURIComponent(message)}`,
+      );
+    }
+
+    const state = parsedState.state;
     const code = asString(req.query.code, { max: 4000 });
-    const userIdFromState = state.split(".")[0];
     try {
-      const userId = requireUserId(req.query.user_id || userIdFromState);
       const result = await syncService.completeConnection({
-        userId,
+        userId: parsedState.userId,
         state,
         code,
       });
-      if (wantsJson) return res.json(result);
+      if (wantsJson) return res.json(publicSyncResult(result));
       const status = result.status === "PENDING" ? "pending" : "success";
       return res.redirect(`${redirectBase}?connection=${status}`);
     } catch (error) {
@@ -932,11 +1402,20 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
           parsed.searchParams.get("error_description") || error,
         );
       }
-      const userId = requireUserId(
-        req.body?.user_id || state.split(".")[0],
-      );
-      const result = await syncService.completeConnection({ userId, state, code });
-      res.json(result);
+      const userId = bodyUserId(req);
+      const parsedState = parseOAuthState(state);
+      if (!parsedState) {
+        throw new HttpError(400, "État OAuth manquant ou invalide");
+      }
+      if (parsedState.userId !== userId) {
+        throw new HttpError(403, "State OAuth associé à un autre profil");
+      }
+      const result = await syncService.completeConnection({
+        userId,
+        state: parsedState.state,
+        code,
+      });
+      res.json(publicSyncResult(result));
     }),
   );
 
@@ -947,7 +1426,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const results = await syncService.syncAll(userId, {
         force: toBool(req.body?.force),
       });
-      res.json({ results });
+      res.json({ results: results.map(publicSyncResult) });
     }),
   );
 
@@ -958,7 +1437,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const result = await syncService.syncConnection(req.params.id, userId, {
         force: toBool(req.body?.force),
       });
-      res.json(result);
+      res.json(publicSyncResult(result));
     }),
   );
 
@@ -988,7 +1467,8 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
   router.get(
     "/sidecar/bourso/status",
     asyncHandler(async (req, res) => {
-      const status = getBoursoStatus(repository);
+      const userId = requireSessionUserId(req);
+      const status = getBoursoStatus(repository, userId);
       res.json(status);
     }),
   );
@@ -1013,7 +1493,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         saveCredentials,
       });
 
-      res.json(result);
+      res.json(publicSyncResult(result));
     }),
   );
 
@@ -1031,15 +1511,16 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         pages,
       });
 
-      res.json(result);
+      res.json(publicSyncResult(result));
     }),
   );
 
   router.delete(
     "/sidecar/bourso/credentials",
     asyncHandler(async (req, res) => {
-      deleteBoursoCredentials(repository);
-      res.json({ deleted: true });
+      const userId = requireSessionUserId(req);
+      const deleted = deleteBoursoCredentials(repository, userId);
+      res.json({ deleted });
     }),
   );
 
@@ -1556,7 +2037,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const populated = accounts.map((account) => {
         const holdings = repository.listHoldings(account.id, userId);
         return {
-          ...account,
+          ...publicAccount(account),
           holdings,
         };
       });
@@ -1571,16 +2052,32 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const name = asString(req.body?.name, { max: 120 });
       if (!name) throw new HttpError(400, "Le nom du compte crypto est requis");
       const provider = asString(req.body?.provider, { max: 40, fallback: "manual" }).toLowerCase();
-      const metadata = req.body?.metadata || {};
+      const metadata = sanitizeAccountMetadata(req.body?.metadata || {}) || {};
 
       if (provider === "binance") {
-        const apiKey = asString(req.body?.apiKey, { max: 200 });
-        const apiSecret = asString(req.body?.apiSecret, { max: 200 });
-        if (!apiKey || !apiSecret) {
-          throw new HttpError(400, "Clé API et Clé Secrète Binance requises");
+        // Les clés Binance vivent uniquement dans le coffre chiffré. Le corps
+        // de la requête n'est accepté que pour migrer un ancien client.
+        const bodyApiKey = asString(req.body?.apiKey, { max: 200 });
+        const bodyApiSecret = asString(req.body?.apiSecret, { max: 200 });
+        let apiKey = getUserSecret(db, userId, "binanceApiKey");
+        let apiSecret = getUserSecret(db, userId, "binanceSecretKey");
+        if (bodyApiKey && bodyApiSecret && (!apiKey || !apiSecret)) {
+          setUserSecret(db, userId, "binanceApiKey", bodyApiKey);
+          setUserSecret(db, userId, "binanceSecretKey", bodyApiSecret);
+          apiKey = bodyApiKey;
+          apiSecret = bodyApiSecret;
         }
-        metadata.credentialsEncrypted = encryptJson({ apiKey, apiSecret });
-        metadata.apiKeyMasked = `${apiKey.slice(0, 6)}...${apiKey.slice(-4)}`;
+        if (!apiKey || !apiSecret) {
+          throw new HttpError(
+            400,
+            "Clés API Binance non configurées. Renseignez-les dans les paramètres.",
+          );
+        }
+        delete metadata.credentialsEncrypted;
+        delete metadata.apiKeyMasked;
+        delete metadata.apiKey;
+        delete metadata.apiSecret;
+        metadata.binanceConfigured = true;
       } else if (["evm", "bitcoin", "solana", "hyperliquid", "aptos"].includes(provider)) {
         const address = asString(req.body?.address, { max: 200 });
         if (!address) throw new HttpError(400, "L'adresse du wallet est requise");
@@ -1621,7 +2118,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         syncResult = { account, holdings: repository.listHoldings(account.id, userId) };
       }
 
-      res.status(201).json(syncResult);
+      res.status(201).json(publicSyncResult(syncResult));
     }),
   );
 
@@ -1630,7 +2127,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     asyncHandler(async (req, res) => {
       const userId = bodyUserId(req);
       const result = await syncCryptoAccount(repository, req.params.id, userId);
-      res.json(result);
+      res.json(publicSyncResult(result));
     }),
   );
 
@@ -1639,7 +2136,7 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     asyncHandler(async (req, res) => {
       const userId = bodyUserId(req);
       const result = await syncAllCryptoAccounts(repository, userId);
-      res.json(result);
+      res.json(publicSyncResult(result));
     }),
   );
 

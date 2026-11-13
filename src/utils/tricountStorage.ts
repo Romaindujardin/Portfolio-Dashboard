@@ -56,6 +56,7 @@ export const fetchTricountFromDatabase = async (userId: string = "Romain") => {
   try {
     const res = await fetch(
       `${API_BASE}/data?user_id=${encodeURIComponent(userId)}`,
+      { credentials: "include" },
     );
     if (!res.ok) return null;
     const data = await res.json();
@@ -77,6 +78,7 @@ export const pushTricountToDatabase = async (userId: string = "Romain") => {
     const configs = getStoredConfigs();
     const res = await fetch(`${API_BASE}/sync`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expenses, incomes, configs, userId }),
     });
@@ -241,14 +243,9 @@ export const getStoredExpenses = (): TricountExpense[] => {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      // Nettoyer définitivement les transactions de test ou importées par erreur
-      const cleaned = parsed.filter(
-        (e) => !e.id || (!e.id.startsWith("exp-bank-") && e.id !== "exp-1" && e.id !== "exp-2")
-      );
-      if (cleaned.length !== parsed.length) {
-        localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(cleaned));
-      }
-      return cleaned;
+      // Aucun filtre métier codé en dur : les identifiants exp-1/exp-2 ou
+      // exp-bank-* peuvent être de vraies données utilisateur.
+      return parsed;
     }
   } catch (e) {
     console.error("Erreur lors de la lecture des dépenses Tricount:", e);
@@ -292,6 +289,7 @@ export const deleteExpense = (id: string, userId: string = "Romain"): void => {
   try {
     fetch(`${API_BASE}/expenses/${encodeURIComponent(id)}?user_id=${encodeURIComponent(userId)}`, {
       method: "DELETE",
+      credentials: "include",
     }).catch(() => {});
   } catch {
     // ignore
@@ -349,6 +347,7 @@ export const deleteIncome = (id: string, userId: string = "Romain"): void => {
   try {
     fetch(`${API_BASE}/incomes/${encodeURIComponent(id)}?user_id=${encodeURIComponent(userId)}`, {
       method: "DELETE",
+      credentials: "include",
     }).catch(() => {});
   } catch {
     // ignore

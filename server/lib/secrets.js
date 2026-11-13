@@ -1,6 +1,6 @@
-// Chiffrement au repos des secrets d'intégration (clés Enable Banking,
-// éventuelle clé OpenFIGI). AES-256-GCM, clé dérivée d'une variable
-// d'environnement ou d'un fichier local généré automatiquement.
+// Chiffrement au repos des secrets d'intégration (Enable Banking, Gemini,
+// Binance, Etherscan, CoinGecko, OpenSea). AES-256-GCM, clé dérivée d'une
+// variable d'environnement ou d'un fichier local généré automatiquement.
 //
 // Le fichier de clé vit dans data/ (déjà ignoré par git) et n'est lisible que
 // par l'utilisateur courant. Aucun secret n'est jamais renvoyé en clair par
@@ -31,6 +31,9 @@ const loadKey = () => {
     if (fs.existsSync(KEY_FILE)) {
       const stored = fs.readFileSync(KEY_FILE, "utf8").trim();
       if (stored) {
+        try {
+          fs.chmodSync(KEY_FILE, 0o600);
+        } catch {}
         cachedKey = deriveKey(stored);
         return cachedKey;
       }
@@ -38,6 +41,9 @@ const loadKey = () => {
     fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true, mode: 0o700 });
     const generated = crypto.randomBytes(32).toString("hex");
     fs.writeFileSync(KEY_FILE, generated, { mode: 0o600 });
+    try {
+      fs.chmodSync(KEY_FILE, 0o600);
+    } catch {}
     cachedKey = deriveKey(generated);
     return cachedKey;
   } catch (error) {

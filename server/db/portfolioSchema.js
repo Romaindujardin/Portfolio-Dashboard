@@ -281,17 +281,34 @@ export function initializePortfolioSchema(db) {
 
     -- Identifiants & mots de passe sécurisés par profil (scrypt + timing-safe)
     CREATE TABLE IF NOT EXISTS user_credentials (
-      username      TEXT PRIMARY KEY,
-      password_hash TEXT NOT NULL,
-      salt          TEXT NOT NULL,
-      created_at    TEXT NOT NULL,
-      updated_at    TEXT NOT NULL
+      username        TEXT PRIMARY KEY,
+      password_hash   TEXT NOT NULL,
+      salt            TEXT NOT NULL,
+      session_version INTEGER NOT NULL DEFAULT 1,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL
+    );
+
+    -- Coffre de secrets d'intégration par profil (AES-256-GCM).
+    -- Les valeurs ne sont jamais renvoyées en clair par l'API.
+    CREATE TABLE IF NOT EXISTS user_secrets (
+      user_id        TEXT NOT NULL,
+      key_name       TEXT NOT NULL,
+      encrypted_json TEXT NOT NULL,
+      updated_at     TEXT NOT NULL,
+      PRIMARY KEY (user_id, key_name)
     );
   `);
 
   // Colonnes ajoutées après coup (bases déjà créées par une version antérieure).
   addColumnIfMissing(db, "accounts", "cash_balance", "REAL");
   addColumnIfMissing(db, "accounts", "connection_id", "TEXT");
+  addColumnIfMissing(
+    db,
+    "user_credentials",
+    "session_version",
+    "INTEGER NOT NULL DEFAULT 1",
+  );
   addColumnIfMissing(db, "loans", "term_months", "INTEGER");
   addColumnIfMissing(db, "properties", "bathrooms", "INTEGER");
   addColumnIfMissing(db, "properties", "valuation_mode", "TEXT NOT NULL DEFAULT 'ESTIMATED'");

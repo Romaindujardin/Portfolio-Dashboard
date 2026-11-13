@@ -1112,6 +1112,24 @@ const SavingsStrategyPage: React.FC<SavingsStrategyPageProps> = ({
     }
 
     if (isDossier && finalSubItems.length > 0) {
+      if (finalP1Cur != null && finalP1Cur > 0) {
+        const p1Sub =
+          finalSubItems.find(
+            (s) =>
+              s.personId === "person1" &&
+              !s.name.toLowerCase().includes("assurance"),
+          ) || finalSubItems.find((s) => s.personId === "person1");
+        if (p1Sub) {
+          p1Sub.currentAmount = finalP1Cur;
+        }
+      }
+      if (finalP2Cur != null && finalP2Cur > 0) {
+        const p2Sub = finalSubItems.find((s) => s.personId === "person2");
+        if (p2Sub) {
+          p2Sub.currentAmount = finalP2Cur;
+        }
+      }
+
       currentNum = finalSubItems.reduce(
         (sum, sub) => sum + (Number(sub.currentAmount) || 0),
         0,

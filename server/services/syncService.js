@@ -18,6 +18,26 @@ import { syncBoursoSidecar } from "./boursoSidecarService.js";
 
 const SYNC_COOLDOWN_MS = 4 * 3600 * 1000;
 
+const USERNAME_STATE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const NONCE_STATE_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
+/**
+ * Valide le format du state OAuth : `<userId>.<nonce aléatoire>`.
+ * Retourne null pour un state vide, mal formé ou trop long.
+ */
+export const parseOAuthState = (value) => {
+  if (typeof value !== "string") return null;
+  const state = value.trim();
+  if (state.length < 18 || state.length > 200) return null;
+  const parts = state.split(".");
+  if (parts.length !== 2) return null;
+  const [userId, nonce] = parts;
+  if (!USERNAME_STATE_RE.test(userId) || !NONCE_STATE_RE.test(nonce)) {
+    return null;
+  }
+  return { userId, state };
+};
+
 export class SyncService {
   constructor({ repository, connector, now = () => new Date() }) {
     this.repository = repository;
@@ -52,16 +72,33 @@ export class SyncService {
         code: "MISSING_CODE",
       });
     }
+    const parsedState = parseOAuthState(state);
+    if (!parsedState) {
+      throw new ConnectorError(
+        "État OAuth manquant ou invalide (protection CSRF).",
+        { status: 400, code: "INVALID_STATE" },
+      );
+    }
+    if (parsedState.userId !== userId) {
+      throw new ConnectorError("État OAuth associé à un autre profil.", {
+        status: 403,
+        code: "INVALID_STATE",
+      });
+    }
     const pending = connectorId
       ? this.repository.getConnector(connectorId, userId)
-      : this.repository.findPendingConnectorByState(state, userId);
+      : this.repository.findPendingConnectorByState(parsedState.state, userId);
     if (!pending) {
       throw new ConnectorError(
         "Connexion en attente introuvable. Relancez l'autorisation depuis l'application.",
         { status: 404, code: "PENDING_CONNECTION_NOT_FOUND" },
       );
     }
-    if (pending.metadata?.state && state && pending.metadata.state !== state) {
+    const expectedState =
+      typeof pending.metadata?.state === "string"
+        ? pending.metadata.state.trim()
+        : "";
+    if (!expectedState || expectedState !== parsedState.state) {
       throw new ConnectorError("État OAuth invalide (protection CSRF).", {
         status: 400,
         code: "INVALID_STATE",

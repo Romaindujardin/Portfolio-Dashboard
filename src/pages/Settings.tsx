@@ -12,6 +12,7 @@ import {
   Loader2,
   Lock,
   AlertCircle,
+  Trash2,
 } from "lucide-react";
 import { ACCENT_COLORS, applyUserTheme, getAccentColorDef } from "../utils/theme";
 import {
@@ -21,7 +22,13 @@ import {
 } from "../utils/userSettings";
 import { getBinanceAccountInfo } from "../utils/binanceService";
 import { addWallet, getStoredWallets } from "../utils/storage";
-import { changePassword } from "../services/portfolioApi";
+import {
+  changePassword,
+  deleteSecret,
+  getSecretsStatus,
+  saveSecret,
+  type SecretStatus,
+} from "../services/portfolioApi";
 import { scorePassword } from "../utils/passwordStrength";
 
 type StringSettingKeys = {
@@ -31,14 +38,8 @@ type StringSettingKeys = {
 const Settings: React.FC = () => {
   const { username } = useParams<{ username: string }>();
   const navigate = useNavigate();
-  const { currentUser, lockUser } = useUser();
+  const { currentUser, lockUser, isUnlocked } = useUser();
   const [settings, setSettings] = useState<UserSettings>({
-    binanceApiKey: "",
-    binanceSecretKey: "",
-    geminiApiKey: "",
-    etherscanApiKey: "",
-    coinGeckoApiKey: "",
-    openSeaApiKey: "",
     customApiEndpoint: "",
     accountSections: [
       { id: "bank", label: "Compte bancaire", kind: "bank" },
@@ -46,7 +47,6 @@ const Settings: React.FC = () => {
       { id: "pee", label: "PEE", kind: "investment" },
     ],
     csvColumnMappings: {},
-    boursoClientId: "",
     boursoAccountMappings: [],
     theme: "auto",
     currency: "EUR",
@@ -54,13 +54,13 @@ const Settings: React.FC = () => {
     accentColor: "blue",
   });
 
-  // États pour gérer la visibilité des clés
-  const [showBinanceSecret, setShowBinanceSecret] = useState(false);
-  const [showBinanceApi, setShowBinanceApi] = useState(false);
-  const [showGeminiApi, setShowGeminiApi] = useState(false);
-  const [showEtherscanApi, setShowEtherscanApi] = useState(false);
-  const [showCoinGeckoApi, setShowCoinGeckoApi] = useState(false);
-  const [showOpenSeaApi, setShowOpenSeaApi] = useState(false);
+  // Les secrets ne sont jamais préremplis : on ne reçoit que leur état.
+  const [secretInputs, setSecretInputs] = useState<Record<string, string>>({});
+  const [secretStatuses, setSecretStatuses] = useState<
+    Record<string, SecretStatus>
+  >({});
+  const [showSecret, setShowSecret] = useState<Record<string, boolean>>({});
+  const [secretMessage, setSecretMessage] = useState<string | null>(null);
 
   // États pour gérer les boutons de copie
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -91,7 +91,7 @@ const Settings: React.FC = () => {
   const newPwMatches = newPassword.length > 0 && newPassword === confirmNewPassword;
   const canSubmitPasswordChange =
     currentPassword.length > 0 &&
-    newPassword.length >= 4 &&
+    newPassword.length >= 8 &&
     newPwMatches &&
     !isChangingPassword;
 
@@ -133,12 +133,40 @@ const Settings: React.FC = () => {
     }
   };
 
+  const refreshSecretStatuses = async () => {
+    try {
+      const data = await getSecretsStatus();
+      setSecretStatuses(data.secrets || {});
+    } catch (error) {
+      console.warn("Impossible de charger l'état des clés API:", error);
+    }
+  };
+
   useEffect(() => {
     if (username) {
       const userSettings = getUserSettings(username);
       setSettings(userSettings);
+      if (isUnlocked) void refreshSecretStatuses();
     }
-  }, [username]);
+  }, [username, isUnlocked]);
+
+  const persistSecretInputs = async () => {
+    const entries = Object.entries(secretInputs).filter(
+      ([, value]) => value.trim().length > 0,
+    );
+    for (const [key, value] of entries) {
+      await saveSecret(key, value.trim());
+    }
+    if (entries.length > 0) {
+      setSecretInputs({});
+      await refreshSecretStatuses();
+      setSecretMessage(
+        `${entries.length} clé(s) enregistrée(s) dans le coffre chiffré.`,
+      );
+      setTimeout(() => setSecretMessage(null), 4000);
+    }
+    return entries.length;
+  };
 
   const saveSettings = async () => {
     if (!username) return;
@@ -149,11 +177,14 @@ const Settings: React.FC = () => {
       if (settings.accentColor) {
         applyUserTheme(settings.accentColor);
       }
+      await persistSecretInputs();
       setMessage("Paramètres sauvegardés avec succès !");
       setTimeout(() => setMessage(""), 3000);
-    } catch {
-      setMessage("Erreur lors de la sauvegarde des paramètres");
-      setTimeout(() => setMessage(""), 3000);
+    } catch (error: any) {
+      setMessage(
+        error?.message || "Erreur lors de la sauvegarde des paramètres",
+      );
+      setTimeout(() => setMessage(""), 4000);
     } finally {
       setIsLoading(false);
     }
@@ -177,10 +208,24 @@ const Settings: React.FC = () => {
   };
 
   const handleConnectBinance = async () => {
-    if (!settings.binanceApiKey || !settings.binanceSecretKey) {
+    const apiKey = secretInputs.binanceApiKey?.trim() || "";
+    const secretKey = secretInputs.binanceSecretKey?.trim() || "";
+    const hasStoredKeys =
+      secretStatuses.binanceApiKey?.configured &&
+      secretStatuses.binanceSecretKey?.configured;
+
+    if ((!apiKey || !secretKey) && !hasStoredKeys) {
       setBinanceConnectionStatus({
         type: "error",
-        message: "Veuillez d'abord saisir votre clé API et secret Binance",
+        message:
+          "Saisissez la clé API et le secret Binance, ou enregistrez-les d'abord.",
+      });
+      return;
+    }
+    if ((apiKey && !secretKey) || (!apiKey && secretKey)) {
+      setBinanceConnectionStatus({
+        type: "error",
+        message: "La clé API et le secret Binance doivent être fournis ensemble.",
       });
       return;
     }
@@ -189,6 +234,18 @@ const Settings: React.FC = () => {
     setBinanceConnectionStatus({ type: null, message: "" });
 
     try {
+      if (apiKey && secretKey) {
+        await saveSecret("binanceApiKey", apiKey);
+        await saveSecret("binanceSecretKey", secretKey);
+        setSecretInputs((prev) => {
+          const next = { ...prev };
+          delete next.binanceApiKey;
+          delete next.binanceSecretKey;
+          return next;
+        });
+        await refreshSecretStatuses();
+      }
+
       // Vérifier si un wallet Binance existe déjà
       const existingWallets = await getStoredWallets(username || currentUser);
       const existingBinanceWallet = existingWallets.find(
@@ -204,11 +261,8 @@ const Settings: React.FC = () => {
         return;
       }
 
-      // Tester la connexion et récupérer les assets
-      const assets = await getBinanceAccountInfo(
-        settings.binanceApiKey,
-        settings.binanceSecretKey,
-      );
+      // Tester la connexion et récupérer les assets (clés lues côté serveur)
+      const assets = await getBinanceAccountInfo();
 
       // Calculer la valeur totale
       const totalValue = assets.reduce(
@@ -220,7 +274,7 @@ const Settings: React.FC = () => {
       const wallet = {
         id: `binance-${Date.now()}`,
         name: "Compte Binance",
-        address: settings.binanceApiKey.slice(0, 8) + "...",
+        address: "Binance API",
         walletType: "binance" as const,
         blockchains: ["binance"],
         assets,
@@ -266,59 +320,85 @@ const Settings: React.FC = () => {
     }
   };
 
-  const renderApiKeyField = (
+  const renderSecretField = (
     label: string,
-    field: StringSettingKeys,
-    showState: boolean,
-    setShowState: (show: boolean) => void,
+    secretKey: string,
     placeholder: string,
-    isPassword: boolean = true,
   ) => {
-    const value = settings[field] ?? "";
-    const fieldName = field.toString();
+    const status = secretStatuses[secretKey];
+    const value = secretInputs[secretKey] || "";
+    const isVisible = Boolean(showSecret[secretKey]);
 
     return (
       <div>
-        <label className="block text-sm font-medium text-[#8a8a8a] mb-2">
-          {label}
-        </label>
+        <div className="flex items-center justify-between mb-2">
+          <label className="block text-sm font-medium text-[#8a8a8a]">
+            {label}
+          </label>
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+              status?.configured
+                ? "bg-green-950/50 text-green-400 border border-green-500/20"
+                : "bg-[#1a1a1a] text-[#777] border border-white/5"
+            }`}
+          >
+            {status?.configured ? "Configurée" : "Non configurée"}
+          </span>
+        </div>
         <div className="relative">
           <input
-            type={isPassword && !showState ? "password" : "text"}
+            type={isVisible ? "text" : "password"}
             value={value}
-            onChange={(e) => handleInputChange(field, e.target.value)}
-            placeholder={placeholder}
+            onChange={(e) =>
+              setSecretInputs((prev) => ({
+                ...prev,
+                [secretKey]: e.target.value,
+              }))
+            }
+            placeholder={
+              status?.configured
+                ? "Clé configurée — laisser vide pour conserver"
+                : placeholder
+            }
             className="input-field pr-20"
+            autoComplete="new-password"
           />
           <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex space-x-1">
-            {isPassword && (
-              <button
-                type="button"
-                onClick={() => setShowState(!showState)}
-                className="p-1 text-[#555555] hover:text-[#f5f5f5] transition-colors"
-                title={showState ? "Masquer" : "Afficher"}
-              >
-                {showState ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            )}
             <button
               type="button"
-              onClick={() => copyToClipboard(value, fieldName)}
+              onClick={() =>
+                setShowSecret((prev) => ({
+                  ...prev,
+                  [secretKey]: !prev[secretKey],
+                }))
+              }
               className="p-1 text-[#555555] hover:text-[#f5f5f5] transition-colors"
-              title="Copier"
+              title={isVisible ? "Masquer" : "Afficher"}
             >
-              {copiedField === fieldName ? (
-                <Check className="h-4 w-4 text-green-500" />
+              {isVisible ? (
+                <EyeOff className="h-4 w-4" />
               ) : (
-                <Copy className="h-4 w-4" />
+                <Eye className="h-4 w-4" />
               )}
             </button>
+            {status?.configured && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await deleteSecret(secretKey);
+                  await refreshSecretStatuses();
+                }}
+                className="p-1 text-[#555555] hover:text-red-400 transition-colors"
+                title="Supprimer la clé"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
+        <p className="text-[11px] text-[#555555] mt-1">
+          Chiffrée côté serveur (AES-256-GCM), jamais renvoyée au navigateur.
+        </p>
       </div>
     );
   };
@@ -367,6 +447,11 @@ const Settings: React.FC = () => {
           }`}
         >
           {message}
+        </div>
+      )}
+      {secretMessage && (
+        <div className="mb-6 p-4 rounded-md bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+          {secretMessage}
         </div>
       )}
 
@@ -430,21 +515,16 @@ const Settings: React.FC = () => {
 
             <div className="space-y-4">
               {/* Binance API Key */}
-              {renderApiKeyField(
+              {renderSecretField(
                 "Clé API Binance",
                 "binanceApiKey",
-                showBinanceApi,
-                setShowBinanceApi,
                 "Votre clé API Binance",
-                false,
               )}
 
               {/* Binance Secret Key */}
-              {renderApiKeyField(
+              {renderSecretField(
                 "Clé secrète Binance",
                 "binanceSecretKey",
-                showBinanceSecret,
-                setShowBinanceSecret,
                 "Votre clé secrète Binance",
               )}
 
@@ -452,11 +532,7 @@ const Settings: React.FC = () => {
               <div className="pt-2">
                 <button
                   onClick={handleConnectBinance}
-                  disabled={
-                    isConnectingBinance ||
-                    !settings.binanceApiKey ||
-                    !settings.binanceSecretKey
-                  }
+                  disabled={isConnectingBinance}
                   className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-[#c8a55e] hover:bg-[#d4b06a] disabled:bg-gray-400 text-white rounded-md transition-colors duration-200 disabled:cursor-not-allowed"
                 >
                   {isConnectingBinance ? (
@@ -671,11 +747,9 @@ const Settings: React.FC = () => {
 
             <div className="space-y-4">
               {/* Gemini API Key */}
-              {renderApiKeyField(
+              {renderSecretField(
                 "Clé API Google Gemini",
                 "geminiApiKey",
-                showGeminiApi,
-                setShowGeminiApi,
                 "Votre clé API Gemini (pour l'assistant IA)",
               )}
 
@@ -724,29 +798,23 @@ const Settings: React.FC = () => {
 
             <div className="space-y-4">
               {/* Etherscan API Key */}
-              {renderApiKeyField(
+              {renderSecretField(
                 "Clé API Etherscan",
                 "etherscanApiKey",
-                showEtherscanApi,
-                setShowEtherscanApi,
                 "Votre clé API Etherscan (optionnel)",
               )}
 
               {/* CoinGecko API Key */}
-              {renderApiKeyField(
+              {renderSecretField(
                 "Clé API CoinGecko",
                 "coinGeckoApiKey",
-                showCoinGeckoApi,
-                setShowCoinGeckoApi,
                 "Votre clé API CoinGecko Pro (optionnel)",
               )}
 
               {/* OpenSea API Key */}
-              {renderApiKeyField(
+              {renderSecretField(
                 "Clé API OpenSea",
                 "openSeaApiKey",
-                showOpenSeaApi,
-                setShowOpenSeaApi,
                 "Votre clé API OpenSea (pour les NFTs)",
               )}
             </div>

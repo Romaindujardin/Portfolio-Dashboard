@@ -9,7 +9,11 @@ import React, {
 import { useLocation, useNavigate } from "react-router-dom";
 import { deleteUserData } from "../utils/storage";
 import { applyUserTheme, getUserAccentColor } from "../utils/theme";
-import { getAuthStatus } from "../services/portfolioApi";
+import {
+  getAuthStatus,
+  getSession,
+  logoutSession,
+} from "../services/portfolioApi";
 
 export interface UserContextType {
   currentUser: string;
@@ -126,35 +130,31 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   // Vérification de l'état d'authentification pour un utilisateur donné
   const checkUserAuth = useCallback(async (user: string) => {
-    if (isSessionUnlocked(user)) {
-      setIsLocked(false);
-      setAuthMode(null);
-      setIsCheckingAuth(false);
-      return;
-    }
-
     setIsCheckingAuth(true);
     try {
-      const status = await getAuthStatus(user);
-      if (!status.hasPassword) {
-        // Premier accès ou aucun mot de passe configuré
-        setIsLocked(true);
+      // Le serveur est la seule source de vérité : un drapeau sessionStorage
+      // ne suffit plus à déverrouiller l'interface.
+      const session = await getSession();
+      if (session.authenticated && session.username === user) {
+        markSessionUnlocked(user);
+        setIsLocked(false);
         setAuthTargetUser(user);
-        setAuthMode("setup");
-      } else {
-        // Mot de passe configuré : session verrouillée
-        setIsLocked(true);
-        setAuthTargetUser(user);
-        setAuthMode("unlock");
+        setAuthMode(null);
+        return;
       }
+
+      // Session serveur absente ou appartenant à un autre profil.
+      clearSessionUnlocked(user);
+      const status = await getAuthStatus(user);
+      setIsLocked(true);
+      setAuthTargetUser(user);
+      setAuthMode(status.hasPassword ? "unlock" : "setup");
     } catch (err) {
       console.warn("Impossible de vérifier l'état d'authentification:", err);
-      // En cas d'erreur réseau, ne pas bloquer si la session est déjà ouverte
-      if (!isSessionUnlocked(user)) {
-        setIsLocked(true);
-        setAuthTargetUser(user);
-        setAuthMode("unlock");
-      }
+      clearSessionUnlocked(user);
+      setIsLocked(true);
+      setAuthTargetUser(user);
+      setAuthMode("unlock");
     } finally {
       setIsCheckingAuth(false);
     }
@@ -219,6 +219,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const lockUser = (user?: string) => {
     const target = user || currentUser;
     clearSessionUnlocked(target);
+    void logoutSession().catch(() => {});
     setIsLocked(true);
     setAuthTargetUser(target);
     setAuthMode("unlock");
@@ -226,6 +227,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   const lockAll = () => {
     clearSessionUnlocked();
+    void logoutSession().catch(() => {});
     setIsLocked(true);
     setAuthTargetUser(currentUser);
     setAuthMode("unlock");
@@ -285,8 +287,19 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
 
   const deleteUser = async (userName: string) => {
     if (availableUsers.length > 1) {
-      // Supprimer toutes les données de l'utilisateur
-      await deleteUserData(userName);
+      if (userName !== currentUser) {
+        console.warn(
+          "Suppression refusée : authentifiez-vous sur le profil à supprimer.",
+        );
+        return;
+      }
+      // Supprimer toutes les données de l'utilisateur (serveur + local)
+      try {
+        await deleteUserData(userName);
+      } catch (error) {
+        console.error("Suppression du profil impossible:", error);
+        return;
+      }
       clearSessionUnlocked(userName);
 
       // Supprimer l'utilisateur de la liste

@@ -6,20 +6,36 @@ import type {
 } from "../types";
 import { API_BASE } from "./apiBase";
 
+// Les secrets d'intégration ne font plus partie des paramètres : ils vivent
+// dans le coffre chiffré côté serveur (voir server/services/userSecretsService.js).
+export const SECRET_SETTING_KEYS = [
+  "binanceApiKey",
+  "binanceSecretKey",
+  "geminiApiKey",
+  "etherscanApiKey",
+  "coinGeckoApiKey",
+  "openSeaApiKey",
+  "boursoClientId",
+  "boursoCustomerId",
+  "boursoPassword",
+] as const;
+
+export type SecretSettingKey = (typeof SECRET_SETTING_KEYS)[number];
+
+const stripLegacySecrets = (settings: unknown): Record<string, unknown> => {
+  if (!settings || typeof settings !== "object") return {};
+  const clean = { ...(settings as Record<string, unknown>) };
+  for (const key of SECRET_SETTING_KEYS) delete clean[key];
+  return clean;
+};
+
 export interface UserSettings {
-  binanceApiKey: string;
-  binanceSecretKey: string;
-  geminiApiKey: string;
-  etherscanApiKey: string;
-  coinGeckoApiKey: string;
-  openSeaApiKey: string;
   customApiEndpoint: string;
   accountSections: AccountSectionConfig[];
   csvColumnMappings: Record<
     string,
     BankCsvColumnMapping | InvestmentCsvColumnMapping
   >;
-  boursoClientId: string;
   boursoAccountMappings: BoursoAccountMapping[];
   theme: "light" | "dark" | "auto";
   currency: string;
@@ -28,12 +44,6 @@ export interface UserSettings {
 }
 
 const defaultSettings: UserSettings = {
-  binanceApiKey: "",
-  binanceSecretKey: "",
-  geminiApiKey: "",
-  etherscanApiKey: "",
-  coinGeckoApiKey: "",
-  openSeaApiKey: "",
   customApiEndpoint: "",
   accountSections: [
     { id: "bank", label: "Compte bancaire", kind: "bank" },
@@ -42,7 +52,6 @@ const defaultSettings: UserSettings = {
     { id: "assurance-vie", label: "Assurance vie", kind: "investment" },
   ],
   csvColumnMappings: {},
-  boursoClientId: "",
   boursoAccountMappings: [],
   theme: "auto",
   currency: "EUR",
@@ -54,8 +63,24 @@ export const getUserSettings = (username: string): UserSettings => {
   try {
     const stored = localStorage.getItem(`user_settings_${username}`);
     if (stored) {
-      const parsedSettings = JSON.parse(stored);
+      const rawSettings = JSON.parse(stored);
+      const parsedSettings = stripLegacySecrets(rawSettings);
       const merged = { ...defaultSettings, ...parsedSettings } as UserSettings;
+      // Purge les anciennes clés API stockées en clair dans localStorage.
+      if (
+        rawSettings &&
+        typeof rawSettings === "object" &&
+        SECRET_SETTING_KEYS.some((key) =>
+          Object.prototype.hasOwnProperty.call(rawSettings, key),
+        )
+      ) {
+        try {
+          localStorage.setItem(
+            `user_settings_${username}`,
+            JSON.stringify(stripLegacySecrets(merged)),
+          );
+        } catch {}
+      }
       if (!merged.accentColor) {
         merged.accentColor = username.toLowerCase().includes("sophie") ? "emerald" : "blue";
       }
@@ -99,14 +124,18 @@ export const saveUserSettings = (
   settings: UserSettings,
 ): void => {
   try {
-    localStorage.setItem(`user_settings_${username}`, JSON.stringify(settings));
+    const sanitized = stripLegacySecrets(settings) as unknown as UserSettings;
+    localStorage.setItem(
+      `user_settings_${username}`,
+      JSON.stringify(sanitized),
+    );
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("userSettingsUpdated", { detail: { username } }),
       );
     }
     // Sauvegarder sur la base de données et disque
-    pushUserSettingsToDatabase(username, settings);
+    pushUserSettingsToDatabase(username, sanitized);
   } catch (error) {
     console.error("Erreur lors de la sauvegarde des paramètres:", error);
   }
@@ -119,11 +148,14 @@ export const fetchUserSettingsFromDatabase = async (
 ): Promise<UserSettings | null> => {
   try {
     const res = await fetch(
-      `${SETTINGS_API_BASE}?user_id=${encodeURIComponent(username)}`
+      `${SETTINGS_API_BASE}?user_id=${encodeURIComponent(username)}`,
+      { credentials: "include" },
     );
     if (!res.ok) return null;
     const data = await res.json();
-    return data.settings || null;
+    return data.settings
+      ? ({ ...defaultSettings, ...stripLegacySecrets(data.settings) } as UserSettings)
+      : null;
   } catch (e) {
     console.warn("Impossible de récupérer les paramètres utilisateur depuis le serveur:", e);
     return null;
@@ -135,9 +167,10 @@ export const pushUserSettingsToDatabase = async (
   settings?: UserSettings
 ): Promise<boolean> => {
   try {
-    const stg = settings || getUserSettings(username);
+    const stg = stripLegacySecrets(settings || getUserSettings(username));
     const res = await fetch(SETTINGS_API_BASE, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ settings: stg, userId: username }),
     });
@@ -178,7 +211,9 @@ export const syncUserSettingsWithDatabase = async (
 
 if (typeof window !== "undefined") {
   setTimeout(() => {
-    syncUserSettingsWithDatabase("Romain");
+    const currentUser =
+      localStorage.getItem("portfolio_current_user") || "Romain";
+    syncUserSettingsWithDatabase(currentUser);
   }, 120);
 }
 
@@ -198,31 +233,6 @@ export const setSetting = <K extends keyof UserSettings>(
   const settings = getUserSettings(username);
   settings[key] = value;
   saveUserSettings(username, settings);
-};
-
-// Fonctions utilitaires pour les clés API
-export const getBinanceApiKey = (username: string): string => {
-  return getSetting(username, "binanceApiKey") as string;
-};
-
-export const getBinanceSecretKey = (username: string): string => {
-  return getSetting(username, "binanceSecretKey") as string;
-};
-
-export const getGeminiApiKey = (username: string): string => {
-  return getSetting(username, "geminiApiKey") as string;
-};
-
-export const getEtherscanApiKey = (username: string): string => {
-  return getSetting(username, "etherscanApiKey") as string;
-};
-
-export const getCoinGeckoApiKey = (username: string): string => {
-  return getSetting(username, "coinGeckoApiKey") as string;
-};
-
-export const getOpenSeaApiKey = (username: string): string => {
-  return getSetting(username, "openSeaApiKey") as string;
 };
 
 export const getCustomApiEndpoint = (username: string): string => {

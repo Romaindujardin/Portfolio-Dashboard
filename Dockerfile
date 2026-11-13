@@ -36,7 +36,9 @@ COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server.js ./
+COPY --from=build /app/restore-database.js ./
 COPY --from=build /app/server ./server
+COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/src/utils/database ./src/utils/database
 
 RUN mkdir -p /app/data && chown -R node:node /app

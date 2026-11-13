@@ -1,4 +1,3 @@
-import { getOpenSeaApiKey } from "./userSettings";
 import { API_ORIGIN } from "./apiBase";
 
 const API_BASE_URL = API_ORIGIN;
@@ -44,21 +43,14 @@ interface OpenSeaResponse {
 
 export const getNFTsForAddress = async (
   address: string,
-  username: string = "Romain"
+  _username: string = "Romain"
 ): Promise<NFTAsset[]> => {
-  const apiKey = getOpenSeaApiKey(username);
-
-  if (!apiKey) {
-    console.warn("⚠️ Clé API OpenSea non configurée");
-    return [];
-  }
-
   try {
     console.log(`🔍 [OpenSea] Récupération des NFTs pour ${address}...`);
 
-    const url = `${API_BASE_URL}/api/opensea/nfts/${address}?apiKey=${apiKey}`;
+    const url = `${API_BASE_URL}/api/opensea/nfts/${address}`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, { credentials: "include" });
 
     if (!response.ok) {
       throw new Error(
@@ -85,18 +77,12 @@ export const getNFTsForAddress = async (
 export const getNFTValue = async (
   contractAddress: string,
   tokenId: string,
-  username: string = "Romain"
+  _username: string = "Romain"
 ): Promise<number | null> => {
-  const apiKey = getOpenSeaApiKey(username);
-
-  if (!apiKey) {
-    return null;
-  }
-
   try {
-    const url = `${API_BASE_URL}/api/opensea/nft/${contractAddress}/${tokenId}?apiKey=${apiKey}`;
+    const url = `${API_BASE_URL}/api/opensea/nft/${contractAddress}/${tokenId}`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, { credentials: "include" });
 
     if (!response.ok) {
       return null;
@@ -122,18 +108,12 @@ export const getNFTValue = async (
 
 export const getCollectionFloorPrice = async (
   collection: string,
-  username: string = "Romain"
+  _username: string = "Romain"
 ): Promise<number | null> => {
-  const apiKey = getOpenSeaApiKey(username);
-
-  if (!apiKey) {
-    return null;
-  }
-
   try {
-    const url = `${API_BASE_URL}/api/opensea/collection/${collection}/floor?apiKey=${apiKey}`;
+    const url = `${API_BASE_URL}/api/opensea/collection/${collection}/floor`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, { credentials: "include" });
 
     if (!response.ok) {
       return null;

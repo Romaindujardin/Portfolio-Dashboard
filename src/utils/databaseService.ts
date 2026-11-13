@@ -23,7 +23,8 @@ class DatabaseService {
   public async getStoredWallets(userId: string = "Romain"): Promise<Wallet[]> {
     try {
       const response = await fetch(
-        `${this.apiBase}/database/wallets?user_id=${encodeURIComponent(userId)}`
+        `${this.apiBase}/database/wallets?user_id=${encodeURIComponent(userId)}`,
+        { credentials: "include" }
       );
       if (!response.ok) throw new Error("Failed to fetch wallets");
 
@@ -92,6 +93,7 @@ class DatabaseService {
   ): Promise<void> {
     const response = await fetch(`${this.apiBase}/database/wallets`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: userId,
@@ -117,6 +119,7 @@ class DatabaseService {
       `${this.apiBase}/database/wallets/${wallet.id}`,
       {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: userId,
@@ -145,8 +148,9 @@ class DatabaseService {
       `${this.apiBase}/database/wallets/${walletId}/assets/${assetIndex}/visibility`,
       {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isHidden }),
+        body: JSON.stringify({ isHidden, user_id: _userId }),
       }
     );
 
@@ -156,14 +160,16 @@ class DatabaseService {
   public async updateWalletNFTVisibility(
     walletId: string,
     nftIndex: number,
-    isHidden: boolean
+    isHidden: boolean,
+    userId: string = "Romain"
   ): Promise<void> {
     const response = await fetch(
       `${this.apiBase}/database/wallets/${walletId}/nfts/${nftIndex}/visibility`,
       {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isHidden }),
+        body: JSON.stringify({ isHidden, user_id: userId }),
       }
     );
 
@@ -180,17 +186,29 @@ class DatabaseService {
       )}`,
       {
         method: "DELETE",
+        credentials: "include",
       }
     );
 
     if (!response.ok) throw new Error("Failed to delete wallet");
   }
 
+  /** Suppression serveur complète du profil (données, secrets, identifiants). */
+  public async deleteUserProfile(userId: string): Promise<boolean> {
+    const response = await fetch(
+      `${this.apiBase}/portfolio/users/${encodeURIComponent(userId)}`,
+      { method: "DELETE", credentials: "include" },
+    );
+    return response.ok;
+  }
+
   // ===== STATISTIQUES =====
 
   public async getDatabaseStats(): Promise<any> {
     try {
-      const response = await fetch(`${this.apiBase}/database/stats`);
+      const response = await fetch(`${this.apiBase}/database/stats`, {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error("Failed to get database stats");
 
       return await response.json();
@@ -216,7 +234,8 @@ class DatabaseService {
       const response = await fetch(
         `${this.apiBase}/database/bank-csv?user_id=${encodeURIComponent(
           userId
-        )}${sectionParam}`
+        )}${sectionParam}`,
+        { credentials: "include" }
       );
       if (!response.ok) throw new Error("Failed to fetch bank csv uploads");
 
@@ -245,7 +264,8 @@ class DatabaseService {
       const response = await fetch(
         `${this.apiBase}/database/bank-csv/${encodeURIComponent(
           id
-        )}?user_id=${encodeURIComponent(userId)}`
+        )}?user_id=${encodeURIComponent(userId)}`,
+        { credentials: "include" }
       );
       if (!response.ok) throw new Error("Failed to fetch bank csv upload");
 
@@ -276,6 +296,7 @@ class DatabaseService {
     try {
       const response = await fetch(`${this.apiBase}/database/bank-csv`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),
       });
@@ -297,7 +318,7 @@ class DatabaseService {
         `${this.apiBase}/database/bank-csv/${encodeURIComponent(
           id
         )}?user_id=${encodeURIComponent(userId)}`,
-        { method: "DELETE" }
+        { method: "DELETE", credentials: "include" }
       );
       return response.ok;
     } catch (error) {
@@ -318,6 +339,7 @@ class DatabaseService {
         )}?user_id=${encodeURIComponent(userId)}`,
         {
           method: "PUT",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user_id: userId, ...updates }),
         }

@@ -13,6 +13,7 @@ export async function fetchBoursoAccounts(params: {
 }): Promise<BoursoAccount[]> {
   const response = await fetch(`${apiBase}/bourso/accounts`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   });
@@ -37,6 +38,7 @@ export async function syncBoursoAccounts(params: {
 }): Promise<BoursoSyncResult> {
   const response = await fetch(`${apiBase}/bourso/sync`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   });

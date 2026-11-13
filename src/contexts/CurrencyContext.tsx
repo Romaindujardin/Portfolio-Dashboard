@@ -6,6 +6,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
+import { API_BASE } from "../utils/apiBase";
 
 export type SupportedCurrency = "EUR" | "USD";
 
@@ -248,7 +249,9 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const fetchRate = async () => {
       try {
-        const resp = await fetch("/api/portfolio/fx/rates");
+        const resp = await fetch(`${API_BASE}/portfolio/fx/rates`, {
+          credentials: "include",
+        });
         if (resp.ok) {
           const data = await resp.json();
           if (data?.eur_usd && Number.isFinite(Number(data.eur_usd))) {

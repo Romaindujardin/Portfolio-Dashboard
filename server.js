@@ -9,6 +9,22 @@ import os from "os";
 import DatabaseManager from "./src/utils/database/database.js";
 import { initializePortfolioSchema } from "./server/db/portfolioSchema.js";
 import { createPortfolioRouter } from "./server/routes/portfolio.js";
+import {
+  getSessionUser,
+  rejectUserMismatch,
+  requireSession,
+} from "./server/lib/session.js";
+import {
+  getUserSecret,
+  migrateLegacyUserSecrets,
+  migrateUserSettingsSecrets,
+  sanitizeUserSettings,
+} from "./server/services/userSecretsService.js";
+import { getUserCredential } from "./server/services/authService.js";
+import {
+  migrateLegacyBoursoCredentials,
+  sanitizeBoursoConnectorMetadata,
+} from "./server/services/boursoSidecarService.js";
 
 // En local, `.env` est chargé par Vite pour le frontend ; on fait de même pour
 // le backend afin que PORT, APP_URL, BASIC_AUTH_* ou DATABASE_PATH soient
@@ -41,15 +57,21 @@ app.disable("x-powered-by");
 // Middleware — CORS : origines locales + origine publique configurée.
 // Les requêtes sans Origin (curl, clients natifs) restent autorisées.
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
-const configuredOrigins = String(process.env.CORS_ORIGINS || APP_URL || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+// L'origine publique de l'application doit toujours être autorisée, même si
+// CORS_ORIGINS est défini pour un frontend séparé.
+const configuredOrigins = Array.from(
+  new Set(
+    [APP_URL, ...String(process.env.CORS_ORIGINS || "").split(",")]
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  ),
+);
 const isAllowedOrigin = (origin) =>
   !origin || LOCAL_ORIGIN.test(origin) || configuredOrigins.includes(origin);
 app.use(
   cors({
     origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+    credentials: true,
   }),
 );
 
@@ -142,8 +164,6 @@ app.use((req, res, next) => {
   return next();
 });
 
-app.use(express.json({ limit: "10mb" }));
-
 // Initialiser la base de données
 const dbManager = DatabaseManager.getInstance();
 dbManager.initializeTables();
@@ -152,6 +172,56 @@ dbManager.initializeTables();
 // Aucune table historique n'est modifiée : la logique CSV/budget/épargne reste
 // strictement inchangée.
 initializePortfolioSchema(dbManager.getDatabase());
+
+// Sessions serveur : toutes les routes /api sont protégées, sauf les routes
+// d'authentification, le callback bancaire (navigation OAuth) et la santé.
+const PUBLIC_AUTH_PATHS = new Set([
+  "/api/portfolio/auth/status",
+  "/api/portfolio/auth/setup",
+  "/api/portfolio/auth/verify",
+  "/api/portfolio/auth/me",
+  "/api/portfolio/auth/logout",
+]);
+
+const isPublicApiRequest = (req) => {
+  if (req.path === "/api/health" || req.path === "/api/test") return true;
+  if (PUBLIC_AUTH_PATHS.has(req.path)) return true;
+  if (
+    req.method === "GET" &&
+    req.path === "/api/portfolio/connections/enable-banking/callback"
+  ) {
+    return true;
+  }
+  return false;
+};
+
+app.use((req, res, next) => {
+  // Attache la session même sur les routes publiques (/auth/me, logout…).
+  // Un jeton signé n'est valide que tant que le profil possède encore des
+  // identifiants : la suppression du profil invalide donc immédiatement ses
+  // anciennes sessions.
+  const session = getSessionUser(req);
+  const credential = session
+    ? getUserCredential(dbManager.getDatabase(), session.username)
+    : null;
+  const sessionVersion = Number(credential?.session_version) || 1;
+  req.sessionUser =
+    credential && sessionVersion === session.sessionVersion
+      ? session.username
+      : null;
+  next();
+});
+
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") return next();
+  if (!req.path.startsWith("/api/")) return next();
+  if (isPublicApiRequest(req)) return next();
+  return requireSession(req, res, next);
+});
+// Le corps JSON n'est analysé qu'après le contrôle de session sur les routes
+// protégées : une requête non authentifiée ne peut pas faire parser 10 Mo.
+app.use(express.json({ limit: "10mb" }));
+app.use(rejectUserMismatch);
 
 // Endpoint de santé pour Docker/Caddy et les vérifications de déploiement.
 // Volontairement accessible sans authentification.
@@ -191,6 +261,20 @@ const sanitizeUserId = (value) => {
   return /^[A-Za-z0-9_-]{1,64}$/.test(candidate) ? candidate : null;
 };
 
+// La session est la source de vérité. Le user_id client n'est accepté que
+// s'il est syntaxiquement valide et identique au profil authentifié.
+const resolveUserId = (req, value) => {
+  const raw =
+    value ?? req.body?.user_id ?? req.body?.userId ?? req.query?.user_id;
+  if (raw == null || String(raw).trim() === "") {
+    return req.sessionUser || null;
+  }
+  const requested = sanitizeUserId(raw);
+  if (!requested) return null;
+  if (req.sessionUser && requested !== req.sessionUser) return null;
+  return req.sessionUser || requested;
+};
+
 const writeDiskBackup = (filename, data) => {
   try {
     const filepath = resolveBackupPath(filename);
@@ -198,7 +282,13 @@ const writeDiskBackup = (filename, data) => {
       console.warn(`⚠️ Nom de backup disque refusé: ${filename}`);
       return;
     }
-    fs.writeFileSync(filepath, JSON.stringify(data, null, 2), "utf-8");
+    fs.writeFileSync(filepath, JSON.stringify(data, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    try {
+      fs.chmodSync(filepath, 0o600);
+    } catch {}
   } catch (err) {
     console.error(`⚠️ Erreur écriture backup disque ${filename}:`, err);
   }
@@ -216,6 +306,59 @@ const readDiskBackup = (filename) => {
   }
   return null;
 };
+
+// Les données personnelles (DB, WAL, miroirs JSON, clés) ne doivent pas être
+// lisibles par les autres comptes système de la machine.
+const hardenFileMode = (filepath, mode) => {
+  try {
+    if (fs.existsSync(filepath)) fs.chmodSync(filepath, mode);
+  } catch (error) {
+    console.warn(`⚠️ Impossible de durcir ${filepath}: ${error.message}`);
+  }
+};
+
+const hardenDataPermissions = () => {
+  hardenFileMode(DATA_DIR, 0o700);
+  const dbPath = dbManager.dbPath;
+  hardenFileMode(dbPath, 0o600);
+  hardenFileMode(`${dbPath}-wal`, 0o600);
+  hardenFileMode(`${dbPath}-shm`, 0o600);
+  hardenFileMode(`${dbPath}-journal`, 0o600);
+  try {
+    for (const filename of fs.readdirSync(DATA_DIR)) {
+      if (filename.endsWith(".json") || filename.startsWith(".portfolio")) {
+        hardenFileMode(path.join(DATA_DIR, filename), 0o600);
+      }
+    }
+  } catch {}
+  const backupsDir = path.join(process.cwd(), "backups");
+  try {
+    if (fs.existsSync(backupsDir)) {
+      hardenFileMode(backupsDir, 0o700);
+      for (const filename of fs.readdirSync(backupsDir)) {
+        const filepath = path.join(backupsDir, filename);
+        try {
+          if (fs.statSync(filepath).isFile()) hardenFileMode(filepath, 0o600);
+        } catch {}
+      }
+    }
+  } catch {}
+};
+
+hardenDataPermissions();
+migrateLegacyUserSecrets(dbManager.getDatabase(), DATA_DIR);
+const boursoMigrated = migrateLegacyBoursoCredentials(
+  dbManager.getDatabase(),
+);
+const boursoMetadataSanitized = sanitizeBoursoConnectorMetadata(
+  dbManager.getDatabase(),
+);
+if (boursoMigrated || boursoMetadataSanitized) {
+  console.log(
+    `🔐 Identifiants BoursoBank migrés vers le coffre du profil propriétaire.`,
+  );
+}
+hardenDataPermissions();
 
 const resolveBoursoCliPath = () => {
   const candidates = [
@@ -266,6 +409,58 @@ const removeBoursoSandboxHome = (sandboxHome) => {
   }
 };
 
+const BOURSO_TIMEOUT_MS =
+  Number(process.env.BOURSO_TIMEOUT_MS) > 0
+    ? Number(process.env.BOURSO_TIMEOUT_MS)
+    : 120_000;
+const BOURSO_MAX_OUTPUT_BYTES =
+  Number(process.env.BOURSO_MAX_OUTPUT_BYTES) > 0
+    ? Number(process.env.BOURSO_MAX_OUTPUT_BYTES)
+    : 10 * 1024 * 1024;
+
+const BOURSO_ENV_ALLOWLIST = new Set([
+  "PATH",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LANGUAGE",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TERM",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "all_proxy",
+  "RUST_LOG",
+  "RUST_BACKTRACE",
+]);
+
+// Le CLI ne doit pas hériter des secrets du serveur (clé de coffre, secret de
+// session, mot de passe Basic, clés d'intégration…). On ne transmet que le
+// strict nécessaire, plus les variables propres au CLI Bourso.
+const buildBoursoEnv = (sandboxHome) => {
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      BOURSO_ENV_ALLOWLIST.has(key) ||
+      key.startsWith("BOURSO_") ||
+      key.startsWith("LC_")
+    ) {
+      env[key] = value;
+    }
+  }
+  env.HOME = sandboxHome || process.env.HOME || os.tmpdir();
+  return env;
+};
+
 const runBoursoCli = ({ args, customerId, password }) => {
   const cliPath = resolveBoursoCliPath();
   const sandboxHome = password
@@ -276,21 +471,61 @@ const runBoursoCli = ({ args, customerId, password }) => {
     new Promise((resolve, reject) => {
       const child = spawn(cliPath, args, {
         cwd: process.cwd(),
-        env: sandboxHome ? { ...process.env, HOME: sandboxHome } : process.env,
+        env: buildBoursoEnv(sandboxHome),
         stdio: "pipe",
       });
 
       let stdout = "";
       let stderr = "";
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+      let timedOut = false;
+      let outputLimitReached = false;
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, BOURSO_TIMEOUT_MS);
+      timer.unref?.();
+
+      const append = (current, chunk, stream) => {
+        const bytes = Buffer.byteLength(chunk);
+        const nextBytes =
+          stream === "stdout" ? stdoutBytes + bytes : stderrBytes + bytes;
+        if (stream === "stdout") stdoutBytes = nextBytes;
+        else stderrBytes = nextBytes;
+        if (nextBytes > BOURSO_MAX_OUTPUT_BYTES) {
+          outputLimitReached = true;
+          child.kill("SIGKILL");
+          return current;
+        }
+        return current + chunk;
+      };
 
       child.stdout.on("data", (data) => {
-        stdout += data.toString();
+        stdout = append(stdout, data.toString(), "stdout");
       });
       child.stderr.on("data", (data) => {
-        stderr += data.toString();
+        stderr = append(stderr, data.toString(), "stderr");
       });
-      child.on("error", (error) => reject(error));
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
       child.on("close", (code) => {
+        clearTimeout(timer);
+        if (timedOut) {
+          return reject(
+            new Error(`bourso-cli n'a pas répondu en ${BOURSO_TIMEOUT_MS} ms`),
+          );
+        }
+        if (outputLimitReached) {
+          return reject(
+            new Error(
+              `bourso-cli a dépassé la limite de ${BOURSO_MAX_OUTPUT_BYTES} octets`,
+            ),
+          );
+        }
         if (code !== 0) {
           return reject(
             new Error(stderr || stdout || `bourso-cli exit ${code}`),
@@ -302,9 +537,10 @@ const runBoursoCli = ({ args, customerId, password }) => {
 
   return execCommand()
     .catch((error) => {
-      // Ne jamais laisser fuiter le mot de passe dans un message d'erreur
+      // Ne jamais laisser fuiter les identifiants dans un message d'erreur.
       let message = String(error?.message || error);
       if (password) message = message.split(password).join("***");
+      if (customerId) message = message.split(customerId).join("***");
       throw new Error(message);
     })
     .finally(() => {
@@ -435,11 +671,22 @@ app.get("/api/test", (req, res) => {
   });
 });
 
-// Proxy Binance API
+// Proxy Binance API : les clés sont lues dans le coffre chiffré du profil.
 app.post("/api/binance/account", async (req, res) => {
-  const { apiKey, apiSecret } = req.body;
-  if (!apiKey || !apiSecret)
-    return res.status(400).json({ error: "Missing API key or secret" });
+  const userId = req.sessionUser;
+  const apiKey = getUserSecret(dbManager.getDatabase(), userId, "binanceApiKey");
+  const apiSecret = getUserSecret(
+    dbManager.getDatabase(),
+    userId,
+    "binanceSecretKey",
+  );
+  if (!apiKey || !apiSecret) {
+    return res.status(400).json({
+      error:
+        "Clés Binance non configurées. Enregistrez-les dans les paramètres.",
+      code: "BINANCE_KEYS_MISSING",
+    });
+  }
 
   const timestamp = Date.now();
   const recvWindow = 5000;
@@ -463,14 +710,27 @@ app.post("/api/binance/account", async (req, res) => {
   }
 });
 
+const getOpenSeaApiKey = (req) =>
+  getUserSecret(dbManager.getDatabase(), req.sessionUser, "openSeaApiKey");
+
+const requireOpenSeaApiKey = (req, res) => {
+  const apiKey = getOpenSeaApiKey(req);
+  if (!apiKey) {
+    res.status(400).json({
+      error:
+        "Clé API OpenSea non configurée. Renseignez-la dans les paramètres.",
+      code: "OPENSEA_KEY_MISSING",
+    });
+    return null;
+  }
+  return apiKey;
+};
+
 // Proxy OpenSea API pour les NFTs
 app.get("/api/opensea/nfts/:address", async (req, res) => {
   const { address } = req.params;
-  const { apiKey } = req.query;
-
-  if (!apiKey) {
-    return res.status(400).json({ error: "Missing OpenSea API key" });
-  }
+  const apiKey = requireOpenSeaApiKey(req, res);
+  if (!apiKey) return;
 
   try {
     console.log(`🔍 [Server] Récupération des NFTs OpenSea pour ${address}...`);
@@ -507,11 +767,8 @@ app.get("/api/opensea/nfts/:address", async (req, res) => {
 // Proxy OpenSea API pour la valeur d'un NFT spécifique
 app.get("/api/opensea/nft/:contract/:tokenId", async (req, res) => {
   const { contract, tokenId } = req.params;
-  const { apiKey } = req.query;
-
-  if (!apiKey) {
-    return res.status(400).json({ error: "Missing OpenSea API key" });
-  }
+  const apiKey = requireOpenSeaApiKey(req, res);
+  if (!apiKey) return;
 
   try {
     console.log(
@@ -551,11 +808,8 @@ app.get("/api/opensea/nft/:contract/:tokenId", async (req, res) => {
 // Proxy OpenSea API pour le floor price d'une collection
 app.get("/api/opensea/collection/:collection/floor", async (req, res) => {
   const { collection } = req.params;
-  const { apiKey } = req.query;
-
-  if (!apiKey) {
-    return res.status(400).json({ error: "Missing OpenSea API key" });
-  }
+  const apiKey = requireOpenSeaApiKey(req, res);
+  if (!apiKey) return;
 
   try {
     console.log(
@@ -722,12 +976,12 @@ app.post("/api/bourso/sync", async (req, res) => {
       password,
       mappings,
       pages = 10,
-      userId: rawUserId = "Romain",
+      userId: rawUserId,
       dryRun = false,
       duplicateRefsToRemove = [],
     } = req.body || {};
 
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
 
@@ -1098,7 +1352,11 @@ app.post("/api/bourso/sync", async (req, res) => {
 app.get("/api/database/stats", (req, res) => {
   try {
     const stats = dbManager.getDatabaseStats();
-    res.json(stats);
+    // Ne pas exposer le chemin absolu du fichier SQLite au navigateur.
+    res.json({
+      ...stats,
+      databasePath: path.basename(stats.databasePath || ""),
+    });
   } catch (error) {
     console.error("Error getting database stats:", error);
     res.status(500).json({ error: "Failed to get database stats" });
@@ -1110,7 +1368,7 @@ app.get("/api/database/stats", (req, res) => {
 // GET /api/database/bank-csv - Lister les CSV uploadés
 app.get("/api/database/bank-csv", (req, res) => {
   try {
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const section = req.query.section || null;
@@ -1126,7 +1384,10 @@ app.get("/api/database/bank-csv", (req, res) => {
 // POST /api/database/bank-csv - Créer un upload CSV
 app.post("/api/database/bank-csv", (req, res) => {
   try {
-    const id = dbManager.createBankCsvUpload(req.body);
+    const userId = resolveUserId(req, req.body?.user_id ?? req.body?.userId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    const id = dbManager.createBankCsvUpload({ ...req.body, user_id: userId });
     res.json({ id, message: "Bank CSV upload created successfully" });
   } catch (error) {
     console.error("Error creating bank csv upload:", error);
@@ -1138,7 +1399,7 @@ app.post("/api/database/bank-csv", (req, res) => {
 app.get("/api/database/bank-csv/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const upload = dbManager.getBankCsvUploadById(id, userId);
@@ -1154,7 +1415,7 @@ app.get("/api/database/bank-csv/:id", (req, res) => {
 app.delete("/api/database/bank-csv/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const success = dbManager.deleteBankCsvUpload(id, userId);
@@ -1170,30 +1431,16 @@ app.delete("/api/database/bank-csv/:id", (req, res) => {
 app.put("/api/database/bank-csv/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = sanitizeUserId(req.query.user_id || req.body.user_id);
+    const userId = resolveUserId(req, req.query.user_id || req.body.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const { filename, content, size_bytes } = req.body || {};
 
-    let success = dbManager.updateBankCsvUpload(id, userId, {
+    const success = dbManager.updateBankCsvUpload(id, userId, {
       filename,
       content,
       size_bytes,
     });
-
-    if (!success) {
-      const db = dbManager.getDatabase();
-      const row = db
-        .prepare("SELECT user_id FROM bank_csv_uploads WHERE id = ?")
-        .get(id);
-      if (row) {
-        success = dbManager.updateBankCsvUpload(id, row.user_id || "Romain", {
-          filename,
-          content,
-          size_bytes,
-        });
-      }
-    }
 
     if (success) return res.json({ message: "Upload updated successfully" });
     res.status(404).json({ error: "Upload not found" });
@@ -1208,58 +1455,16 @@ app.put("/api/database/bank-csv/:id", (req, res) => {
 // GET /api/database/tricount/data - Récupérer toutes les données Tricount (dépenses, revenus, configs)
 app.get("/api/database/tricount/data", (req, res) => {
   try {
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
-    let rawExpenses = dbManager.getAllTricountExpenses(userId) || [];
-    let expenses = rawExpenses.filter((e) => e && e.id !== "exp-1" && e.id !== "exp-2");
-    // Si des dépenses de test étaient encore en base, les purger
-    if (rawExpenses.length !== expenses.length) {
-      try {
-        dbManager.db.prepare("DELETE FROM tricount_expenses WHERE id IN ('exp-1', 'exp-2')").run();
-      } catch {}
-    }
-
-    let incomes = dbManager.getAllTricountIncomes(userId) || [];
-    let configs = dbManager.getAllTricountConfigs(userId) || {};
-
-    // Si SQLite est vide, vérifier si une sauvegarde fichier existe pour auto-restaurer
-    if (expenses.length === 0 && incomes.length === 0) {
-      const members = dbManager.getHouseholdMembers(userId);
-      let backup = null;
-      for (const m of members) {
-        backup = readDiskBackup(`tricount_${m}.json`);
-        if (backup) break;
-      }
-      if (backup) {
-        const cleanBackupExpenses = (backup.expenses || []).filter((e) => e && e.id !== "exp-1" && e.id !== "exp-2");
-        if (cleanBackupExpenses.length > 0) {
-          dbManager.saveTricountExpensesBatch(cleanBackupExpenses, userId);
-          expenses = cleanBackupExpenses;
-        }
-        if (Array.isArray(backup.incomes) && backup.incomes.length > 0) {
-          dbManager.saveTricountIncomesBatch(backup.incomes, userId);
-          incomes = backup.incomes;
-        }
-        if (backup.configs && typeof backup.configs === "object") {
-          for (const m of Object.keys(backup.configs)) {
-            if (m !== "2026-09" || expenses.some(e => e.month === "2026-09")) {
-              dbManager.saveTricountConfig(backup.configs[m], userId);
-            }
-          }
-          configs = dbManager.getAllTricountConfigs(userId);
-        }
-      }
-    }
-
-    // Supprimer la config 2026-09 si elle est vide
-    if (configs["2026-09"] && !expenses.some(e => e.month === "2026-09") && !incomes.some(i => i.month === "2026-09")) {
-      delete configs["2026-09"];
-      try {
-        dbManager.db.prepare("DELETE FROM tricount_configs WHERE month = '2026-09'").run();
-      } catch {}
-    }
-
+    // Lecture strictement non destructive : une base vide ne doit jamais
+    // ressusciter automatiquement des données supprimées depuis un miroir
+    // disque. Les sauvegardes restent disponibles pour une restauration
+    // manuelle et explicite.
+    const expenses = dbManager.getAllTricountExpenses(userId) || [];
+    const incomes = dbManager.getAllTricountIncomes(userId) || [];
+    const configs = dbManager.getAllTricountConfigs(userId) || {};
     res.json({ expenses, incomes, configs });
   } catch (error) {
     console.error("Error fetching tricount data:", error);
@@ -1271,17 +1476,14 @@ app.get("/api/database/tricount/data", (req, res) => {
 app.post("/api/database/tricount/sync", (req, res) => {
   try {
     const { expenses, incomes, configs, userId: rawUserId } = req.body;
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     let expCount = 0;
     let incCount = 0;
     let confCount = 0;
 
-    // Filtrer les dépenses de test résiduelles
-    const cleanExpenses = Array.isArray(expenses)
-      ? expenses.filter((e) => e && e.id !== "exp-1" && e.id !== "exp-2")
-      : [];
+    const cleanExpenses = Array.isArray(expenses) ? expenses : [];
 
     if (cleanExpenses.length > 0) {
       expCount = dbManager.saveTricountExpensesBatch(cleanExpenses, userId);
@@ -1290,12 +1492,6 @@ app.post("/api/database/tricount/sync", (req, res) => {
       incCount = dbManager.saveTricountIncomesBatch(incomes, userId);
     }
     const cleanConfigs = { ...(configs || {}) };
-    if (cleanConfigs["2026-09"] && !cleanExpenses.some(e => e.month === "2026-09") && (!incomes || !incomes.some(i => i.month === "2026-09"))) {
-      delete cleanConfigs["2026-09"];
-      try {
-        dbManager.db.prepare("DELETE FROM tricount_configs WHERE month = '2026-09'").run();
-      } catch {}
-    }
 
     if (cleanConfigs && typeof cleanConfigs === "object") {
       for (const month of Object.keys(cleanConfigs)) {
@@ -1334,7 +1530,7 @@ app.post("/api/database/tricount/sync", (req, res) => {
 app.post("/api/database/tricount/expenses", (req, res) => {
   try {
     const { expense, userId: rawUserId } = req.body || {};
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     if (!expense) return res.status(400).json({ error: "Expense data required" });
@@ -1363,7 +1559,7 @@ app.post("/api/database/tricount/expenses", (req, res) => {
 app.delete("/api/database/tricount/expenses/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const success = dbManager.deleteTricountExpense(id, userId);
@@ -1391,7 +1587,7 @@ app.delete("/api/database/tricount/expenses/:id", (req, res) => {
 app.post("/api/database/tricount/incomes", (req, res) => {
   try {
     const { income, userId: rawUserId } = req.body || {};
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     if (!income) return res.status(400).json({ error: "Income data required" });
@@ -1420,7 +1616,7 @@ app.post("/api/database/tricount/incomes", (req, res) => {
 app.delete("/api/database/tricount/incomes/:id", (req, res) => {
   try {
     const { id } = req.params;
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const success = dbManager.deleteTricountIncome(id, userId);
@@ -1448,7 +1644,7 @@ app.delete("/api/database/tricount/incomes/:id", (req, res) => {
 app.post("/api/database/tricount/configs", (req, res) => {
   try {
     const { config, userId: rawUserId } = req.body || {};
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     if (!config) return res.status(400).json({ error: "Config data required" });
@@ -1478,7 +1674,7 @@ app.post("/api/database/tricount/configs", (req, res) => {
 // GET /api/database/savings/strategy - Récupérer la stratégie d'épargne
 app.get("/api/database/savings/strategy", (req, res) => {
   try {
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     let strategy = dbManager.getSavingsStrategy(userId);
@@ -1503,7 +1699,7 @@ app.get("/api/database/savings/strategy", (req, res) => {
 app.post("/api/database/savings/strategy", (req, res) => {
   try {
     const { strategy, userId: rawUserId } = req.body || {};
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     if (!strategy) return res.status(400).json({ error: "Strategy data required" });
@@ -1522,7 +1718,7 @@ app.post("/api/database/savings/strategy", (req, res) => {
 // GET /api/database/savings/monthly - Récupérer les stratégies mensuelles
 app.get("/api/database/savings/monthly", (req, res) => {
   try {
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     let strategies = dbManager.getAllSavingsMonthlyStrategies(userId);
@@ -1547,7 +1743,7 @@ app.get("/api/database/savings/monthly", (req, res) => {
 app.post("/api/database/savings/monthly", (req, res) => {
   try {
     const { month, strategy, userId: rawUserId } = req.body || {};
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     if (!month || !strategy) return res.status(400).json({ error: "Month and strategy required" });
@@ -1568,7 +1764,7 @@ app.post("/api/database/savings/monthly", (req, res) => {
 app.post("/api/database/savings/monthly/batch", (req, res) => {
   try {
     const { strategies, userId: rawUserId } = req.body || {};
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     if (!strategies || typeof strategies !== "object") {
@@ -1591,17 +1787,23 @@ app.post("/api/database/savings/monthly/batch", (req, res) => {
 // GET /api/database/user-settings - Récupérer les paramètres utilisateur
 app.get("/api/database/user-settings", (req, res) => {
   try {
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     let settings = dbManager.getUserSettings(userId);
     if (!settings) {
       settings = readDiskBackup(`user_settings_${userId}.json`);
-      if (settings) {
-        dbManager.saveUserSettings(userId, settings);
-      }
     }
-    res.json({ settings });
+    settings = migrateUserSettingsSecrets(
+      dbManager.getDatabase(),
+      userId,
+      settings,
+    );
+    if (settings) {
+      dbManager.saveUserSettings(userId, settings);
+      writeDiskBackup(`user_settings_${userId}.json`, settings);
+    }
+    res.json({ settings: sanitizeUserSettings(settings) });
   } catch (error) {
     console.error("Error fetching user settings:", error);
     res.status(500).json({ error: "Failed to fetch user settings" });
@@ -1612,12 +1814,17 @@ app.get("/api/database/user-settings", (req, res) => {
 app.post("/api/database/user-settings", (req, res) => {
   try {
     const { settings, userId: rawUserId } = req.body || {};
-    const userId = sanitizeUserId(rawUserId);
+    const userId = resolveUserId(req, rawUserId);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     if (!settings) return res.status(400).json({ error: "Settings required" });
-    dbManager.saveUserSettings(userId, settings);
-    writeDiskBackup(`user_settings_${userId}.json`, settings);
+    const sanitized = migrateUserSettingsSecrets(
+      dbManager.getDatabase(),
+      userId,
+      settings,
+    );
+    dbManager.saveUserSettings(userId, sanitized);
+    writeDiskBackup(`user_settings_${userId}.json`, sanitized);
     res.json({ success: true, message: "User settings saved successfully" });
   } catch (error) {
     console.error("Error saving user settings:", error);
@@ -1630,7 +1837,7 @@ app.post("/api/database/user-settings", (req, res) => {
 // GET /api/database/wallets - Récupérer tous les wallets
 app.get("/api/database/wallets", (req, res) => {
   try {
-    const userId = sanitizeUserId(req.query.user_id);
+    const userId = resolveUserId(req, req.query.user_id);
     if (!userId)
       return res.status(400).json({ error: "user_id invalide" });
     const wallets = dbManager.getAllWallets(userId);
@@ -1656,8 +1863,11 @@ app.get("/api/database/wallets", (req, res) => {
 // POST /api/database/wallets - Créer un wallet
 app.post("/api/database/wallets", (req, res) => {
   try {
+    const userId = resolveUserId(req, req.body?.user_id ?? req.body?.userId);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const { assets, nfts, ...walletData } = req.body;
-    const walletId = dbManager.createWallet(walletData);
+    const walletId = dbManager.createWallet({ ...walletData, user_id: userId });
 
     // Ajouter les assets du wallet
     if (assets && Array.isArray(assets)) {
@@ -1694,14 +1904,21 @@ app.post("/api/database/wallets", (req, res) => {
 app.put("/api/database/wallets/:id", (req, res) => {
   try {
     const { id } = req.params;
+    const userId = resolveUserId(
+      req,
+      req.body?.user_id ?? req.body?.userId ?? req.query.user_id,
+    );
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
     const { assets, nfts, ...walletData } = req.body;
 
-    // Le wallet doit exister — les champs fournis sont ensuite appliqués
-    // (whitelist), même si le corps ne contient que des assets/NFTs.
-    if (!dbManager.getWalletById(id)) {
+    // Vérification d'appartenance : un 404 évite de révéler l'existence d'un
+    // wallet appartenant à un autre profil.
+    const existing = dbManager.getWalletById(id);
+    if (!existing || existing.user_id !== userId) {
       return res.status(404).json({ error: "Wallet not found" });
     }
-    dbManager.updateWallet(id, walletData);
+    dbManager.updateWallet(id, { ...walletData, user_id: userId });
 
     // Supprimer les anciens assets et NFTs
     dbManager.deleteWalletAssets(id);
@@ -1738,6 +1955,13 @@ app.put("/api/database/wallets/:id", (req, res) => {
 app.delete("/api/database/wallets/:id", (req, res) => {
   try {
     const { id } = req.params;
+    const userId = resolveUserId(req, req.query.user_id);
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    const existing = dbManager.getWalletById(id);
+    if (!existing || existing.user_id !== userId) {
+      return res.status(404).json({ error: "Wallet not found" });
+    }
 
     // Supprimer les assets et NFTs du wallet
     dbManager.deleteWalletAssets(id);
@@ -1762,6 +1986,16 @@ app.put("/api/database/wallets/:id/assets/:index/visibility", (req, res) => {
   try {
     const { id, index } = req.params;
     const { isHidden } = req.body;
+    const userId = resolveUserId(
+      req,
+      req.body?.user_id ?? req.body?.userId ?? req.query.user_id,
+    );
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    const wallet = dbManager.getWalletById(id);
+    if (!wallet || wallet.user_id !== userId) {
+      return res.status(404).json({ error: "Wallet not found" });
+    }
 
     const assets = dbManager.getWalletAssets(id);
     if (assets[index]) {
@@ -1789,6 +2023,16 @@ app.put("/api/database/wallets/:id/nfts/:index/visibility", (req, res) => {
   try {
     const { id, index } = req.params;
     const { isHidden } = req.body;
+    const userId = resolveUserId(
+      req,
+      req.body?.user_id ?? req.body?.userId ?? req.query.user_id,
+    );
+    if (!userId)
+      return res.status(400).json({ error: "user_id invalide" });
+    const wallet = dbManager.getWalletById(id);
+    if (!wallet || wallet.user_id !== userId) {
+      return res.status(404).json({ error: "Wallet not found" });
+    }
 
     const nftIndex = Number.parseInt(index, 10);
     const nfts = dbManager.getWalletNFTs(id);

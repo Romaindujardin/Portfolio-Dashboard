@@ -123,7 +123,6 @@ const seedUser = () => {
 
   const settings: UserSettings = {
     ...getUserSettings(USER),
-    geminiApiKey: "test-gemini-key",
     accountSections: [
       { id: "pea-test", label: "PEA Test", kind: "investment" },
       { id: "bank-test", label: "Compte courant Test", kind: "bank" },
@@ -397,14 +396,18 @@ describe("geminiAI — conseiller contextualisé", () => {
 
     expect(answer).toContain("**fonds d'urgence**");
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toContain("generativelanguage.googleapis.com");
-    expect(calls[0].url).toContain("test-gemini-key");
+    expect(calls[0].url).toContain("/api/portfolio/ai/gemini");
+    expect(calls[0].url).not.toContain("test-gemini-key");
 
-    const body = JSON.parse(String(calls[0].init?.body)) as {
-      systemInstruction: { parts: Array<{ text: string }> };
-      contents: Array<{ role: string; parts: Array<{ text: string }> }>;
-      generationConfig: { maxOutputTokens: number };
+    const envelope = JSON.parse(String(calls[0].init?.body)) as {
+      model: string;
+      payload: {
+        systemInstruction: { parts: Array<{ text: string }> };
+        contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+        generationConfig: { maxOutputTokens: number };
+      };
     };
+    const body = envelope.payload;
     expect(body.systemInstruction.parts[0].text).toContain(
       "PEA Test — 7 247,60 €",
     );
@@ -763,8 +766,8 @@ describe("geminiAI — boucle autonome de Function Calling", () => {
         }
 
         // Deuxième tour : Gemini reçoit le résultat et formule sa recommandation finale
-        const body = JSON.parse(String(init?.body));
-        expect(body.contents.length).toBeGreaterThan(2);
+        const envelope = JSON.parse(String(init?.body));
+        expect(envelope.payload.contents.length).toBeGreaterThan(2);
 
         return new Response(
           JSON.stringify({

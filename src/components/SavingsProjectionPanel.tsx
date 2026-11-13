@@ -10,7 +10,9 @@ import {
 } from "recharts";
 import { SavingsStrategy } from "../types";
 import {
+  calculateHouseholdSummary,
   calculateSavingsProjection,
+  getPocketMonthlyAmount,
   isProjectedSavingsPocket,
 } from "../utils/savingsStorage";
 
@@ -37,6 +39,13 @@ const SavingsProjectionPanel: React.FC<SavingsProjectionPanelProps> = ({
     [strategy, years],
   );
   const placementPockets = strategy.pockets.filter(isProjectedSavingsPocket);
+  const totalMonthlyPlanned = useMemo(() => {
+    const household = calculateHouseholdSummary(strategy);
+    const totalIncome = household.totalMonthlyIncome;
+    return placementPockets.reduce((total, pocket) => {
+      return total + getPocketMonthlyAmount(pocket, totalIncome);
+    }, 0);
+  }, [strategy, placementPockets]);
   const goalGroups = useMemo(() => {
     const groups = new Map<
       string,
@@ -105,15 +114,7 @@ const SavingsProjectionPanel: React.FC<SavingsProjectionPanelProps> = ({
             Épargne mensuelle prévue
           </p>
           <p className="mt-1 text-xl font-bold text-[#c8a55e] text-[#c8a55e]">
-            {formatEur(
-              placementPockets.reduce((total, pocket) => {
-                const amount =
-                  pocket.allocationType === "fixed"
-                    ? Number(pocket.allocationValue) || 0
-                    : 0;
-                return total + amount;
-              }, 0),
-            )}
+            {formatEur(totalMonthlyPlanned)}
           </p>
         </div>
       </div>

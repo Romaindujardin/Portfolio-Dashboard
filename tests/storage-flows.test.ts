@@ -54,6 +54,7 @@ import {
   updateWalletAssetVisibility,
   updateWalletNFTVisibility,
 } from "../src/utils/storage";
+import { getSecretsStatus, saveSecret } from "../src/services/portfolioApi";
 import type { SavingsStrategy, Wallet } from "../src/types";
 
 const USER = "TestStoreUser";
@@ -263,7 +264,6 @@ describe("userSettings (défauts EUR + synchronisation)", () => {
     const settings = getUserSettings(USER);
     settings.currency = "USD";
     settings.theme = "dark";
-    settings.geminiApiKey = "cle-de-test";
     saveUserSettings(USER, settings);
     expect(getUserSettings(USER).currency).toBe("USD");
 
@@ -271,7 +271,38 @@ describe("userSettings (défauts EUR + synchronisation)", () => {
     const fromDb = await fetchUserSettingsFromDatabase(USER);
     expect(fromDb?.currency).toBe("USD");
     expect(fromDb?.theme).toBe("dark");
-    expect(fromDb?.geminiApiKey).toBe("cle-de-test");
+    expect(fromDb).not.toHaveProperty("geminiApiKey");
+    expect(getUserSettings(USER)).not.toHaveProperty("geminiApiKey");
+
+    await saveSecret("geminiApiKey", "cle-de-test");
+    const statuses = await getSecretsStatus();
+    expect(statuses.secrets.geminiApiKey.configured).toBe(true);
+  });
+
+  it("purge les anciens identifiants Bourso stockés en clair", () => {
+    const legacyUser = `${USER}_BoursoLegacy`;
+    localStorage.setItem(
+      `user_settings_${legacyUser}`,
+      JSON.stringify({
+        currency: "EUR",
+        boursoClientId: "legacy-client-id",
+        boursoCustomerId: "legacy-customer-id",
+        boursoPassword: "legacy-password",
+      }),
+    );
+
+    const settings = getUserSettings(legacyUser);
+    expect(settings).not.toHaveProperty("boursoClientId");
+    expect(settings).not.toHaveProperty("boursoCustomerId");
+    expect(settings).not.toHaveProperty("boursoPassword");
+
+    const raw = JSON.parse(
+      localStorage.getItem(`user_settings_${legacyUser}`) || "{}",
+    );
+    expect(raw).not.toHaveProperty("boursoClientId");
+    expect(raw).not.toHaveProperty("boursoCustomerId");
+    expect(raw).not.toHaveProperty("boursoPassword");
+    localStorage.removeItem(`user_settings_${legacyUser}`);
   });
 
   it("getSetting / setSetting", () => {
@@ -372,7 +403,7 @@ describe("storage wallets (mapping API + visibilités)", () => {
     expect(nftWallet!.nfts[0].tokenId).toBe("777");
     expect((nftWallet!.nfts[0].nftData as any)?.collection).toBe("Coll");
 
-    await updateWalletNFTVisibility(nftWallet!.id, 0, true);
+    await updateWalletNFTVisibility(nftWallet!.id, 0, true, USER);
     const raw = (await (await api(`/database/wallets?user_id=${USER}`)).json()) as any[];
     const rawWallet = raw.find((w) => w.name === "Wallet NFT");
     expect(Boolean(rawWallet.nfts[0].is_hidden)).toBe(true);

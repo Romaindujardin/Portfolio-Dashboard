@@ -7,12 +7,19 @@ import { spawn } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { encryptJson, decryptJson, isEncryptionAvailable } from "../lib/secrets.js";
+import { decryptJson } from "../lib/secrets.js";
 import { nowIso, round2 } from "../lib/validate.js";
 import { PROVIDERS } from "../connectors/types.js";
 import { convertBoursoSymbolToYahoo } from "./marketData.js";
+import {
+  deleteUserSecret,
+  getUserSecret,
+  setUserSecret,
+} from "./userSecretsService.js";
 
 export const BOURSO_PROVIDER = PROVIDERS.BOURSO_SIDECAR || "bourso-sidecar";
+const BOURSO_CUSTOMER_ID_KEY = "boursoCustomerId";
+const BOURSO_PASSWORD_KEY = "boursoPassword";
 
 export const resolveBoursoCliPath = () => {
   const candidates = [
@@ -68,6 +75,58 @@ const removeBoursoSandboxHome = (sandboxHome) => {
   }
 };
 
+const BOURSO_TIMEOUT_MS =
+  Number(process.env.BOURSO_TIMEOUT_MS) > 0
+    ? Number(process.env.BOURSO_TIMEOUT_MS)
+    : 120_000;
+const BOURSO_MAX_OUTPUT_BYTES =
+  Number(process.env.BOURSO_MAX_OUTPUT_BYTES) > 0
+    ? Number(process.env.BOURSO_MAX_OUTPUT_BYTES)
+    : 10 * 1024 * 1024;
+
+const BOURSO_ENV_ALLOWLIST = new Set([
+  "PATH",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LANGUAGE",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TERM",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "all_proxy",
+  "RUST_LOG",
+  "RUST_BACKTRACE",
+]);
+
+// Le CLI ne doit pas hériter des secrets du serveur (clé de coffre, secret de
+// session, mot de passe Basic, clés d'intégration…). On ne transmet que le
+// strict nécessaire, plus les variables propres au CLI Bourso.
+const buildBoursoEnv = (sandboxHome) => {
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      BOURSO_ENV_ALLOWLIST.has(key) ||
+      key.startsWith("BOURSO_") ||
+      key.startsWith("LC_")
+    ) {
+      env[key] = value;
+    }
+  }
+  env.HOME = sandboxHome || process.env.HOME || os.tmpdir();
+  return env;
+};
+
 export const runBoursoCli = ({ args, customerId, password }) => {
   const cliPath = resolveBoursoCliPath();
   const sandboxHome = password
@@ -78,21 +137,61 @@ export const runBoursoCli = ({ args, customerId, password }) => {
     new Promise((resolve, reject) => {
       const child = spawn(cliPath, args, {
         cwd: process.cwd(),
-        env: sandboxHome ? { ...process.env, HOME: sandboxHome } : process.env,
+        env: buildBoursoEnv(sandboxHome),
         stdio: "pipe",
       });
 
       let stdout = "";
       let stderr = "";
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+      let timedOut = false;
+      let outputLimitReached = false;
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, BOURSO_TIMEOUT_MS);
+      timer.unref?.();
+
+      const append = (current, chunk, stream) => {
+        const bytes = Buffer.byteLength(chunk);
+        const nextBytes =
+          stream === "stdout" ? stdoutBytes + bytes : stderrBytes + bytes;
+        if (stream === "stdout") stdoutBytes = nextBytes;
+        else stderrBytes = nextBytes;
+        if (nextBytes > BOURSO_MAX_OUTPUT_BYTES) {
+          outputLimitReached = true;
+          child.kill("SIGKILL");
+          return current;
+        }
+        return current + chunk;
+      };
 
       child.stdout.on("data", (data) => {
-        stdout += data.toString();
+        stdout = append(stdout, data.toString(), "stdout");
       });
       child.stderr.on("data", (data) => {
-        stderr += data.toString();
+        stderr = append(stderr, data.toString(), "stderr");
       });
-      child.on("error", (error) => reject(error));
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
       child.on("close", (code) => {
+        clearTimeout(timer);
+        if (timedOut) {
+          return reject(
+            new Error(`bourso-cli n'a pas répondu en ${BOURSO_TIMEOUT_MS} ms`),
+          );
+        }
+        if (outputLimitReached) {
+          return reject(
+            new Error(
+              `bourso-cli a dépassé la limite de ${BOURSO_MAX_OUTPUT_BYTES} octets`,
+            ),
+          );
+        }
         if (code !== 0) {
           return reject(
             new Error(stderr || stdout || `bourso-cli exit ${code}`),
@@ -106,6 +205,7 @@ export const runBoursoCli = ({ args, customerId, password }) => {
     .catch((error) => {
       let message = String(error?.message || error);
       if (password) message = message.split(password).join("***");
+      if (customerId) message = message.split(customerId).join("***");
       throw new Error(message);
     })
     .finally(() => {
@@ -225,37 +325,187 @@ export const extractCsvFromOutput = (stdout, headerStartsWith) => {
   return lines.slice(idx).join("\n").trim();
 };
 
-export const getBoursoSavedCredentials = (repository) => {
-  const row = repository.getEncryptedIntegration(BOURSO_PROVIDER);
-  if (!row?.encrypted_json) return null;
-  try {
-    return decryptJson(row.encrypted_json);
-  } catch (err) {
-    console.warn("⚠️ Impossible de déchiffrer les identifiants Bourso:", err);
-    return null;
-  }
+export const getBoursoSavedCredentials = (repository, userId) => {
+  if (!userId) return null;
+  const customerId = getUserSecret(
+    repository.db,
+    userId,
+    BOURSO_CUSTOMER_ID_KEY,
+  );
+  const password = getUserSecret(repository.db, userId, BOURSO_PASSWORD_KEY);
+  if (!customerId || !password) return null;
+  return { customerId, password };
 };
 
-export const saveBoursoCredentials = (repository, { customerId, password }) => {
+export const saveBoursoCredentials = (
+  repository,
+  userId,
+  { customerId, password },
+) => {
+  if (!userId) throw new Error("Profil requis pour les identifiants BoursoBank");
   if (!customerId || !password) {
     throw new Error("Identifiant client et mot de passe requis");
   }
-  const encrypted = encryptJson({ customerId, password });
-  repository.saveEncryptedIntegration(BOURSO_PROVIDER, encrypted);
+  setUserSecret(repository.db, userId, BOURSO_CUSTOMER_ID_KEY, customerId);
+  setUserSecret(repository.db, userId, BOURSO_PASSWORD_KEY, password);
 };
 
-export const deleteBoursoCredentials = (repository) => {
-  return repository.deleteIntegration(BOURSO_PROVIDER);
+export const deleteBoursoCredentials = (repository, userId) => {
+  if (!userId) return false;
+  const customerIdDeleted = deleteUserSecret(
+    repository.db,
+    userId,
+    BOURSO_CUSTOMER_ID_KEY,
+  );
+  const passwordDeleted = deleteUserSecret(
+    repository.db,
+    userId,
+    BOURSO_PASSWORD_KEY,
+  );
+  return customerIdDeleted || passwordDeleted;
 };
 
-export const getBoursoStatus = (repository) => {
+export const getBoursoStatus = (repository, userId) => {
   const available = isBoursoCliAvailable();
-  const creds = getBoursoSavedCredentials(repository);
+  const creds = getBoursoSavedCredentials(repository, userId);
   return {
     available,
     configured: Boolean(creds?.customerId && creds?.password),
-    customerId: creds?.customerId || null,
   };
+};
+
+/**
+ * Migre les identifiants BoursoBank historiquement stockés dans
+ * integration_settings (global) vers le coffre du profil propriétaire.
+ * La migration n'est faite que si un seul profil possède une connexion
+ * BoursoBank, pour ne jamais attribuer un mot de passe au mauvais profil.
+ */
+export const migrateLegacyBoursoCredentials = (db) => {
+  try {
+    const row = db
+      .prepare(
+        "SELECT encrypted_json FROM integration_settings WHERE provider = ?",
+      )
+      .get(BOURSO_PROVIDER);
+    if (!row?.encrypted_json) return 0;
+
+    let legacy = null;
+    try {
+      legacy = decryptJson(row.encrypted_json);
+    } catch (error) {
+      console.warn(
+        `⚠️ Identifiants BoursoBank historiques illisibles: ${error.message}`,
+      );
+      return 0;
+    }
+    const customerId =
+      typeof legacy?.customerId === "string" ? legacy.customerId.trim() : "";
+    const password =
+      typeof legacy?.password === "string" ? legacy.password.trim() : "";
+    if (!customerId || !password) return 0;
+
+    const owners = db
+      .prepare(
+        "SELECT DISTINCT user_id FROM connectors WHERE provider = ?",
+      )
+      .all(BOURSO_PROVIDER)
+      .map((owner) => owner.user_id)
+      .filter(Boolean);
+    if (owners.length !== 1) {
+      console.warn(
+        "⚠️ Identifiants BoursoBank historiques non migrés : propriétaire ambigu.",
+      );
+      return 0;
+    }
+
+    const userId = owners[0];
+    if (!getUserSecret(db, userId, BOURSO_CUSTOMER_ID_KEY)) {
+      setUserSecret(db, userId, BOURSO_CUSTOMER_ID_KEY, customerId);
+    }
+    if (!getUserSecret(db, userId, BOURSO_PASSWORD_KEY)) {
+      setUserSecret(db, userId, BOURSO_PASSWORD_KEY, password);
+    }
+    db.prepare("DELETE FROM integration_settings WHERE provider = ?").run(
+      BOURSO_PROVIDER,
+    );
+    return 1;
+  } catch (error) {
+    console.warn(
+      `⚠️ Migration des identifiants BoursoBank impossible: ${error.message}`,
+    );
+    return 0;
+  }
+};
+
+/**
+ * Retire les identifiants en clair des métadonnées de connexions BoursoBank.
+ * Les valeurs encore présentes sont d'abord migrées vers le coffre du profil.
+ */
+export const sanitizeBoursoConnectorMetadata = (db) => {
+  let sanitized = 0;
+  try {
+    const rows = db
+      .prepare(
+        "SELECT id, user_id, metadata_json FROM connectors WHERE provider = ?",
+      )
+      .all(BOURSO_PROVIDER);
+    for (const row of rows) {
+      let metadata;
+      try {
+        metadata = JSON.parse(row.metadata_json || "{}");
+      } catch {
+        continue;
+      }
+      if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+        continue;
+      }
+      const hasCustomerId = Object.prototype.hasOwnProperty.call(
+        metadata,
+        "customerId",
+      );
+      const hasPassword = Object.prototype.hasOwnProperty.call(
+        metadata,
+        "password",
+      );
+      if (!hasCustomerId && !hasPassword) continue;
+      const customerId =
+        typeof metadata.customerId === "string"
+          ? metadata.customerId.trim()
+          : "";
+      const password =
+        typeof metadata.password === "string" ? metadata.password.trim() : "";
+
+      if (row.user_id) {
+        try {
+          if (
+            customerId &&
+            !getUserSecret(db, row.user_id, BOURSO_CUSTOMER_ID_KEY)
+          ) {
+            setUserSecret(db, row.user_id, BOURSO_CUSTOMER_ID_KEY, customerId);
+          }
+          if (password && !getUserSecret(db, row.user_id, BOURSO_PASSWORD_KEY)) {
+            setUserSecret(db, row.user_id, BOURSO_PASSWORD_KEY, password);
+          }
+        } catch (error) {
+          console.warn(
+            `⚠️ Migration des métadonnées BoursoBank impossible: ${error.message}`,
+          );
+        }
+      }
+
+      delete metadata.customerId;
+      delete metadata.password;
+      db.prepare(
+        "UPDATE connectors SET metadata_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+      ).run(JSON.stringify(metadata), nowIso(), row.id, row.user_id);
+      sanitized += 1;
+    }
+  } catch (error) {
+    console.warn(
+      `⚠️ Nettoyage des métadonnées BoursoBank impossible: ${error.message}`,
+    );
+  }
+  return sanitized;
 };
 
 /**
@@ -280,7 +530,7 @@ export const syncBoursoSidecar = async ({
   let password = directPassword;
 
   if (!customerId || !password) {
-    const creds = getBoursoSavedCredentials(repository);
+    const creds = getBoursoSavedCredentials(repository, userId);
     if (creds?.customerId && creds?.password) {
       customerId = creds.customerId;
       password = creds.password;
@@ -294,7 +544,7 @@ export const syncBoursoSidecar = async ({
   }
 
   if (saveCredentials && directPassword) {
-    saveBoursoCredentials(repository, { customerId, password });
+    saveBoursoCredentials(repository, userId, { customerId, password });
   }
 
   // Trouver ou créer la connexion dans la table `connections`
@@ -312,19 +562,28 @@ export const syncBoursoSidecar = async ({
       psuType: "personal",
       metadata: {
         type: "sidecar",
-        customerId,
         createdAt: nowIso(),
       },
     });
   } else {
+    // L'identifiant client est un secret : il reste exclusivement dans le
+    // coffre chiffré, jamais dans les métadonnées de la connexion.
+    const metadata = { ...(connection.metadata || {}) };
+    for (const key of [
+      "customerId",
+      "password",
+      "credentialsEncrypted",
+      "apiKey",
+      "apiSecret",
+      "privateKey",
+    ]) {
+      delete metadata[key];
+    }
     repository.updateConnector(connection.id, userId, {
       status: "active",
       lastSyncAt: nowIso(),
       lastError: null,
-      metadata: {
-        ...(connection.metadata || {}),
-        customerId,
-      },
+      metadata,
     });
   }
 

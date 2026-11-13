@@ -23,6 +23,9 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronUp,
+  ShieldCheck,
+  Zap,
+  CheckCircle2,
 } from "lucide-react";
 import {
   AccountSectionKind,
@@ -97,6 +100,64 @@ type AccountSectionSummary = {
   pnl?: number | null;
   purchaseValue?: number | null;
   currentValue?: number | null;
+};
+
+const getSavingsDetails = (name: string, _balance: number) => {
+  const u = (name || "").toUpperCase();
+  if (u.includes("LIVRET A")) {
+    return {
+      rate: 3.0,
+      ceiling: 22950,
+      regulationType: "Livret A (Épargne réglementée)",
+      isExempt: true,
+    };
+  }
+  if (u.includes("LDD") || u.includes("DEVELOPPEMENT")) {
+    return {
+      rate: 3.0,
+      ceiling: 12000,
+      regulationType: "LDDS (Livret de Développement Durable et Solidaire)",
+      isExempt: true,
+    };
+  }
+  if (u.includes("LEP") || u.includes("POPULAIRE")) {
+    return {
+      rate: 4.0,
+      ceiling: 10000,
+      regulationType: "LEP (Livret d'Épargne Populaire)",
+      isExempt: true,
+    };
+  }
+  if (u.includes("CEL")) {
+    return {
+      rate: 2.0,
+      ceiling: 15300,
+      regulationType: "CEL (Compte Épargne Logement)",
+      isExempt: false,
+    };
+  }
+  if (u.includes("PEL")) {
+    return {
+      rate: 2.25,
+      ceiling: 61200,
+      regulationType: "PEL (Plan Épargne Logement)",
+      isExempt: false,
+    };
+  }
+  if (u.includes("BOURSO+") || u.includes("BOURSO PLUS")) {
+    return {
+      rate: 2.5,
+      ceiling: null,
+      regulationType: "Livret Bourso+ (Compte sur livret bancaire)",
+      isExempt: false,
+    };
+  }
+  return {
+    rate: 2.0,
+    ceiling: null,
+    regulationType: "Livret d'Épargne bancaire",
+    isExempt: false,
+  };
 };
 
 const Dashboard: React.FC = () => {
@@ -654,9 +715,11 @@ const Dashboard: React.FC = () => {
     const list: Array<{
       id: string;
       label: string;
-      kind: "all" | "investment" | "bank" | "crypto";
+      kind: "all" | "investment" | "savings" | "bank" | "crypto";
       totalValue: number;
+      holdingsValue: number;
       investedValue: number;
+      cashBalance: number;
       pnl: number;
       pnlPercent: number;
       positionsCount: number;
@@ -673,6 +736,10 @@ const Dashboard: React.FC = () => {
       "#06b6d4",
       "#f97316",
       "#14b8a6",
+      "#84cc16",
+      "#e11d48",
+      "#6366f1",
+      "#d97706",
     ];
 
     const accounts = overview?.accounts || [];
@@ -682,15 +749,15 @@ const Dashboard: React.FC = () => {
       holdingsByAcc.get(h.accountId)!.push(h);
     }
 
-    // 1. Enveloppes d'investissement (PEA, CTO, PEE, Assurance-vie comme Gresham)
-    const investmentAccounts = accounts.filter(
-      (a) =>
-        ["PEA", "SECURITIES", "EMPLOYEE_SAVINGS"].includes(a.type) ||
-        (a.type === "SAVINGS" && (holdingsByAcc.get(a.id)?.length || 0) > 0),
+    // 1. Tous les comptes individuels (PEA, CTO, PEE, Assurance-vie, Livrets, Comptes courants)
+    // Flexible et automatique : tout compte existant ou nouvellement ajouté apparaît individuellement
+    const nonCryptoAccounts = accounts.filter(
+      (a) => !a.isArchived && !["CRYPTO", "LOAN", "REAL_ESTATE"].includes(a.type),
     );
 
-    investmentAccounts.forEach((acc, idx) => {
+    nonCryptoAccounts.forEach((acc, idx) => {
       const accHoldings = holdingsByAcc.get(acc.id) || [];
+      const hasHoldings = accHoldings.length > 0;
       const holdingsTotal = accHoldings.reduce(
         (s, h) => s + (h.quantity || 0) * (h.price || 0),
         0,
@@ -699,90 +766,128 @@ const Dashboard: React.FC = () => {
         (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
         0,
       );
-      const totalVal = Math.max(acc.balance, holdingsTotal);
-      const pnl = holdingsTotal > 0 ? holdingsTotal - holdingsCost : 0;
-      const investedVal = totalVal - pnl;
+      const cash =
+        acc.cashBalance != null
+          ? Math.max(0, acc.cashBalance)
+          : hasHoldings
+          ? Math.max(0, (acc.balance || 0) - holdingsTotal)
+          : (acc.balance || 0);
+
+      const totalVal = hasHoldings
+        ? Math.max(acc.balance || 0, holdingsTotal + (acc.cashBalance ?? 0))
+        : (acc.balance || 0);
+
+      const pnl = hasHoldings ? holdingsTotal - holdingsCost : 0;
+      const holdingsVal = hasHoldings ? holdingsTotal : 0;
+      const investedVal = hasHoldings
+        ? (holdingsCost > 0 ? holdingsCost : holdingsVal)
+        : (acc.balance || 0);
       const pnlPct = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
 
       const upper = acc.name.toUpperCase();
+      let description = "Compte financier";
+      let kind: "investment" | "savings" | "bank" | "crypto" = "investment";
+
+      if (upper.includes("LIVRET A")) {
+        description = "Livret A (Épargne réglementée)";
+        kind = "savings";
+      } else if (upper.includes("LDD") || upper.includes("DEVELOPPEMENT")) {
+        description = "LDDS (Épargne solidaire)";
+        kind = "savings";
+      } else if (upper.includes("LEP") || upper.includes("POPULAIRE")) {
+        description = "LEP (Épargne populaire)";
+        kind = "savings";
+      } else if (upper.includes("BOURSO+") || upper.includes("BOURSO PLUS")) {
+        description = "Livret Bourso+ (Compte sur livret)";
+        kind = "savings";
+      } else if (acc.type === "SAVINGS" && !hasHoldings) {
+        description = "Compte sur livret / Épargne";
+        kind = "savings";
+      } else if (acc.type === "CHECKING") {
+        description = "Compte courant bancaire";
+        kind = "bank";
+      } else if (upper.includes("PEA")) {
+        description = "Plan d'Épargne en Actions";
+        kind = "investment";
+      } else if (upper.includes("PER") || upper.includes("RETRAITE")) {
+        description = "Plan d'Épargne Retraite";
+        kind = "investment";
+      } else if (upper.includes("ENTREPRISE") || upper.includes("PEE")) {
+        description = "Plan d'Épargne Entreprise";
+        kind = "investment";
+      } else if (
+        upper.includes("GRESHAM") ||
+        upper.includes("ASSURANCE") ||
+        upper.includes("VIE") ||
+        upper.includes("CAPITALISATION")
+      ) {
+        description = "Contrat d'Assurance-Vie / Capitalisation";
+        kind = "investment";
+      } else if (acc.type === "SECURITIES") {
+        description = "Compte Titres Ordinaire (CTO)";
+        kind = "investment";
+      } else if (acc.type === "EMPLOYEE_SAVINGS") {
+        description = "Épargne Salariale";
+        kind = "investment";
+      }
+
       list.push({
         id: acc.id,
         label: acc.name,
-        kind: "investment",
+        kind,
         totalValue: totalVal,
+        holdingsValue: holdingsVal,
         investedValue: investedVal,
+        cashBalance: cash,
         pnl,
         pnlPercent: pnlPct,
         positionsCount: accHoldings.length,
         color: colors[idx % colors.length],
-        description: upper.includes("PEA")
-          ? "Plan d'Épargne en Actions"
-          : upper.includes("PER")
-          ? "Plan d'Épargne Retraite"
-          : upper.includes("ENTREPRISE") || upper.includes("PEE")
-          ? "Plan d'Épargne Entreprise"
-          : upper.includes("GRESHAM") || upper.includes("ASSURANCE") || upper.includes("VIE")
-          ? "Contrat d'Assurance-Vie / Capitalisation"
-          : "Compte Titres / Investissement",
+        description,
       });
     });
 
-    // 2. Liquidités & Banque (BoursoBank checking, livrets épargne sans titres)
-    const bankAccounts = accounts.filter(
-      (a) =>
-        a.type === "CHECKING" ||
-        (a.type === "SAVINGS" && (holdingsByAcc.get(a.id)?.length || 0) === 0),
-    );
-    const bankTotal = bankAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
-    list.push({
-      id: "bank",
-      label: "Banque & Liquidités",
-      kind: "bank",
-      totalValue: bankTotal,
-      investedValue: bankTotal,
-      pnl: 0,
-      pnlPercent: 0,
-      positionsCount: bankAccounts.length,
-      color: "#06b6d4",
-      description: "Comptes courants et livrets bancaires",
-    });
-
-    // 3. Crypto & Web3
+    // 2. Crypto & Web3 (agrégation de tous les wallets crypto)
     const cryptoAccs = accounts.filter((a) => a.type === "CRYPTO");
-    const cryptoHoldings = allHoldings.filter((h) => {
-      const a = accounts.find((acc) => acc.id === h.accountId);
-      return a?.type === "CRYPTO";
-    });
-    const cryptoTotal = cryptoAccs.reduce((sum, a) => sum + (a.balance || 0), 0);
-    const cryptoCost = cryptoHoldings.reduce(
-      (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
-      0,
-    );
-    const cryptoPnl = cryptoTotal > 0 && cryptoCost > 0 ? cryptoTotal - cryptoCost : 0;
-    const cryptoPnlPct = cryptoCost > 0 ? (cryptoPnl / cryptoCost) * 100 : 0;
-    list.push({
-      id: "crypto",
-      label: "Crypto & Web3",
-      kind: "crypto",
-      totalValue: cryptoTotal,
-      investedValue: cryptoCost || cryptoTotal,
-      pnl: cryptoPnl,
-      pnlPercent: cryptoPnlPct,
-      positionsCount: cryptoHoldings.length,
-      color: "#f97316",
-      description: "Exchanges et wallets blockchain",
-    });
+    if (cryptoAccs.length > 0) {
+      const cryptoHoldings = allHoldings.filter((h) => {
+        const a = accounts.find((acc) => acc.id === h.accountId);
+        return a?.type === "CRYPTO";
+      });
+      const cryptoTotal = cryptoAccs.reduce((sum, a) => sum + (a.balance || 0), 0);
+      const cryptoCost = cryptoHoldings.reduce(
+        (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
+        0,
+      );
+      const cryptoPnl = cryptoTotal > 0 && cryptoCost > 0 ? cryptoTotal - cryptoCost : 0;
+      const cryptoPnlPct = cryptoCost > 0 ? (cryptoPnl / cryptoCost) * 100 : 0;
+      list.push({
+        id: "crypto",
+        label: "Crypto & Web3",
+        kind: "crypto",
+        totalValue: cryptoTotal,
+        holdingsValue: cryptoTotal,
+        investedValue: cryptoCost || cryptoTotal,
+        cashBalance: 0,
+        pnl: cryptoPnl,
+        pnlPercent: cryptoPnlPct,
+        positionsCount: cryptoHoldings.length,
+        color: "#f97316",
+        description: "Exchanges et wallets blockchain",
+      });
+    }
 
-    // Ordonner naturellement : PEA, PEE, Assurance vie, PER, Banque, Crypto, puis autres
+    // Ordonner naturellement : PEA, PEE, Assurance vie, PER, Livrets / Épargne, Banque, Crypto, puis autres
     const orderScore = (id: string, label: string) => {
       const u = (label || id || "").toUpperCase();
       if (u.includes("PEA")) return 1;
       if (u.includes("ENTREPRISE") || u.includes("PEE")) return 2;
       if (u.includes("GRESHAM") || u.includes("ASSURANCE") || u.includes("VIE")) return 3;
       if (u.includes("PER") || u.includes("RETRAITE")) return 4;
-      if (id === "bank" || u.includes("BANQUE")) return 5;
-      if (id === "crypto" || u.includes("CRYPTO")) return 6;
-      return 7;
+      if (u.includes("LIVRET") || u.includes("LDD") || u.includes("EPARGNE") || u.includes("SAVINGS")) return 5;
+      if (u.includes("BANQUE") || u.includes("BOURSO") || u.includes("CHECKING") || u.includes("COURANT")) return 6;
+      if (id === "crypto" || u.includes("CRYPTO")) return 7;
+      return 10;
     };
     list.sort((a, b) => orderScore(a.id, a.label) - orderScore(b.id, b.label));
 
@@ -812,13 +917,10 @@ const Dashboard: React.FC = () => {
       .map((env) => {
         const share =
           totalWealthAll > 0 ? (env.totalValue / totalWealthAll) * 100 : 0;
-        let displayName = env.label;
-        if (env.id === "bank") displayName = "Compte bancaire";
-        else if (env.id === "crypto") displayName = "Crypto";
 
         return {
           id: env.id,
-          name: displayName,
+          name: env.label,
           value: env.totalValue,
           share,
           color: env.color,
@@ -1779,12 +1881,30 @@ const Dashboard: React.FC = () => {
                               </div>
                             </td>
                             <td className="py-3 px-3 text-right whitespace-nowrap text-[#8a8a8a]">
-                              {env.investedValue > 0
-                                ? formatCurrency(env.investedValue)
-                                : "—"}
+                              {env.investedValue > 0 ? (
+                                <div>
+                                  <span className="text-[#f5f5f5]">
+                                    {formatCurrency(env.investedValue)}
+                                  </span>
+                                  {env.kind === "investment" && env.cashBalance > 0 && (
+                                    <span className="text-[11px] text-[#666666] block">
+                                      + {formatCurrency(env.cashBalance)} cash
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                "—"
+                              )}
                             </td>
                             <td className="py-3 px-3 text-right whitespace-nowrap text-[#f5f5f5] font-bold">
-                              {formatCurrency(env.totalValue)}
+                              <div>
+                                <span>{formatCurrency(env.totalValue)}</span>
+                                {env.kind === "investment" && env.cashBalance > 0 && env.holdingsValue > 0 && (
+                                  <span className="text-[11px] font-normal text-[#8a8a8a] block">
+                                    dont {formatCurrency(env.holdingsValue)} titres
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="py-3 px-3 text-right whitespace-nowrap">
                               {env.kind === "investment" &&
@@ -1798,6 +1918,10 @@ const Dashboard: React.FC = () => {
                                 >
                                   {isPositive ? "+" : ""}
                                   {formatCurrency(env.pnl)}
+                                </span>
+                              ) : env.kind === "savings" ? (
+                                <span className="text-xs text-[#22c55e] font-medium">
+                                  +{formatCurrency((env.totalValue * getSavingsDetails(env.label, env.totalValue).rate) / 100)}/an
                                 </span>
                               ) : (
                                 <span className="text-[#555555]">—</span>
@@ -1815,6 +1939,10 @@ const Dashboard: React.FC = () => {
                                 >
                                   {isPositive ? "+" : ""}
                                   {formatPercent(env.pnlPercent, 2)}
+                                </span>
+                              ) : env.kind === "savings" ? (
+                                <span className="font-semibold text-[#22c55e]">
+                                  +{getSavingsDetails(env.label, env.totalValue).rate.toFixed(2).replace(".", ",")}%
                                 </span>
                               ) : (
                                 <span className="text-[#555555]">—</span>
@@ -2083,22 +2211,39 @@ const Dashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 4 Bento KPIs */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* 5 Bento KPIs */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
                     <span className="text-xs text-[#8a8a8a] block mb-1">
                       Valeur Actuelle
                     </span>
-                    <span className="text-2xl font-bold text-[#f5f5f5]">
-                      {formatCurrency(envelope.totalValue)}
+                    <span className="text-xl sm:text-2xl font-bold text-[#f5f5f5]">
+                      {formatCurrency(envelope.holdingsValue)}
+                    </span>
+                    <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                      Hors cash disponible
                     </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
                     <span className="text-xs text-[#8a8a8a] block mb-1">
-                      Montant Investi (PRU)
+                      Valeur Investie
                     </span>
-                    <span className="text-2xl font-bold text-[#f5f5f5]">
+                    <span className="text-xl sm:text-2xl font-bold text-[#f5f5f5]">
                       {formatCurrency(envelope.investedValue)}
+                    </span>
+                    <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                      Hors cash disponible (PRU)
+                    </span>
+                  </div>
+                  <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
+                    <span className="text-xs text-[#8a8a8a] block mb-1">
+                      Cash Disponible
+                    </span>
+                    <span className="text-xl sm:text-2xl font-bold text-[#f5f5f5]">
+                      {formatCurrency(envelope.cashBalance)}
+                    </span>
+                    <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                      Liquidités non investies
                     </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
@@ -2106,7 +2251,7 @@ const Dashboard: React.FC = () => {
                       Plus/Moins-value
                     </span>
                     <span
-                      className={`text-2xl font-bold ${
+                      className={`text-xl sm:text-2xl font-bold ${
                         envelope.pnl >= 0
                           ? "text-[#22c55e]"
                           : "text-[#ef4444]"
@@ -2115,13 +2260,16 @@ const Dashboard: React.FC = () => {
                       {envelope.pnl >= 0 ? "+" : ""}
                       {formatCurrency(envelope.pnl)}
                     </span>
+                    <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                      Sur les positions
+                    </span>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
                     <span className="text-xs text-[#8a8a8a] block mb-1">
                       Rendement Global
                     </span>
                     <span
-                      className={`text-2xl font-bold ${
+                      className={`text-xl sm:text-2xl font-bold ${
                         envelope.pnlPercent >= 0
                           ? "text-[#22c55e]"
                           : "text-[#ef4444]"
@@ -2129,6 +2277,9 @@ const Dashboard: React.FC = () => {
                     >
                       {envelope.pnlPercent >= 0 ? "+" : ""}
                       {formatPercent(envelope.pnlPercent, 2)}
+                    </span>
+                    <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                      Sur capital investi
                     </span>
                   </div>
                 </div>
@@ -2266,7 +2417,7 @@ const Dashboard: React.FC = () => {
                           </ResponsiveContainer>
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                             <span className="text-base font-bold text-[#f5f5f5]">
-                              {formatCurrency(envelope.totalValue)}
+                              {formatCurrency(envelope.holdingsValue || envelope.totalValue)}
                             </span>
                             <span className="text-[11px] text-[#8a8a8a]">
                               {holdings.length} lignes
@@ -2544,19 +2695,192 @@ const Dashboard: React.FC = () => {
                     );
                   })()}
 
-                {selectedPortfolio === "bank" && (
-                  <div id="envelope-bank" className="space-y-6 scroll-mt-24">
+                {selectedEnvelope &&
+                  selectedEnvelope.kind === "savings" &&
+                  (() => {
+                    const envelope = selectedEnvelope;
+                    const details = getSavingsDetails(
+                      envelope.label,
+                      envelope.totalValue,
+                    );
+                    const annualGain =
+                      (envelope.totalValue * details.rate) / 100;
+                    const ceilingPct = details.ceiling
+                      ? (envelope.totalValue / details.ceiling) * 100
+                      : null;
+                    const remaining = details.ceiling
+                      ? Math.max(0, details.ceiling - envelope.totalValue)
+                      : null;
+                    return (
+                      <div
+                        id={`envelope-${envelope.id}`}
+                        className="space-y-6 scroll-mt-24"
+                      >
+                        {/* Hero Enveloppe Épargne */}
+                        <div className="card">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span
+                                  className="w-3 h-3 rounded-full"
+                                  style={{ backgroundColor: envelope.color }}
+                                />
+                                <h3 className="text-xl font-bold text-[#f5f5f5]">
+                                  {envelope.label}
+                                </h3>
+                                <span className="text-xs px-2.5 py-0.5 rounded-full bg-[rgba(255,255,255,0.06)] text-[#c8a55e] font-medium border border-[rgba(200,165,94,0.2)]">
+                                  {details.regulationType}
+                                </span>
+                              </div>
+                              <p className="text-xs text-[#8a8a8a]">
+                                Épargne sécurisée et disponible à tout moment • Capital garanti par l'État
+                              </p>
+                            </div>
+                            <Link
+                              to="/patrimoine"
+                              className="text-xs text-[#c8a55e] hover:underline inline-flex items-center gap-1 self-start sm:self-auto"
+                            >
+                              <span>Gérer dans Patrimoine</span>
+                              <ArrowRight className="h-3 w-3" />
+                            </Link>
+                          </div>
+
+                          {/* 5 Bento KPIs Épargne */}
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                            <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
+                              <span className="text-xs text-[#8a8a8a] block mb-1">
+                                Solde Actuel
+                              </span>
+                              <span className="text-xl sm:text-2xl font-bold text-[#f5f5f5]">
+                                {formatCurrency(envelope.totalValue)}
+                              </span>
+                              <span className="text-[11px] text-[#22c55e] block mt-0.5 truncate font-medium">
+                                100% disponible
+                              </span>
+                            </div>
+                            <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
+                              <span className="text-xs text-[#8a8a8a] block mb-1">
+                                Taux Net Annuel
+                              </span>
+                              <span className="text-xl sm:text-2xl font-bold text-[#22c55e]">
+                                {details.rate.toFixed(2).replace(".", ",")}%
+                              </span>
+                              <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                                {details.isExempt ? "Net d'impôt et CSG" : "Taux brut"}
+                              </span>
+                            </div>
+                            <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
+                              <span className="text-xs text-[#8a8a8a] block mb-1">
+                                Intérêts Annuels Estimés
+                              </span>
+                              <span className="text-xl sm:text-2xl font-bold text-[#f5f5f5]">
+                                +{formatCurrency(annualGain)}
+                              </span>
+                              <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                                par an (au solde actuel)
+                              </span>
+                            </div>
+                            <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
+                              <span className="text-xs text-[#8a8a8a] block mb-1">
+                                Plafond de Versement
+                              </span>
+                              <span className="text-xl sm:text-2xl font-bold text-[#f5f5f5]">
+                                {details.ceiling ? formatCurrency(details.ceiling) : "Illimité"}
+                              </span>
+                              <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                                {ceilingPct != null ? `${formatPercent(ceilingPct, 1)} atteint` : "Sans limite légale"}
+                              </span>
+                            </div>
+                            <div className="p-3.5 rounded-lg bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)]">
+                              <span className="text-xs text-[#8a8a8a] block mb-1">
+                                Niveau de Risque
+                              </span>
+                              <span className="text-xl sm:text-2xl font-bold text-[#22c55e]">
+                                1 / 7 (Nul)
+                              </span>
+                              <span className="text-[11px] text-[#666666] block mt-0.5 truncate">
+                                Garanti État / FGDR
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Jauge d'utilisation du Plafond (si applicable) */}
+                        {details.ceiling && (
+                          <div className="card">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="text-sm font-semibold text-[#f5f5f5]">
+                                Utilisation du Plafond Réglementé ({formatCurrency(details.ceiling)})
+                              </h4>
+                              <span className="text-xs font-semibold text-[#c8a55e]">
+                                {formatPercent(ceilingPct || 0, 1)}
+                              </span>
+                            </div>
+                            <div className="h-2 w-full bg-[rgba(255,255,255,0.05)] rounded-full overflow-hidden mb-2">
+                              <div
+                                className="h-full bg-gradient-to-r from-[#c8a55e] to-[#22c55e] rounded-full transition-all duration-700"
+                                style={{ width: `${Math.min(Math.max(ceilingPct || 0, 1), 100)}%` }}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-[#8a8a8a]">
+                              <span>Solde actuel : <strong className="text-[#f5f5f5]">{formatCurrency(envelope.totalValue)}</strong></span>
+                              <span>Capacité restante de versement : <strong className="text-[#22c55e]">{formatCurrency(remaining || 0)}</strong></span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Caractéristiques & Avantages Épargne */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="card p-4">
+                            <div className="flex items-center gap-2 mb-2 text-[#22c55e]">
+                              <ShieldCheck className="h-4 w-4" />
+                              <span className="font-semibold text-sm text-[#f5f5f5]">Sécurité Totale</span>
+                            </div>
+                            <p className="text-xs text-[#8a8a8a] leading-relaxed">
+                              Votre capital et les intérêts acquis sont garantis à 100% par l'État français et le FGDR. Aucun risque de perte en capital.
+                            </p>
+                          </div>
+                          <div className="card p-4">
+                            <div className="flex items-center gap-2 mb-2 text-[#c8a55e]">
+                              <Zap className="h-4 w-4" />
+                              <span className="font-semibold text-sm text-[#f5f5f5]">Disponibilité Immédiate</span>
+                            </div>
+                            <p className="text-xs text-[#8a8a8a] leading-relaxed">
+                              Les fonds peuvent être transférés vers votre compte courant instantanément et sans aucun frais, à tout moment.
+                            </p>
+                          </div>
+                          <div className="card p-4">
+                            <div className="flex items-center gap-2 mb-2 text-[#3b82f6]">
+                              <CheckCircle2 className="h-4 w-4" />
+                              <span className="font-semibold text-sm text-[#f5f5f5]">Exonération Fiscale</span>
+                            </div>
+                            <p className="text-xs text-[#8a8a8a] leading-relaxed">
+                              {details.isExempt
+                                ? "Totalement exonéré d'impôt sur le revenu et de prélèvements sociaux (CSG/CRDS à 17,2%). Les intérêts perçus sont 100% nets."
+                                : "Les intérêts générés sont soumis au prélèvement forfaitaire unique (PFU) de 30% lors de leur versement annuel."}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                {(selectedPortfolio === "bank" || (selectedEnvelope && selectedEnvelope.kind === "bank")) && (
+                  <div id={`envelope-${selectedEnvelope?.id || "bank"}`} className="space-y-6 scroll-mt-24">
               {/* Header Hero Banque */}
               <div className="card">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="w-3 h-3 rounded-full bg-[#06b6d4]" />
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: selectedEnvelope?.color || "#06b6d4" }}
+                      />
                       <h3 className="text-xl font-bold text-[#f5f5f5]">
-                        Liquidités & Comptes Bancaires
+                        {selectedEnvelope?.label || "Liquidités & Comptes Bancaires"}
                       </h3>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-[rgba(255,255,255,0.06)] text-[#8a8a8a]">
-                        Comptes courants & livrets
+                        {selectedEnvelope?.description || "Comptes courants & flux financiers"}
                       </span>
                     </div>
                     <p className="text-xs text-[#8a8a8a]">
@@ -2824,8 +3148,12 @@ const Dashboard: React.FC = () => {
                   </div>
                 )}
 
-                {selectedPortfolio === "crypto" && (
-                  <div id="envelope-crypto" className="space-y-6 scroll-mt-24">
+                {(selectedPortfolio === "crypto" ||
+                  (selectedEnvelope && selectedEnvelope.kind === "crypto")) && (
+                  <div
+                    id={`envelope-${selectedEnvelope?.id || "crypto"}`}
+                    className="space-y-6 scroll-mt-24"
+                  >
               {/* Header Hero Crypto */}
               <div className="card">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">

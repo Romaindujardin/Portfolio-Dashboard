@@ -15,17 +15,17 @@ export function scorePassword(pw: string): PasswordScore {
     };
   }
 
-  if (pw.length < 4) {
+  if (pw.length < 8) {
     return {
       score: 0,
-      label: "Trop court (min. 4 car.)",
+      label: "Trop court (min. 8 car.)",
       color: "#ef4444",
       percent: 15,
     };
   }
 
   let points = 0;
-  if (pw.length >= 6) points++;
+  if (pw.length >= 8) points++;
   if (pw.length >= 10) points++;
   if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) points++;
   if (/\d/.test(pw) && /[^a-zA-Z0-9]/.test(pw)) points++;

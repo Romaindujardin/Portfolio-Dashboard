@@ -536,6 +536,13 @@ describe("API patrimoine — connexions et marché", () => {
     expect(listBody.accounts[0].name).toBe("Cold Storage Ledger");
     expect(listBody.accounts[0].holdings).toHaveLength(2);
 
+    // Synchroniser le compte manuel via la route générique de compte
+    const accountSyncRes = await postJson(
+      `/portfolio/accounts/${body.account.id}/sync`,
+      { user_id: user },
+    );
+    expect(accountSyncRes.status).toBe(200);
+
     // Synchroniser le compte manuel
     const syncRes = await postJson(`/portfolio/crypto/sync/${body.account.id}`, { user_id: user });
     expect(syncRes.status).toBe(200);

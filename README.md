@@ -2,7 +2,7 @@
 
 Application personnelle et complète de gestion de patrimoine, de budget de foyer et de stratégie financière : connexion bancaire PSD2 multi-banques (Enable Banking), valorisation immobilière automatisée, suivi des prêts avec amortissement, budget partagé façon **Tricount**, stratégie d'épargne avec calcul d'objectifs, et **Conseiller IA (Gemini 2.5 Flash)** contextualisé avec vos finances réelles.
 
-Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sécurisée (chiffrement AES-256-GCM), exécutable localement sur votre machine ou déployable sur votre propre serveur/VPS avec HTTPS automatique.
+Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sécurisée (sessions serveur HttpOnly, secrets chiffrés AES-256-GCM), exécutable localement sur votre machine ou déployable sur votre propre serveur/VPS avec HTTPS automatique.
 
 ---
 
@@ -50,8 +50,8 @@ Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sé
 | **Frontend** | React 18, TypeScript 5, Vite (avec support natif HTTPS en dev), Tailwind CSS |
 | **Dataviz** | Recharts, Lucide Icons, Thème sombre "Noir & Or" soigné |
 | **Backend API** | Node.js, Express, better-sqlite3 |
-| **Base de données** | SQLite local (`portfolio.db`), persistance disque garantie |
-| **Sécurité** | Chiffrement AES-256-GCM des clés privées et secrets, HTTP Basic Auth en production |
+| **Base de données** | SQLite local (`portfolio.db` en dev, `data/portfolio.db` en Docker), sauvegardes cohérentes via `npm run db:backup` |
+| **Sécurité** | Sessions serveur HttpOnly par profil, secrets chiffrés AES-256-GCM, HTTP Basic Auth optionnelle en production |
 | **Intelligence Artificielle** | Google Gemini 2.5 Flash |
 | **Open Banking** | Enable Banking API (PSD2 / AIS via JWT RS256 signés localement) |
 | **Sources de données** | Yahoo Finance, OpenFIGI, DVF / Cerema, IGN Géoplateforme, INSEE, CoinGecko, Binance, Etherscan |
@@ -62,8 +62,13 @@ Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sé
 
 Vous trouverez à la racine un `Dockerfile`, un `docker-compose.yml` et un dossier `deploy/Caddyfile` :
 - **Pour le local au quotidien** : Vous n'avez pas besoin de Docker (`npm start` suffit).
-- **Pour l'accès mobile & serveur permanent** : Si vous souhaitez héberger l'application sur un mini-PC, NAS ou VPS afin d'y accéder depuis votre smartphone, Docker Compose démarre l'application derrière **Caddy**. Caddy génère et renouvelle **automatiquement un certificat HTTPS Let's Encrypt gratuit** pour votre nom de domaine.
+- **Pour l'accès mobile & serveur permanent** : Si vous souhaitez héberger l'application sur un mini-PC, NAS ou VPS afin d'y accéder depuis votre smartphone, lancez `docker compose --profile tls up -d --build`. Caddy génère et renouvelle **automatiquement un certificat HTTPS Let's Encrypt gratuit** pour votre nom de domaine. Sans le profil `tls`, seul le port loopback `127.0.0.1:3001` est publié.
 - C'est ce qui garantit une URL HTTPS stable et permanente requise par les redirections bancaires d'Enable Banking.
+
+> [!IMPORTANT]
+> **Base Docker** : le conteneur utilise `/app/data/portfolio.db`, monté depuis `./data`. Avant le premier démarrage, arrêtez l'application locale puis préparez la base avec `npm run db:prepare-docker`. Sans cette étape, Docker démarre sur une base vide. Le script refuse d'écraser une base Docker non vide sans `--force`, vérifie l'intégrité SQLite et applique les permissions `0600`.
+>
+> `data/` est ignoré par Git car il contient des données personnelles. Sauvegardez séparément `data/portfolio.db`, `data/.portfolio-secret` et `data/.portfolio-session-secret` : sans les deux clés, les secrets et sessions existants ne peuvent plus être déchiffrés/validés.
 
 Pour plus de détails, consultez le guide complet dans [`docs/deployment.md`](docs/deployment.md).
 
@@ -95,6 +100,16 @@ Cette commande démarre simultanément :
 
 ---
 
+## 🔐 Sécurité & données sensibles
+
+- **Authentification par profil** : chaque profil (Romain / Sophie) possède son propre mot de passe (8 caractères minimum). Le serveur émet un cookie de session `portfolio_session` **HttpOnly**, `SameSite=Lax`, valable 7 jours. Les routes `/api` protégées refusent toute requête sans session (seules la santé, la connexion et le callback OAuth restent publics), et un `user_id` différent de la session est rejeté (`403 USER_MISMATCH`). Un changement de mot de passe invalide les anciens jetons.
+- **Coffre de secrets** : les clés API Gemini, Binance, Etherscan, CoinGecko et OpenSea, ainsi que les identifiants du sidecar BoursoBank, ne sont plus stockés dans le navigateur ni dans `user_settings`. Ils sont chiffrés au repos en **AES-256-GCM** dans la table `user_secrets`, rattachés au profil, et ne sont jamais renvoyés en clair par l'API. Les appels authentifiés Gemini, Etherscan, CoinGecko, Binance et OpenSea passent par des proxies serveur.
+- **Clés locales** : `data/.portfolio-secret` (chiffrement des secrets) et `data/.portfolio-session-secret` (signature des sessions) sont générés automatiquement en `0600`. Sauvegardez-les avec la base : sans eux, les secrets et sessions existants ne peuvent plus être déchiffrés/validés. On peut aussi fournir `PORTFOLIO_SECRET_KEY` et `PORTFOLIO_SESSION_SECRET`.
+- **Sauvegardes** : `npm run db:backup` crée une sauvegarde SQLite cohérente dans `backups/`. Pour restaurer, arrêtez le serveur puis lancez `npm run db:restore -- [fichier.db]` (le script refuse de s'exécuter si des fichiers `-wal`/`-shm` indiquent un serveur actif, sauf `--force`).
+- **Suppression de profil** : `DELETE /api/portfolio/users/:username` supprime les données du profil, ses secrets et ses identifiants, puis invalide sa session.
+
+---
+
 ## 🔒 Configuration d'Enable Banking (Multi-Banques)
 
 1. Créez un compte et une application sur le portail [Enable Banking](https://enablebanking.com/).
@@ -112,37 +127,35 @@ Cette commande démarre simultanément :
 
 ## 🗺️ Feuille de Route (Roadmap)
 
-Voici les prochaines évolutions planifiées pour enrichir l'application :
+Les grandes fonctionnalités (marché live, ETF look-through, passerelle Enable
+Banking → Tricount, conseiller IA enrichi) sont déjà implémentées. Les
+prochains chantiers portent sur la robustesse et l'exploitation :
 
-### 📈 1. Suivi Live des Cours d'Actions & Marchés Boursiers
-- Intégration en temps réel des cotations d'actions et ETF via l'API de marché (Yahoo Finance).
-- Recherche dynamique de titres par ticker ou ISIN avec autocomplétion.
-- Graphiques boursiers interactifs (intraday, 1M, 6M, 1A, max) et mini-sparklines dans la vue Portefeuille.
-- Suivi des principaux indices de référence (CAC 40, S&P 500, MSCI World).
+### 🔐 1. Finaliser le modèle multi-profils
+- Permissions co-owner explicites (lecture/écriture vs opérations destructives).
+- Clés `localStorage` Tricount/Savings préfixées par profil.
+- Paramètres d'intégration Enable Banking / BoursoBank par profil.
 
-### 🔄 2. Passerelle Directe Enable Banking ➔ Module Banque & Tricount
-- Possibilité d'injecter directement les opérations bancaires récupérées par l'Open Banking dans la table des transactions de la page Banque.
-- Catégorisation IA automatique à la volée dès la synchronisation bancaire.
-- Affectation directe des dépenses synchronisées au **Budget Tricount** (Romain / Sophie / 50-50) sans avoir besoin d'importer manuellement des fichiers CSV.
+### 🗄️ 2. Fiabiliser la persistance
+- Migrations versionnées (`user_version` + table `schema_migrations`).
+- `busy_timeout` SQLite et transactions explicites pour les opérations multi-étapes.
+- Planification automatique des sauvegardes et test de restauration régulier.
 
-### 🧠 3. Enrichissement du Conseiller IA Gemini
-- Connexion native de toutes les données du module Patrimoine au contexte du Conseiller IA :
-  - Connaissance des mensualités de prêts et du capital restant dû.
-  - Connaissance des valorisations immobilières nettes (patrimoine brut vs dettes).
-  - Conseils personnalisés sur l'arbitrage entre remboursement anticipé de crédit et investissement en Bourse/Crypto.
-
-### 🔍 4. Analyse Approfondie & Look-Through des ETF
-- Décomposition sectorielle (Technologie, Santé, Finance, Énergie, etc.) et géographique (États-Unis, Europe, Marchés Émergents) des ETF détenus en portefeuille.
-- Calcul de l'exposition réelle aux plus grandes entreprises mondiales (Apple, Microsoft, LVMH, etc.) à travers les différentes enveloppes d'investissement.
+### 🚀 3. Dette technique et déploiement
+- Migration React Router v6 → v7 (corrige les 2 advisories `npm audit`).
+- Code-splitting des routes pour réduire le bundle JavaScript (> 1,2 Mo).
+- CI GitHub Actions : tests, type-check, lint, build, audit.
+- En production, forcer `REQUIRE_AUTH=true` ou documenter explicitement le
+  recours à un reverse proxy authentifiant.
 
 ---
 
 ## 🧪 Tests & Qualité
 
-Le projet dispose d'une suite de tests complète (150 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement et des synchronisations :
+Le projet dispose d'une suite de tests complète (217 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement, des sessions et des synchronisations :
 
 ```bash
-npm test              # Exécute l'ensemble des 150 tests
+npm test              # Exécute l'ensemble des 217 tests
 npm run test:watch    # Mode surveillance interactif
 npm run test:coverage # Rapport de couverture de code
 npm run type-check    # Vérification stricte TypeScript

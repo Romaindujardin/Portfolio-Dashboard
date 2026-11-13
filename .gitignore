@@ -80,7 +80,7 @@ GEMINI_MIGRATION.md
 # Migration scripts (internal)
 migrate-database-schema.js
 
-# Local scripts
-check-database.js
-backup-database.js
-fix-*.js
+# Local scripts (racine uniquement)
+/check-database.js
+/backup-database.js
+/fix-*.js

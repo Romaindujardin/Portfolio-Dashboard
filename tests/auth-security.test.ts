@@ -53,6 +53,8 @@ describe("authService — sécurité des mots de passe", () => {
     // Vérification réussie et échouée
     expect(verifyUserPassword(db, user, "monSuperMotDePasse123!")).toBe(true);
     expect(verifyUserPassword(db, user, "mauvaisMdp")).toBe(false);
+    // Une entrée démesurée est rejetée sans tenter de scrypt sur des Mo de données.
+    expect(verifyUserPassword(db, user, "x".repeat(100_000))).toBe(false);
 
     // Changement de mot de passe avec mauvais mot de passe actuel -> échec
     expect(() =>

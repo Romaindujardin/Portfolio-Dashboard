@@ -570,32 +570,56 @@ class DatabaseManager {
 
   getHouseholdMembers(userId = "Romain") {
     if (!userId) return ["Romain", "Sophie"];
-    const db = this.getDatabase();
-    try {
-      const rows = db.prepare("SELECT strategy_json FROM savings_strategies").all();
-      for (const row of rows) {
-        if (!row.strategy_json) continue;
-        try {
-          const strat = JSON.parse(row.strategy_json);
-          const p1 = strat?.household?.person1?.name;
-          const p2 = strat?.household?.person2?.name;
-          if (p1 && p2) {
-            const members = [p1, p2];
-            if (members.includes(userId)) {
-              return members;
-            }
-          }
-        } catch {}
-      }
-    } catch {}
 
-    // Couple par défaut de l'application
+    // Couple historique de l'application : toujours considéré comme le foyer
+    // par défaut, quel que soit le contenu des stratégies d'épargne.
     if (userId === "Romain" || userId === "Sophie") {
       return ["Romain", "Sophie"];
     }
 
-    // Utilisateur unique / mode solo / test isolé
-    return [userId];
+    const db = this.getDatabase();
+    const validMember = /^[A-Za-z0-9_-]{1,64}$/;
+    const readHousehold = (owner) => {
+      try {
+        const row = db
+          .prepare("SELECT strategy_json FROM savings_strategies WHERE user_id = ?")
+          .get(owner);
+        if (!row?.strategy_json) return null;
+        const strat = JSON.parse(row.strategy_json);
+        const p1 = strat?.household?.person1?.name;
+        const p2 = strat?.household?.person2?.name;
+        if (
+          typeof p1 !== "string" ||
+          typeof p2 !== "string" ||
+          !validMember.test(p1) ||
+          !validMember.test(p2) ||
+          p1 === p2
+        ) {
+          return null;
+        }
+        return [p1, p2];
+      } catch {
+        return null;
+      }
+    };
+
+    // Un profil personnalisé ne peut rejoindre un foyer que si les deux
+    // membres déclarent explicitement le même couple dans leur propre
+    // stratégie. Sans ce consentement mutuel, il reste seul : une stratégie
+    // forgée ne suffit pas à accéder aux données Tricount/Savings d'autrui.
+    const own = readHousehold(userId);
+    if (!own || !own.includes(userId)) return [userId];
+
+    const partner = own[0] === userId ? own[1] : own[0];
+    const partnerHousehold = readHousehold(partner);
+    if (
+      !partnerHousehold ||
+      partnerHousehold.length !== own.length ||
+      !own.every((member) => partnerHousehold.includes(member))
+    ) {
+      return [userId];
+    }
+    return own;
   }
 
   getAllTricountExpenses(userId = "Romain") {
@@ -631,6 +655,19 @@ class DatabaseManager {
 
   saveTricountExpense(exp, userId = "Romain") {
     const db = this.getDatabase();
+    // Un identifiant fourni par le client ne doit jamais permettre d'écraser
+    // la dépense d'un profil hors du foyer.
+    if (exp.id) {
+      const existing = db
+        .prepare("SELECT user_id FROM tricount_expenses WHERE id = ?")
+        .get(exp.id);
+      if (
+        existing?.user_id != null &&
+        !this.getHouseholdMembers(userId).includes(existing.user_id)
+      ) {
+        throw new Error("Cette dépense appartient à un autre profil");
+      }
+    }
     const stmt = db.prepare(`
       INSERT INTO tricount_expenses (
         id, user_id, month, date, label, amount, payer_person_id,
@@ -732,6 +769,18 @@ class DatabaseManager {
 
   saveTricountIncome(inc, userId = "Romain") {
     const db = this.getDatabase();
+    // Même règle que pour les dépenses : pas d'écriture croisée entre profils.
+    if (inc.id) {
+      const existing = db
+        .prepare("SELECT user_id FROM tricount_incomes WHERE id = ?")
+        .get(inc.id);
+      if (
+        existing?.user_id != null &&
+        !this.getHouseholdMembers(userId).includes(existing.user_id)
+      ) {
+        throw new Error("Ce revenu appartient à un autre profil");
+      }
+    }
     const stmt = db.prepare(`
       INSERT INTO tricount_incomes (
         id, user_id, month, date, label, amount, beneficiary_person_id,

@@ -1,4 +1,4 @@
-import { getGeminiApiKey } from "./userSettings";
+import { API_BASE } from "./apiBase";
 
 export type BankCategorySchema = Array<{
   category: string;
@@ -22,15 +22,8 @@ type InputRow = {
   accountLabel?: string;
 };
 
-const getGeminiApiUrl = (username: string): string => {
-  const apiKey = getGeminiApiKey(username);
-  if (!apiKey) {
-    throw new Error(
-      "Clé API Gemini non configurée. Veuillez la configurer dans les paramètres."
-    );
-  }
-  return `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-};
+const getGeminiApiUrl = (_username: string): string =>
+  `${API_BASE}/portfolio/ai/gemini`;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -46,8 +39,9 @@ async function fetchGeminiWithRetry(
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const resp = await fetch(getGeminiApiUrl(username), {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ model: "gemini-2.5-flash", payload: body }),
     });
 
     if (resp.ok) return await resp.json();

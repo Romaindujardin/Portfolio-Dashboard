@@ -1,10 +1,32 @@
 // Petits utilitaires partagés par les fichiers de test.
-import { TEST_SERVER } from "./shims";
+import { TEST_SERVER, ensureTestSession } from "./shims";
 
 export const API_BASE = `${TEST_SERVER.baseUrl}/api`;
 
 export const api = (pathname: string, init?: RequestInit): Promise<Response> =>
   fetch(`${API_BASE}${pathname}`, init);
+
+/** Appelle l'API avec la session explicite d'un profil (tests IDOR). */
+export const apiAs = async (
+  user: string,
+  pathname: string,
+  init?: RequestInit,
+): Promise<Response> => {
+  const cookie = await ensureTestSession(user);
+  const headers = new Headers(init?.headers);
+  headers.set("Cookie", cookie);
+  return fetch(`${API_BASE}${pathname}`, { ...init, headers });
+};
+
+/** Appelle l'API sans cookie, pour vérifier le refus des routes protégées. */
+export const apiWithoutSession = (
+  pathname: string,
+  init?: RequestInit,
+): Promise<Response> => {
+  const headers = new Headers(init?.headers);
+  headers.set("Cookie", "");
+  return fetch(`${API_BASE}${pathname}`, { ...init, headers });
+};
 
 export async function apiJson<T = unknown>(
   pathname: string,

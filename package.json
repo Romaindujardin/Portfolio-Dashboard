@@ -16,6 +16,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "db:init": "node src/utils/database/init.js",
+    "db:backup": "node scripts/backup-database.js",
+    "db:prepare-docker": "node scripts/prepare-docker-data.js",
     "db:restore": "node restore-database.js"
   },
   "dependencies": {

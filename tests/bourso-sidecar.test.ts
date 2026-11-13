@@ -11,8 +11,11 @@ import {
   getBoursoSavedCredentials,
   deleteBoursoCredentials,
   getBoursoStatus,
+  migrateLegacyBoursoCredentials,
+  sanitizeBoursoConnectorMetadata,
   BOURSO_PROVIDER,
 } from "../server/services/boursoSidecarService.js";
+import { encryptJson } from "../server/lib/secrets.js";
 import {
   convertBoursoSymbolToYahoo,
   MarketDataService,
@@ -145,26 +148,82 @@ date,date_op,label,amount,currency
     expect(parsed.rows[0].label).toBe("Restaurant");
   });
 
-  it("sauvegarde, relit et supprime les identifiants chiffrés BoursoBank", () => {
-    saveBoursoCredentials(repo, {
+  it("sauvegarde, relit et supprime les identifiants chiffrés BoursoBank par profil", () => {
+    saveBoursoCredentials(repo, "Romain", {
       customerId: "user_bourso_123",
       password: "SuperSecretPassword!",
     });
 
-    const status = getBoursoStatus(repo);
+    const status = getBoursoStatus(repo, "Romain");
     expect(status.configured).toBe(true);
-    expect(status.customerId).toBe("user_bourso_123");
+    expect(status).not.toHaveProperty("customerId");
 
-    const creds = getBoursoSavedCredentials(repo);
+    const creds = getBoursoSavedCredentials(repo, "Romain");
     expect(creds).toEqual({
       customerId: "user_bourso_123",
       password: "SuperSecretPassword!",
     });
 
-    deleteBoursoCredentials(repo);
-    const postStatus = getBoursoStatus(repo);
+    // Les identifiants d'un profil ne sont jamais visibles par l'autre.
+    expect(getBoursoSavedCredentials(repo, "Sophie")).toBe(null);
+    expect(getBoursoStatus(repo, "Sophie").configured).toBe(false);
+
+    deleteBoursoCredentials(repo, "Romain");
+    const postStatus = getBoursoStatus(repo, "Romain");
     expect(postStatus.configured).toBe(false);
-    expect(postStatus.customerId).toBe(null);
+    expect(postStatus).not.toHaveProperty("customerId");
+    expect(getBoursoSavedCredentials(repo, "Romain")).toBe(null);
+  });
+
+  it("migre les identifiants BoursoBank globaux vers le propriétaire unique", () => {
+    repo.createConnector("Romain", {
+      provider: BOURSO_PROVIDER,
+      label: "BoursoBank (Sidecar)",
+      status: "active",
+      aspspName: "BoursoBank",
+      aspspCountry: "FR",
+    });
+    repo.saveEncryptedIntegration(
+      BOURSO_PROVIDER,
+      encryptJson({
+        customerId: "legacy_customer",
+        password: "legacy_password",
+      }),
+    );
+
+    expect(migrateLegacyBoursoCredentials(db)).toBe(1);
+    expect(getBoursoSavedCredentials(repo, "Romain")).toEqual({
+      customerId: "legacy_customer",
+      password: "legacy_password",
+    });
+    expect(getBoursoSavedCredentials(repo, "Sophie")).toBe(null);
+    expect(repo.getEncryptedIntegration(BOURSO_PROVIDER)).toBeUndefined();
+  });
+
+  it("retire les identifiants en clair des métadonnées de connexion", () => {
+    const connection = repo.createConnector("Romain", {
+      provider: BOURSO_PROVIDER,
+      label: "BoursoBank (Sidecar)",
+      status: "active",
+      aspspName: "BoursoBank",
+      aspspCountry: "FR",
+      metadata: {
+        type: "sidecar",
+        customerId: "metadata_customer",
+        password: "metadata_password",
+      },
+    });
+
+    expect(sanitizeBoursoConnectorMetadata(db)).toBe(1);
+    const updated = repo.getConnector(connection.id, "Romain");
+    expect(updated.metadata).not.toHaveProperty("customerId");
+    expect(updated.metadata).not.toHaveProperty("password");
+    expect(updated.metadata.type).toBe("sidecar");
+    expect(getBoursoSavedCredentials(repo, "Romain")).toEqual({
+      customerId: "metadata_customer",
+      password: "metadata_password",
+    });
+    expect(sanitizeBoursoConnectorMetadata(db)).toBe(0);
   });
 
   it("gère l'insertion d'un compte Bourso sidecar dans le portfolio repository", () => {

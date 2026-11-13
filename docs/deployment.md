@@ -69,23 +69,41 @@ de retour Enable Banking.
 
 ## 2. Récupérer les données existantes
 
-Arrêter l'application locale, puis sauvegarder la base proprement :
+Arrêter l'application locale, puis préparer la base Docker avec le script
+dédié (API backup SQLite, vérification d'intégrité, permissions `0600`) :
 
 ```bash
-mkdir -p data
-sqlite3 portfolio.db ".backup 'data/portfolio.db'"
+npm run db:prepare-docker
 ```
+
+Le script lit `portfolio.db` et écrit `data/portfolio.db`. Il refuse
+d'écraser une base Docker non vide sans `--force`. Vérifier ensuite :
+
+```bash
+ls -l data/portfolio.db
+```
+
+Si `data/portfolio.db` est absent ou fait 0 octet, le conteneur démarrera sur
+une base vide : l'historique, les comptes et les secrets déjà enregistrés ne
+seront pas visibles.
 
 Copier sur le serveur :
 
 - `data/portfolio.db` ;
 - `data/.portfolio-secret` (indispensable pour déchiffrer les clés déjà
   enregistrées) ;
+- `data/.portfolio-session-secret` (indispensable pour valider les sessions
+  existantes) ;
 - éventuellement les autres fichiers de `data/` et `backups/`.
 
 Si `data/.portfolio-secret` est perdu, les secrets stockés en base ne peuvent
 plus être déchiffrés. On peut aussi fournir la même clé via
-`PORTFOLIO_SECRET_KEY`.
+`PORTFOLIO_SECRET_KEY`. De même, `PORTFOLIO_SESSION_SECRET` peut remplacer le
+fichier de signature des sessions.
+
+En Docker, la base utilisée est `/app/data/portfolio.db` (variable
+`DATABASE_PATH`) et le volume `./data:/app/data` conserve la base, les clés
+locales et les miroirs JSON.
 
 ## 3. Clé Enable Banking
 
@@ -204,14 +222,22 @@ profil `tls`.
 
 ## Sécurité et comptes
 
-L'application n'a pas de système de comptes avec mots de passe séparés : les
-profils « Romain / Sophie » du frontend sont des profils de données, pas une
-barrière de sécurité.
+Chaque profil « Romain / Sophie » possède désormais son propre mot de passe
+(8 caractères minimum). Le serveur délivre un cookie de session HttpOnly,
+SameSite=Lax, valable 7 jours, et refuse toute route `/api` protégée sans
+session ou avec un `user_id` différent du profil authentifié (les routes de
+santé, de connexion et le callback OAuth restent publics). Les clés API et les
+identifiants du sidecar BoursoBank sont chiffrés côté serveur, rattachés au
+profil, ne sont plus stockés dans le navigateur et ne sont jamais renvoyés en
+clair par l'API.
 
-La protection HTTP Basic protège l'application entière, mais avec **un seul
-compte partagé**. Pour un accès public, utiliser un mot de passe long, ou placer
-l'application derrière Cloudflare Access, un VPN (Tailscale/WireGuard) ou un
-reverse proxy avec authentification.
+La protection HTTP Basic reste utile en défense en profondeur, mais elle ne
+remplace pas les mots de passe des profils. Pour un accès public, utiliser un
+mot de passe Basic long, ou placer l'application derrière Cloudflare Access, un
+VPN (Tailscale/WireGuard) ou un reverse proxy avec authentification.
+
+Les fichiers `data/.portfolio-secret` et `data/.portfolio-session-secret` sont
+générés en `0600`. Ne les exposez jamais et sauvegardez-les avec la base.
 
 Le port `3001` est publié uniquement sur `127.0.0.1` par Docker Compose. Ne pas
 le changer en `0.0.0.0:3001` : tout passage depuis Internet doit rester derrière
@@ -222,16 +248,36 @@ Caddy, Cloudflare ou le reverse proxy TLS.
 Sauvegarder régulièrement :
 
 - `data/portfolio.db` (base SQLite) ;
-- `data/.portfolio-secret` (clé de chiffrement) ;
+- `data/.portfolio-secret` (clé de chiffrement des secrets) ;
+- `data/.portfolio-session-secret` (clé de signature des sessions) ;
 - éventuellement `data/*.json` et `backups/` ;
 - `.env.production` et `secrets/enablebanking.pem` (à stocker de façon
   sécurisée, jamais dans Git).
 
-Exemple à chaud :
+Sauvegarde cohérente à chaud (API backup SQLite) :
 
 ```bash
-sqlite3 data/portfolio.db ".backup 'backups/portfolio-$(date +%F).db'"
+npm run db:backup
+# ou, en Docker (sauvegarde persistée dans le volume data) :
+docker compose exec -e BACKUP_DIR=/app/data/backups app node scripts/backup-database.js
 ```
+
+Restauration : arrêter le serveur, puis :
+
+```bash
+npm run db:restore -- backups/portfolio-backup-AAAA-MM-JJ.db
+# ou, en Docker :
+docker compose stop app
+docker compose run --rm -e BACKUP_DIR=/app/data/backups app \
+  node restore-database.js /app/data/backups/portfolio-backup-AAAA-MM-JJ.db
+```
+
+Si des fichiers `-wal`/`-shm` subsistent après l'arrêt, ajoutez `--force`
+uniquement après avoir vérifié qu'aucun processus n'utilise la base.
+
+Le script vérifie l'intégrité de la sauvegarde, crée une sauvegarde de sécurité
+de la base actuelle et refuse de restaurer si des fichiers `-wal`/`-shm`
+indiquent que le serveur tourne encore (sauf `--force`).
 
 ## Alternative : frontend Vercel + backend serveur
 
@@ -242,8 +288,9 @@ C'est possible, mais moins simple et **non recommandé** pour cette application 
 3. autoriser cette origine avec `CORS_ORIGINS=https://portfolio.tondomaine.fr` ;
 4. configurer Enable Banking avec l'URL du backend.
 
-La protection HTTP Basic fournie ici est prévue pour un déploiement **même
-origine**. En mode séparé, les appels du frontend vers l'API ne porteront pas
-automatiquement les identifiants : il faudrait ajouter une authentification par
-token ou placer l'API derrière un VPN/Cloudflare Access. Le déploiement
-mono-serveur évite ces problèmes.
+Le cookie de session et la protection HTTP Basic fournis ici sont prévus pour
+un déploiement **même origine**. En mode séparé, les appels du frontend vers
+l'API doivent inclure `credentials: "include"`, l'origine doit être autorisée
+par `CORS_ORIGINS`, et les deux domaines doivent rester *same-site* pour que le
+cookie `SameSite=Lax` soit envoyé. Le plus simple reste le déploiement
+mono-serveur, qui évite ces contraintes.

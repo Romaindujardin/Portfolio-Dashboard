@@ -1,6 +1,6 @@
 # Politique de confidentialité
 
-Dernière mise à jour : 26 octobre 2026
+Dernière mise à jour : 10 novembre 2026
 
 ## 1. Responsable du traitement
 
@@ -18,12 +18,22 @@ L'application peut traiter les catégories de données suivantes :
 - **Données patrimoniales** saisies manuellement : biens immobiliers, prêts,
   comptes, positions et parts de propriété.
 - **Données de marché** : identifiants de titres, tickers, cours et devises.
+- **Secrets d'intégration** : clés API Gemini, Binance, Etherscan, CoinGecko
+  et OpenSea, ainsi que les identifiants du sidecar BoursoBank, uniquement si
+  vous les configurez.
 - **Données techniques** : journaux d'erreurs et informations nécessaires au
-  fonctionnement de l'application.
+  fonctionnement de l'application, dont un cookie de session
+  `portfolio_session` (HttpOnly, SameSite=Lax, 7 jours).
 
-Les identifiants et mots de passe bancaires ne sont **jamais** collectés ni
-stockés par l'application. L'authentification est effectuée directement sur le
-site ou l'application de la banque.
+Avec la connexion Enable Banking, les identifiants et mots de passe bancaires
+ne sont **jamais** collectés ni stockés par l'application : l'authentification
+est effectuée directement sur le site ou l'application de la banque.
+
+Le sidecar BoursoBank optionnel nécessite l'identifiant client et le mot de
+passe BoursoBank. Ils sont chiffrés côté serveur en AES-256-GCM, rattachés au
+profil concerné, utilisés uniquement pour exécuter le CLI local de
+synchronisation et ne sont jamais renvoyés en clair par l'API. Ils peuvent être
+supprimés à tout moment depuis l'application.
 
 ## 3. Finalités et bases légales
 
@@ -45,6 +55,8 @@ moment en supprimant la connexion correspondante.
 Les données peuvent être transmises aux services strictement nécessaires :
 
 - **Enable Banking** et les banques concernées, pour l'accès PSD2 aux comptes ;
+- **Google Gemini**, **Binance**, **Etherscan**, **CoinGecko** et **OpenSea**,
+  uniquement pour les fonctions que vous utilisez et avec vos propres clés ;
 - **Yahoo Finance** et **OpenFIGI**, pour les cours et la résolution des
   identifiants de titres ;
 - **IGN**, **DVF/Cerema** et **INSEE**, pour le géocodage et les données
@@ -64,14 +76,19 @@ titres et les cours, et non les données bancaires personnelles.
 ## 6. Durée de conservation
 
 Les données sont conservées localement tant que l'utilisateur ne les supprime
-pas. La suppression d'une connexion bancaire révoque la session associée
-lorsque la banque le permet. Les sauvegardes éventuelles suivent la même durée
-de conservation que les données d'origine.
+pas. La suppression d'un profil via l'application efface ses données, ses
+secrets et ses identifiants, et invalide sa session. La suppression d'une
+connexion bancaire révoque la session associée lorsque la banque le permet.
+Les sauvegardes éventuelles suivent la même durée de conservation que les
+données d'origine.
 
 ## 7. Sécurité
 
-Les secrets d'intégration, notamment la clé privée Enable Banking, sont
-chiffrés localement avec AES-256-GCM. L'application est destinée à un usage
+Les secrets d'intégration (Enable Banking, Gemini, Binance, Etherscan,
+CoinGecko, OpenSea) sont chiffrés côté serveur avec AES-256-GCM et ne sont
+jamais renvoyés en clair par l'API. Les sessions sont signées côté serveur et
+transportées par un cookie HttpOnly ; les mots de passe des profils sont
+hachés avec scrypt et un sel unique. L'application est destinée à un usage
 local et personnel. L'utilisateur reste responsable de la sécurité de son
 appareil, de ses sauvegardes et de l'exposition éventuelle de l'application sur
 un réseau.
@@ -85,8 +102,10 @@ Ces demandes peuvent être adressées via le contact indiqué ci-dessus.
 ## 9. Cookies et mesure d'audience
 
 L'application n'utilise pas de cookies publicitaires ni de mesure d'audience
-commerciale. Des mécanismes de stockage local peuvent être utilisés pour le
-fonctionnement de l'interface et la persistance de certaines préférences.
+commerciale. Le cookie `portfolio_session` est strictement nécessaire à
+l'authentification et à la sécurité des profils. Des mécanismes de stockage
+local peuvent être utilisés pour le fonctionnement de l'interface et la
+persistance de certaines préférences ; les clés API n'y sont jamais stockées.
 
 ## 10. Modifications
 

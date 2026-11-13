@@ -539,15 +539,60 @@ export const Savings: React.FC = () => {
       pockets: latestStrategy.pockets.map((pocket) => {
         const real = realByPocket.get(pocket.id);
         if (!real) return { ...pocket, currentAmount: 0 };
+
+        // Mettre à jour chaque sous-compte / sous-poche avec les versements réels enregistrés
+        const updatedSubItems = (pocket.subItems || []).map((sub) => {
+          // 1. Placements ciblant spécifiquement cette sous-poche (par ID ou nom)
+          const directPlacements = allPlacements.filter(
+            (item) =>
+              item.pocketId === pocket.id &&
+              (item.subPocketId === sub.id ||
+                (item.subPocketName &&
+                  sub.name &&
+                  item.subPocketName.trim().toLowerCase() ===
+                    sub.name.trim().toLowerCase())),
+          );
+
+          // 2. Placements sur la poche sans sous-poche spécifiée mais avec le même payeur
+          // (s'il n'y a qu'un sous-compte pour cette personne dans le dossier)
+          const personSubs = (pocket.subItems || []).filter(
+            (s) => s.personId === sub.personId,
+          );
+          const fallbackPlacements =
+            personSubs.length === 1
+              ? allPlacements.filter(
+                  (item) =>
+                    item.pocketId === pocket.id &&
+                    !item.subPocketId &&
+                    !item.subPocketName &&
+                    item.payerPersonId === sub.personId,
+                )
+              : [];
+
+          const subPlaced = [...directPlacements, ...fallbackPlacements].reduce(
+            (sum, item) => sum + (Number(item.amount) || 0),
+            0,
+          );
+
+          const subInitial = Number(sub.currentAmount) || 0;
+          return {
+            ...sub,
+            currentAmount: Math.round((subInitial + subPlaced) * 100) / 100,
+          };
+        });
+
         return {
           ...pocket,
-          currentAmount: real.initialCapital + real.totalRealPlaced,
-          person1Current: real.p1Placed,
-          person2Current: real.p2Placed,
+          currentAmount: Math.round((real.initialCapital + real.totalRealPlaced) * 100) / 100,
+          person1Current:
+            Math.round(((Number(pocket.person1Current) || 0) + real.p1Placed) * 100) / 100,
+          person2Current:
+            Math.round(((Number(pocket.person2Current) || 0) + real.p2Placed) * 100) / 100,
+          subItems: updatedSubItems,
         };
       }),
     };
-  }, [latestStrategy, pocketsList]);
+  }, [latestStrategy, pocketsList, allPlacements]);
 
   return (
     <div className="space-y-8 pb-16">
@@ -1206,13 +1251,22 @@ export const Savings: React.FC = () => {
                           Sous-poches
                         </div>
                         {poc.subItems.map((sub) => {
+                          const personSubs = (poc.subItems || []).filter(
+                            (s) => s.personId === sub.personId,
+                          );
                           const subPlaced = allPlacements
                             .filter(
                               (item) =>
                                 item.pocketId === poc.id &&
                                 (item.subPocketId === sub.id ||
-                                  item.subPocketName?.toLowerCase() ===
-                                    sub.name.toLowerCase()),
+                                  (item.subPocketName &&
+                                    sub.name &&
+                                    item.subPocketName.trim().toLowerCase() ===
+                                      sub.name.trim().toLowerCase()) ||
+                                  (!item.subPocketId &&
+                                    !item.subPocketName &&
+                                    personSubs.length === 1 &&
+                                    item.payerPersonId === sub.personId)),
                             )
                             .reduce((sum, item) => sum + (item.amount || 0), 0);
                           const subInitialCapital = Number(sub.currentAmount) || 0;

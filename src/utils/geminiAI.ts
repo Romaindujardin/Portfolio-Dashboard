@@ -1,7 +1,7 @@
 // Conseiller IA (Gemini) : envoie la question de l'utilisateur avec le contexte
 // patrimonial complet en systemInstruction, dispose d'outils d'analyse de marché
 // et de calcul financier, puis gère la conversation multi-tours.
-import { getGeminiApiKey } from "./userSettings";
+import { API_BASE } from "./apiBase";
 import {
   ADVISOR_TOOL_DECLARATIONS,
   executeAdvisorTool,
@@ -74,18 +74,12 @@ const buildHttpErrorMessage = (status: number, detail: string): string => {
   return `Erreur Gemini (${status}) : ${suffix}`;
 };
 
+// Le navigateur n'appelle plus Gemini directement : la clé reste côté serveur.
 export const getAdvisorApiUrl = (
-  username: string,
+  _username?: string,
   model: string = ADVISOR_MODEL,
-): string => {
-  const apiKey = getGeminiApiKey(username);
-  if (!apiKey) {
-    throw new Error(
-      "Clé API Gemini non configurée. Renseignez-la dans les paramètres pour utiliser le Conseiller IA.",
-    );
-  }
-  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-};
+): string =>
+  `${API_BASE}/portfolio/ai/gemini?model=${encodeURIComponent(model)}`;
 
 export const buildAdvisorSystemPrompt = (contextText: string): string =>
   [
@@ -160,7 +154,7 @@ export const askGeminiAdvisor = async (
       : ADVISOR_MODELS;
   const retryDelays = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
 
-  const requestModel = async (url: string): Promise<string> => {
+  const requestModel = async (model: string): Promise<string> => {
     let loopCount = 0;
     const maxIterations = 5;
 
@@ -183,21 +177,30 @@ export const askGeminiAdvisor = async (
         body.tools = tools;
       }
 
-      const response = await fetch(url, {
+      const response = await fetch(getAdvisorApiUrl(username, model), {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ model, payload: body }),
       });
 
       if (!response.ok) {
         let detail = "";
         try {
-          detail = (await response.text()).slice(0, 300);
+          detail = (await response.text()).slice(0, 500);
         } catch {
           detail = "";
         }
+        let serverMessage = "";
+        try {
+          const parsed = JSON.parse(detail);
+          if (typeof parsed?.error === "string") serverMessage = parsed.error;
+          else if (typeof parsed?.error?.message === "string") {
+            serverMessage = parsed.error.message;
+          }
+        } catch {}
         const error = new Error(
-          buildHttpErrorMessage(response.status, detail),
+          serverMessage || buildHttpErrorMessage(response.status, detail),
         ) as GeminiHttpError;
         error.status = response.status;
         throw error;
@@ -285,12 +288,11 @@ export const askGeminiAdvisor = async (
   // modèle après un court délai puis on bascule sur les modèles de repli.
   let lastError: Error | null = null;
   for (const model of models) {
-    const url = getAdvisorApiUrl(username, model);
     const attempts = retryDelays.length + 1;
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        return await requestModel(url);
+        return await requestModel(model);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         const status = (error as GeminiHttpError).status;

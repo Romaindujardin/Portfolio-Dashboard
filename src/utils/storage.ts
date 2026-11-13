@@ -109,13 +109,15 @@ export const updateWalletAssetVisibility = async (
 export const updateWalletNFTVisibility = async (
   walletId: string,
   nftIndex: number,
-  isHidden: boolean
+  isHidden: boolean,
+  userId: string = "Romain"
 ): Promise<void> => {
   try {
     await databaseService.updateWalletNFTVisibility(
       walletId,
       nftIndex,
-      isHidden
+      isHidden,
+      userId
     );
     window.dispatchEvent(new CustomEvent("walletsUpdated"));
   } catch (error) {
@@ -128,10 +130,10 @@ export const updateWalletNFTVisibility = async (
 
 export const deleteWallet = async (
   id: string,
-  _userId: string = "Romain"
+  userId: string = "Romain"
 ): Promise<void> => {
   try {
-    await databaseService.deleteWallet(id);
+    await databaseService.deleteWallet(id, userId);
     window.dispatchEvent(new CustomEvent("walletsUpdated"));
   } catch (error) {
     console.error("❌ Erreur lors de la suppression du wallet:", error);
@@ -141,28 +143,33 @@ export const deleteWallet = async (
 // ===== SUPPRESSION D'UTILISATEUR =====
 
 export const deleteUserData = async (userId: string): Promise<void> => {
-  try {
-    // Supprimer tous les wallets de l'utilisateur
-    const wallets = await getStoredWallets(userId);
-    for (const wallet of wallets) {
-      await deleteWallet(wallet.id, userId);
-    }
-
-    // Supprimer tous les CSV bancaires de l'utilisateur
-    const bankCsvUploads = await getStoredBankCsvUploads(userId);
-    for (const upload of bankCsvUploads) {
-      await deleteBankCsvUpload(upload.id, userId);
-    }
-
-    console.log(
-      `🗑️ Toutes les données de l'utilisateur ${userId} ont été supprimées`
-    );
-  } catch (error) {
-    console.error(
-      `❌ Erreur lors de la suppression des données de l'utilisateur ${userId}:`,
-      error
+  const ok = await databaseService.deleteUserProfile(userId);
+  if (!ok) {
+    throw new Error(
+      "Suppression refusée : connectez-vous au profil concerné pour le supprimer.",
     );
   }
+
+  // Nettoyage des miroirs locaux (les sauvegardes serveur sont déjà purgées).
+  const keys = [
+    `user_settings_${userId}`,
+    `wealth_history_${userId}`,
+    `ai_context_selection_${userId}`,
+    `ai_advisor_conversation_${userId}`,
+    `savings_strategy_${userId}`,
+    `tricount_${userId}`,
+    `savings_monthly_${userId}`,
+    `savings_goals_${userId}`,
+  ];
+  for (const key of keys) {
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  }
+  window.dispatchEvent(new CustomEvent("walletsUpdated"));
+  window.dispatchEvent(
+    new CustomEvent("userSettingsUpdated", { detail: { username: userId } }),
+  );
 };
 
 // ===== BANQUE / IMPORT CSV =====

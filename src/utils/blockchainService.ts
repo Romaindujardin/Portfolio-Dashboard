@@ -1,6 +1,6 @@
 import { Wallet, WalletAsset, BlockchainConfig } from "../types";
 import { getCryptoBySymbol } from "./cryptoDatabase";
-import { getEtherscanApiKey, getCoinGeckoApiKey } from "./userSettings";
+import { API_BASE } from "./apiBase";
 import { getNFTsForAddress, getCollectionFloorPrice } from "./openSeaService";
 
 // Fonction pour récupérer le prix de l'ETH en EUR
@@ -31,7 +31,7 @@ async function getETHPrice(_username: string = "Romain"): Promise<number> {
 // Fonction pour obtenir la configuration blockchain avec les clés API de l'utilisateur
 const getBlockchainConfig = (
   blockchain: string,
-  username: string
+  _username: string,
 ): BlockchainConfig => {
   const baseConfigs: Record<string, Omit<BlockchainConfig, "apiKey">> = {
     ethereum: {
@@ -39,7 +39,7 @@ const getBlockchainConfig = (
       chainId: 1,
       rpcUrl: "https://mainnet.infura.io/v3/",
       explorerUrl: "https://etherscan.io",
-      apiUrl: "https://api.etherscan.io/v2/api",
+      apiUrl: `${API_BASE}/portfolio/crypto/etherscan`,
       nativeToken: {
         symbol: "ETH",
         name: "Ethereum",
@@ -51,7 +51,7 @@ const getBlockchainConfig = (
       chainId: 56,
       rpcUrl: "https://bsc-dataseed.binance.org/",
       explorerUrl: "https://bscscan.com",
-      apiUrl: "https://api.etherscan.io/v2/api", // Utiliser Etherscan v2 pour BSC
+      apiUrl: `${API_BASE}/portfolio/crypto/etherscan`, // Utiliser Etherscan v2 pour BSC
       nativeToken: {
         symbol: "BNB",
         name: "Binance Coin",
@@ -63,7 +63,7 @@ const getBlockchainConfig = (
       chainId: 137,
       rpcUrl: "https://polygon-rpc.com/",
       explorerUrl: "https://polygonscan.com",
-      apiUrl: "https://api.etherscan.io/v2/api", // Utiliser Etherscan v2 pour Polygon
+      apiUrl: `${API_BASE}/portfolio/crypto/etherscan`, // Utiliser Etherscan v2 pour Polygon
       nativeToken: {
         symbol: "MATIC",
         name: "Polygon",
@@ -75,7 +75,7 @@ const getBlockchainConfig = (
       chainId: 42161,
       rpcUrl: "https://arb1.arbitrum.io/rpc",
       explorerUrl: "https://arbiscan.io",
-      apiUrl: "https://api.etherscan.io/v2/api", // Utiliser Etherscan v2 pour Arbitrum
+      apiUrl: `${API_BASE}/portfolio/crypto/etherscan`, // Utiliser Etherscan v2 pour Arbitrum
       nativeToken: {
         symbol: "ETH",
         name: "Ethereum",
@@ -87,7 +87,7 @@ const getBlockchainConfig = (
       chainId: 10,
       rpcUrl: "https://mainnet.optimism.io",
       explorerUrl: "https://optimistic.etherscan.io",
-      apiUrl: "https://api.etherscan.io/v2/api", // Utiliser Etherscan v2 pour Optimism
+      apiUrl: `${API_BASE}/portfolio/crypto/etherscan`, // Utiliser Etherscan v2 pour Optimism
       nativeToken: {
         symbol: "ETH",
         name: "Ethereum",
@@ -99,7 +99,7 @@ const getBlockchainConfig = (
       chainId: 43114,
       rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
       explorerUrl: "https://snowtrace.io",
-      apiUrl: "https://api.etherscan.io/v2/api", // Utiliser Etherscan v2 pour Avalanche
+      apiUrl: `${API_BASE}/portfolio/crypto/etherscan`, // Utiliser Etherscan v2 pour Avalanche
       nativeToken: {
         symbol: "AVAX",
         name: "Avalanche",
@@ -113,19 +113,9 @@ const getBlockchainConfig = (
     throw new Error(`Blockchain non supportée: ${blockchain}`);
   }
 
-  // Utiliser Etherscan API pour toutes les chaînes
-  const apiKey = getEtherscanApiKey(username);
-
-  if (!apiKey) {
-    throw new Error(
-      `Clé API non configurée pour ${blockchain}. Veuillez la configurer dans les paramètres.`
-    );
-  }
-
-  return {
-    ...baseConfig,
-    apiKey,
-  };
+  // Le proxy serveur ajoute la clé Etherscan du profil : elle n'est jamais
+  // exposée au navigateur.
+  return { ...baseConfig };
 };
 
 // Cache pour les prix CoinGecko (évite les appels répétés)
@@ -161,7 +151,7 @@ async function apiCallWithRetry(
         await delay(250); // Délai minimum de 250ms entre chaque appel
       }
 
-      const response = await fetch(url);
+      const response = await fetch(url, { credentials: "include" });
       const data = await response.json();
 
       // Si on dépasse le rate limit, retry
@@ -191,15 +181,19 @@ async function apiCallWithRetry(
 // Fonction pour gérer le rate limiting CoinGecko
 async function coinGeckoApiCall(
   url: string,
-  username: string = "Romain"
+  _username: string = "Romain"
 ): Promise<any> {
-  const apiKey = getCoinGeckoApiKey(username);
-
-  // Ajouter la clé API si elle est configurée
-  const separator = url.includes("?") ? "&" : "?";
-  const finalUrl = apiKey
-    ? `${url}${separator}x_cg_demo_api_key=${apiKey}`
-    : url;
+  // Le proxy serveur ajoute éventuellement la clé CoinGecko du profil.
+  let finalUrl = url;
+  try {
+    const parsed = new URL(url);
+    const endpoint = parsed.pathname.replace(/^\/api\/v3\//, "");
+    const params = new URLSearchParams(parsed.searchParams);
+    params.set("endpoint", endpoint);
+    finalUrl = `${API_BASE}/portfolio/market/coingecko?${params.toString()}`;
+  } catch {
+    finalUrl = url;
+  }
 
   try {
     // Vérifier le rate limiting
@@ -217,7 +211,7 @@ async function coinGeckoApiCall(
 
     coinGeckoCallCount++;
 
-    const response = await fetch(finalUrl);
+    const response = await fetch(finalUrl, { credentials: "include" });
     const data = await response.json();
 
     if (response.ok) {
@@ -331,7 +325,7 @@ const getNativeBalance = async (
 
   try {
     // Construire l'URL avec le chainid pour Etherscan v2
-    const url = `${config.apiUrl}?module=account&action=balance&address=${address}&chainid=${config.chainId}&apikey=${config.apiKey}`;
+    const url = `${config.apiUrl}?module=account&action=balance&address=${address}&chainid=${config.chainId}`;
 
 
     const response = await apiCallWithRetry(url);
@@ -387,7 +381,7 @@ const getTokenBalances = async (
 
   try {
     // Construire l'URL avec le chainid pour Etherscan v2
-    const url = `${config.apiUrl}?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=asc&chainid=${config.chainId}&apikey=${config.apiKey}`;
+    const url = `${config.apiUrl}?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=asc&chainid=${config.chainId}`;
 
 
     const response = await apiCallWithRetry(url);
@@ -411,7 +405,7 @@ const getTokenBalances = async (
         // Calculer le solde actuel
         try {
           // Construire l'URL avec le chainid pour Etherscan v2
-          const balanceUrl = `${config.apiUrl}?module=account&action=tokenbalance&contractaddress=${contractAddress}&address=${address}&chainid=${config.chainId}&apikey=${config.apiKey}`;
+          const balanceUrl = `${config.apiUrl}?module=account&action=tokenbalance&contractaddress=${contractAddress}&address=${address}&chainid=${config.chainId}`;
 
           const balanceResponse = await apiCallWithRetry(balanceUrl);
           const balance = balanceResponse.result;

@@ -591,7 +591,8 @@ export const fetchSavingsStrategyFromDatabase = async (
 ): Promise<SavingsStrategy | null> => {
   try {
     const res = await fetch(
-      `${SAVINGS_API_BASE}/strategy?user_id=${encodeURIComponent(userId)}`
+      `${SAVINGS_API_BASE}/strategy?user_id=${encodeURIComponent(userId)}`,
+      { credentials: "include" }
     );
     if (!res.ok) return null;
     const data = await res.json();
@@ -610,6 +611,7 @@ export const pushSavingsStrategyToDatabase = async (
     const strat = strategy || getSavingsStrategy(userId);
     const res = await fetch(`${SAVINGS_API_BASE}/strategy`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ strategy: strat, userId }),
     });
@@ -625,7 +627,8 @@ export const fetchMonthlyStrategiesFromDatabase = async (
 ): Promise<Record<string, SavingsStrategy> | null> => {
   try {
     const res = await fetch(
-      `${SAVINGS_API_BASE}/monthly?user_id=${encodeURIComponent(userId)}`
+      `${SAVINGS_API_BASE}/monthly?user_id=${encodeURIComponent(userId)}`,
+      { credentials: "include" }
     );
     if (!res.ok) return null;
     const data = await res.json();
@@ -644,6 +647,7 @@ export const pushMonthlyStrategiesToDatabase = async (
     const strats = strategies || getStoredMonthlyStrategies();
     const res = await fetch(`${SAVINGS_API_BASE}/monthly/batch`, {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ strategies: strats, userId }),
     });
@@ -665,9 +669,7 @@ export const syncSavingsWithDatabase = async (
         ? localStorage.getItem(`savings_strategy_${userId}`)
         : null;
 
-    if (localStratRaw) {
-      pushSavingsStrategyToDatabase(userId);
-    } else if (serverStrat) {
+    if (serverStrat) {
       localStorage.setItem(
         `savings_strategy_${userId}`,
         JSON.stringify(serverStrat)
@@ -675,6 +677,8 @@ export const syncSavingsWithDatabase = async (
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("savings_strategy_updated"));
       }
+    } else if (localStratRaw) {
+      pushSavingsStrategyToDatabase(userId);
     }
 
     // 2. Synchroniser les stratégies mensuelles
@@ -684,9 +688,7 @@ export const syncSavingsWithDatabase = async (
         ? localStorage.getItem(STORAGE_KEY_MONTHLY_STRATEGIES)
         : null;
 
-    if (localMonthlyRaw) {
-      pushMonthlyStrategiesToDatabase(userId);
-    } else if (serverMonthly && Object.keys(serverMonthly).length > 0) {
+    if (serverMonthly && Object.keys(serverMonthly).length > 0) {
       localStorage.setItem(
         STORAGE_KEY_MONTHLY_STRATEGIES,
         JSON.stringify(serverMonthly)
@@ -694,6 +696,8 @@ export const syncSavingsWithDatabase = async (
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("savings_strategy_updated"));
       }
+    } else if (localMonthlyRaw) {
+      pushMonthlyStrategiesToDatabase(userId);
     }
   } catch (e) {
     console.error("Erreur lors de la synchronisation de l'épargne avec le serveur:", e);

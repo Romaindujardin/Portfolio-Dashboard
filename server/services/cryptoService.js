@@ -10,7 +10,8 @@
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { nowIso, round2 } from "../lib/validate.js";
-import { encryptJson, decryptJson } from "../lib/secrets.js";
+import { decryptJson } from "../lib/secrets.js";
+import { getUserSecret, setUserSecret } from "./userSecretsService.js";
 
 const COINGECKO_BASE = "https://api.coingecko.com/api/v3";
 const BINANCE_BASE = "https://api.binance.com";
@@ -680,13 +681,39 @@ export async function syncCryptoAccount(repository, accountId, userId) {
   let holdings = [];
 
   if (provider === "binance") {
-    const creds = metadata.credentialsEncrypted
-      ? decryptJson(metadata.credentialsEncrypted)
-      : metadata;
-    holdings = await fetchBinanceHoldings({
-      apiKey: creds.apiKey,
-      apiSecret: creds.apiSecret,
-    });
+    let apiKey = getUserSecret(repository.db, userId, "binanceApiKey");
+    let apiSecret = getUserSecret(repository.db, userId, "binanceSecretKey");
+
+    // Compatibilité avec les comptes créés avant le coffre : on migre les
+    // identifiants chiffrés présents dans les métadonnées vers user_secrets.
+    if ((!apiKey || !apiSecret) && metadata.credentialsEncrypted) {
+      try {
+        const legacy = decryptJson(metadata.credentialsEncrypted);
+        const legacyKey =
+          typeof legacy?.apiKey === "string" ? legacy.apiKey.trim() : "";
+        const legacySecret =
+          typeof legacy?.apiSecret === "string" ? legacy.apiSecret.trim() : "";
+        if (legacyKey && !apiKey) {
+          setUserSecret(repository.db, userId, "binanceApiKey", legacyKey);
+          apiKey = legacyKey;
+        }
+        if (legacySecret && !apiSecret) {
+          setUserSecret(repository.db, userId, "binanceSecretKey", legacySecret);
+          apiSecret = legacySecret;
+        }
+      } catch (error) {
+        console.warn(
+          `⚠️ Identifiants Binance historiques illisibles: ${error.message}`,
+        );
+      }
+    }
+
+    if (!apiKey || !apiSecret) {
+      throw new Error(
+        "Clés API Binance non configurées. Renseignez-les dans les paramètres.",
+      );
+    }
+    holdings = await fetchBinanceHoldings({ apiKey, apiSecret });
   } else if (
     provider === "hyperliquid" ||
     nameLower.includes("hyperliquid")

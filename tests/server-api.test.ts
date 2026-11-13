@@ -135,6 +135,7 @@ describe("wallets (CRUD complet + visibilités)", () => {
 
   it("met à jour le wallet et remplace assets/NFTs", async () => {
     const res = await putJson(`/database/wallets/${walletId}`, {
+      user_id: USER,
       name: "Wallet Renommé",
       total_value: 777.77,
       assets: [
@@ -163,6 +164,7 @@ describe("wallets (CRUD complet + visibilités)", () => {
 
   it("met à jour la visibilité d'un asset (404 sur index invalide)", async () => {
     const ok = await putJson(`/database/wallets/${walletId}/assets/0/visibility`, {
+      user_id: USER,
       isHidden: true,
     });
     expect(ok.status).toBe(200);
@@ -173,7 +175,7 @@ describe("wallets (CRUD complet + visibilités)", () => {
 
     const ko = await putJson(
       `/database/wallets/${walletId}/assets/99/visibility`,
-      { isHidden: true },
+      { user_id: USER, isHidden: true },
     );
     expect(ko.status).toBe(404);
   });
@@ -181,6 +183,7 @@ describe("wallets (CRUD complet + visibilités)", () => {
   it("gère la visibilité des NFTs (404 sur index invalide)", async () => {
     // Remettre un NFT, puis le masquer.
     await putJson(`/database/wallets/${walletId}`, {
+      user_id: USER,
       nfts: [
         {
           token_id: "9",
@@ -193,6 +196,7 @@ describe("wallets (CRUD complet + visibilités)", () => {
     });
 
     const ok = await putJson(`/database/wallets/${walletId}/nfts/0/visibility`, {
+      user_id: USER,
       isHidden: true,
     });
     expect(ok.status).toBe(200);
@@ -202,6 +206,7 @@ describe("wallets (CRUD complet + visibilités)", () => {
     expect(Boolean(wallet.nfts[0].is_hidden)).toBe(true);
 
     const ko = await putJson(`/database/wallets/${walletId}/nfts/12/visibility`, {
+      user_id: USER,
       isHidden: true,
     });
     expect(ko.status).toBe(404);
@@ -213,7 +218,10 @@ describe("wallets (CRUD complet + visibilités)", () => {
   });
 
   it("supprime le wallet", async () => {
-    const res = await api(`/database/wallets/${walletId}`, { method: "DELETE" });
+    const res = await api(
+      `/database/wallets/${walletId}?user_id=${USER}`,
+      { method: "DELETE" },
+    );
     expect(res.status).toBe(200);
 
     const { body } = await apiJson<any[]>(`/database/wallets?user_id=${USER}`);
@@ -533,7 +541,7 @@ describe("validations des services externes (sans appel réseau)", () => {
       body: "{}",
     });
     expect(status).toBe(400);
-    expect(body.error).toContain("Missing");
+    expect(body.error).toMatch(/Binance/i);
   });
 
   it("OpenSea : 400 sans clé API (3 routes)", async () => {

@@ -61,6 +61,7 @@ const request = async <T>(
   try {
     response = await fetch(url.toString(), {
       ...init,
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
         ...(init.headers || {}),
@@ -529,7 +530,6 @@ export const syncAccount = (accountId: string, userId: string) =>
 export interface BoursoSidecarStatus {
   available: boolean;
   configured: boolean;
-  customerId: string | null;
 }
 
 export const getBoursoSidecarStatus = () =>
@@ -627,6 +627,42 @@ export const changePassword = (
   request<{ success: boolean; message: string }>("/auth/change-password", {
     ...json({ username, currentPassword, newPassword }),
   });
+
+export const getSession = () =>
+  request<{ authenticated: boolean; username: string | null }>("/auth/me");
+
+export const logoutSession = () =>
+  request<{ success: boolean }>("/auth/logout", { method: "POST" });
+
+export const deleteUserProfile = (username: string) =>
+  request<{ success: boolean; username: string; diskFiles: number }>(
+    `/users/${encodeURIComponent(username)}`,
+    { method: "DELETE" },
+  );
+
+export interface SecretStatus {
+  configured: boolean;
+  updatedAt: string | null;
+  label: string;
+}
+
+export const getSecretsStatus = () =>
+  request<{
+    secrets: Record<string, SecretStatus>;
+    keys: Record<string, string>;
+  }>("/secrets");
+
+export const saveSecret = (key: string, value: string) =>
+  request<{ success: boolean; key: string; configured: boolean }>(
+    `/secrets/${encodeURIComponent(key)}`,
+    { ...json({ value }), method: "PUT" },
+  );
+
+export const deleteSecret = (key: string) =>
+  request<{ success: boolean; key: string; deleted: boolean }>(
+    `/secrets/${encodeURIComponent(key)}`,
+    { method: "DELETE" },
+  );
 
 
 

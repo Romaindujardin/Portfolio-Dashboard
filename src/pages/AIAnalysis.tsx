@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { useUser } from "../contexts/UserContext";
 import { useCurrency, formatMoney } from "../contexts/CurrencyContext";
-import { getGeminiApiKey } from "../utils/userSettings";
+import { getSecretsStatus } from "../services/portfolioApi";
 import {
   collectAiContext,
   DEFAULT_AI_CONTEXT_SELECTION,
@@ -207,7 +207,7 @@ const ContextCard: React.FC<ContextCardProps> = ({
 );
 
 const AIAnalysis: React.FC = () => {
-  const { currentUser } = useUser();
+  const { currentUser, isUnlocked } = useUser();
   useCurrency();
 
   const [selection, setSelection] = useState<AiContextSelection>(() =>
@@ -225,9 +225,7 @@ const AIAnalysis: React.FC = () => {
   const [error, setError] = useState("");
   const [showContext, setShowContext] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [hasApiKey, setHasApiKey] = useState(() =>
-    Boolean(getGeminiApiKey(currentUser)),
-  );
+  const [hasApiKey, setHasApiKey] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loading = phase !== "idle";
@@ -258,17 +256,30 @@ const AIAnalysis: React.FC = () => {
     };
   }, [currentUser]);
 
-  // Suit la présence de la clé API Gemini (paramètres).
+  // Suit la présence de la clé API Gemini dans le coffre serveur.
   useEffect(() => {
-    const refresh = () => setHasApiKey(Boolean(getGeminiApiKey(currentUser)));
-    refresh();
-    window.addEventListener("userSettingsUpdated", refresh);
-    window.addEventListener("storage", refresh);
-    return () => {
-      window.removeEventListener("userSettingsUpdated", refresh);
-      window.removeEventListener("storage", refresh);
+    let cancelled = false;
+    const refresh = async () => {
+      if (!isUnlocked) return;
+      try {
+        const data = await getSecretsStatus();
+        if (!cancelled) {
+          setHasApiKey(Boolean(data.secrets?.geminiApiKey?.configured));
+        }
+      } catch {
+        if (!cancelled) setHasApiKey(false);
+      }
     };
-  }, [currentUser]);
+    void refresh();
+    const handler = () => void refresh();
+    window.addEventListener("userSettingsUpdated", handler);
+    window.addEventListener("storage", handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("userSettingsUpdated", handler);
+      window.removeEventListener("storage", handler);
+    };
+  }, [currentUser, isUnlocked]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });

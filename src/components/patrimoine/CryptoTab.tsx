@@ -17,6 +17,7 @@ import {
   syncCryptoAccount,
   syncAllCryptoAccounts,
   deleteAccount,
+  saveSecret,
 } from "../../services/portfolioApi";
 import {
   Card,
@@ -160,8 +161,10 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
           setSubmitting(false);
           return;
         }
-        payload.apiKey = apiKey.trim();
-        payload.apiSecret = apiSecret.trim();
+        // Les clés sont envoyées au coffre chiffré du serveur, jamais dans les
+        // métadonnées du compte crypto ni dans le localStorage.
+        await saveSecret("binanceApiKey", apiKey.trim());
+        await saveSecret("binanceSecretKey", apiSecret.trim());
       } else if (["evm", "hyperliquid", "aptos", "bitcoin", "solana"].includes(providerType)) {
         if (!address.trim()) {
           notify("error", "Adresse publique requise");
@@ -432,9 +435,9 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
                             {String(account.metadata.address).slice(-6)}
                           </span>
                         )}
-                        {Boolean(account.metadata?.apiKeyMasked) && (
+                        {account.provider === "binance" && (
                           <span className="font-mono text-[11px] text-[#a3a3a3]">
-                            API: {String(account.metadata.apiKeyMasked)}
+                            API : chiffrée côté serveur
                           </span>
                         )}
                         <span>•</span>
@@ -719,7 +722,7 @@ export const CryptoTab: React.FC<CryptoTabProps> = ({
               <div className="p-3 rounded-lg bg-[rgba(200,165,94,0.05)] border border-[rgba(200,165,94,0.15)] text-xs text-[#d4d4d4] flex items-start gap-2">
                 <Shield className="h-4 w-4 text-[#c8a55e] shrink-0 mt-0.5" />
                 <span>
-                  <strong>Sécurité :</strong> Utilisez impérativement des clés en <em>lecture seule</em> (Read-Only) sans autorisation de retrait. Vos clés sont chiffrées en AES-256-GCM localement.
+                  <strong>Sécurité :</strong> Utilisez impérativement des clés en <em>lecture seule</em> (Read-Only) sans autorisation de retrait. Vos clés sont chiffrées en AES-256-GCM côté serveur et ne sont jamais renvoyées au navigateur.
                 </span>
               </div>
             </div>

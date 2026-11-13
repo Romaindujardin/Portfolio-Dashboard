@@ -43,7 +43,7 @@ export const AuthModal: React.FC = () => {
   const strength = scorePassword(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
   const canSubmit = isSetup
-    ? password.length >= 4 && passwordsMatch && !isSubmitting
+    ? password.length >= 8 && passwordsMatch && !isSubmitting
     : password.length > 0 && !isSubmitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,8 +55,8 @@ export const AuthModal: React.FC = () => {
 
     try {
       if (isSetup) {
-        if (password.length < 4) {
-          setError("Le mot de passe doit comporter au moins 4 caractères.");
+        if (password.length < 8) {
+          setError("Le mot de passe doit comporter au moins 8 caractères.");
           setIsSubmitting(false);
           return;
         }

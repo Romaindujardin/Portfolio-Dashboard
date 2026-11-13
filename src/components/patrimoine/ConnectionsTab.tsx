@@ -25,6 +25,7 @@ import {
   BoursoSidecarStatus,
   completeConnection,
   connectBoursoSidecar,
+  deleteBoursoSidecarCredentials,
   deleteIntegrationSettings,
   disconnect,
   getBoursoSidecarStatus,
@@ -155,12 +156,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
 
   const reloadBoursoStatus = () => {
     void getBoursoSidecarStatus()
-      .then((st) => {
-        setBoursoStatus(st);
-        if (st.customerId) {
-          setBoursoForm((prev) => ({ ...prev, customerId: st.customerId || "" }));
-        }
-      })
+      .then((st) => setBoursoStatus(st))
       .catch(() => {});
   };
 
@@ -175,16 +171,24 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   };
 
   const handleConnectBourso = async () => {
-    if (!boursoForm.customerId.trim()) {
-      setBoursoError("Identifiant client requis.");
+    const customerId = boursoForm.customerId.trim();
+    const password = boursoForm.password;
+    if (!boursoStatus?.configured && (!customerId || !password)) {
+      setBoursoError("Identifiant client et mot de passe requis.");
+      return;
+    }
+    if (boursoStatus?.configured && Boolean(customerId) !== Boolean(password)) {
+      setBoursoError(
+        "Saisissez l'identifiant et le mot de passe, ou laissez les deux vides pour réutiliser les identifiants enregistrés.",
+      );
       return;
     }
     setBoursoBusy(true);
     setBoursoError("");
     try {
       const res = await connectBoursoSidecar(userId, {
-        customerId: boursoForm.customerId.trim(),
-        password: boursoForm.password,
+        customerId,
+        password,
         saveCredentials: boursoForm.saveCredentials,
         pages: Number(boursoForm.pages) || 10,
         connectionId: targetConnectionId || undefined,
@@ -202,6 +206,31 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       setBoursoError(err instanceof Error ? err.message : "Erreur de connexion BoursoBank.");
     } finally {
       setBoursoBusy(false);
+    }
+  };
+
+  const handleForgetBoursoCredentials = async () => {
+    if (
+      !window.confirm(
+        "Supprimer les identifiants BoursoBank enregistrés pour ce profil ?",
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteBoursoSidecarCredentials();
+      setBoursoStatus((prev) =>
+        prev ? { ...prev, configured: false } : prev,
+      );
+      setBoursoForm((prev) => ({ ...prev, customerId: "", password: "" }));
+      notify("success", "Identifiants BoursoBank supprimés.");
+    } catch (err) {
+      notify(
+        "error",
+        err instanceof Error
+          ? err.message
+          : "Impossible de supprimer les identifiants BoursoBank.",
+      );
     }
   };
 
@@ -252,6 +281,8 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     // Détection d'un sidecar disponible pour BoursoBank :
     // On propose directement le sidecar natif pour éviter les limitations DSP2 (PEA, livrets, 90j)
     if (isBoursoInstitution(institution)) {
+      setTargetConnectionId(null);
+      reloadBoursoStatus();
       setBoursoModalOpen(true);
       return;
     }
@@ -387,7 +418,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       <Card className="p-4">
         <SectionHeader
           title="Connexion bancaire — Enable Banking"
-          subtitle="Agrégation PSD2 multi-banques (BNP, BoursoBank, Crédit Agricole, Société Générale…). Les identifiants bancaires sont saisis chez la banque ; seule la clé privée de l'application est chiffrée localement."
+          subtitle="Agrégation PSD2 multi-banques (BNP, BoursoBank, Crédit Agricole, Société Générale…). Les identifiants bancaires sont saisis chez la banque ; seule la clé privée de l'application est chiffrée côté serveur."
           action={
             <div className="flex flex-wrap items-center gap-2">
               {configured ? (
@@ -516,6 +547,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                 size="sm"
                 onClick={() => {
                   setTargetConnectionId(null);
+                  reloadBoursoStatus();
                   setBoursoModalOpen(true);
                 }}
               >
@@ -717,12 +749,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                           variant="primary"
                           onClick={() => {
                             setTargetConnectionId(connection.id);
-                            if (connection.metadata?.customerId) {
-                              setBoursoForm((prev) => ({
-                                ...prev,
-                                customerId: String(connection.metadata?.customerId || prev.customerId),
-                              }));
-                            }
+                            reloadBoursoStatus();
                             setBoursoModalOpen(true);
                           }}
                           title="Extraire comptes, PEA & historique complet via le Sidecar"
@@ -825,7 +852,10 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
               variant="primary"
               onClick={handleConnectBourso}
               loading={boursoBusy}
-              disabled={!boursoForm.customerId.trim()}
+              disabled={
+                !boursoStatus?.configured &&
+                (!boursoForm.customerId.trim() || !boursoForm.password)
+              }
             >
               <Zap className="h-3.5 w-3.5" /> Synchroniser via Sidecar
             </Button>
@@ -870,6 +900,17 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
               placeholder={boursoStatus?.configured ? "•••••••• (laisser vide pour conserver)" : "Mot de passe BoursoBank"}
             />
           </Field>
+
+          {boursoStatus?.configured && (
+            <button
+              type="button"
+              onClick={handleForgetBoursoCredentials}
+              className="inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Oublier les identifiants enregistrés
+            </button>
+          )}
 
           <div className="grid grid-cols-2 gap-3 pt-1">
             <Field label="Historique à extraire (pages)" hint="1 page ≈ 20 transactions">

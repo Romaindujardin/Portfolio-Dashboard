@@ -61,6 +61,10 @@ import {
   isEncryptionAvailable,
   maskSecret,
 } from "../server/lib/secrets.js";
+import {
+  extractSecretsFromSettings,
+  sanitizeUserSettings,
+} from "../server/services/userSecretsService.js";
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -82,6 +86,27 @@ describe("Chiffrement des secrets", () => {
     expect(decryptJson(encrypted)).toEqual(plaintext);
     expect(() => decryptJson("v1:invalide")).toThrow(/incomplet/i);
     expect(() => decryptJson("non-chiffré")).toThrow(/format/i);
+  });
+
+  it("migre l'ancien boursoClientId vers le coffre et l'efface des paramètres", () => {
+    const settings = {
+      theme: "dark",
+      boursoClientId: "legacy-customer",
+      boursoCustomerId: "vault-customer",
+      boursoPassword: "vault-password",
+    };
+    expect(extractSecretsFromSettings(settings)).toEqual({
+      boursoCustomerId: "vault-customer",
+      boursoPassword: "vault-password",
+    });
+    expect(
+      extractSecretsFromSettings({ boursoClientId: "legacy-only" }),
+    ).toEqual({ boursoCustomerId: "legacy-only" });
+    const sanitized = sanitizeUserSettings(settings);
+    expect(sanitized.theme).toBe("dark");
+    expect(sanitized).not.toHaveProperty("boursoClientId");
+    expect(sanitized).not.toHaveProperty("boursoCustomerId");
+    expect(sanitized).not.toHaveProperty("boursoPassword");
   });
 
   it("masque les valeurs sensibles", () => {

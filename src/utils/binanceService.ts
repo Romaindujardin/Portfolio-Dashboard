@@ -47,17 +47,23 @@ async function getCryptoPrices(
 
 const API_BASE_URL = API_ORIGIN;
 
-// Récupère les assets d'un compte Binance
-export async function getBinanceAccountInfo(
-  apiKey: string,
-  apiSecret: string
-): Promise<WalletAsset[]> {
+// Récupère les assets du compte Binance du profil connecté.
+// Les clés restent dans le coffre chiffré serveur.
+export async function getBinanceAccountInfo(): Promise<WalletAsset[]> {
   const res = await fetch(`${API_BASE_URL}/api/binance/account`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey, apiSecret }),
+    body: JSON.stringify({}),
   });
-  if (!res.ok) throw new Error("Erreur API Binance: " + res.status);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const payload = await res.json();
+      detail = payload?.error || "";
+    } catch {}
+    throw new Error(detail || "Erreur API Binance: " + res.status);
+  }
   const data = await res.json();
 
   // data.balances: [{ asset: 'BTC', free: '0.1', locked: '0.0' }, ...]
