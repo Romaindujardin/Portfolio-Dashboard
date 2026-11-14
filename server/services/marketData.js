@@ -519,7 +519,11 @@ export class MarketDataService {
         if (converted && converted !== holding.ticker) {
           holding.ticker = converted;
           if (typeof this.repository.updateHolding === "function") {
-            this.repository.updateHolding(holding.id, { ticker: converted });
+            this.repository.updateHolding(
+              holding.id,
+              { ticker: converted },
+              userId,
+            );
           }
         }
       }
@@ -557,6 +561,7 @@ export class MarketDataService {
           fxRate: quote.fxRate,
           source: quote.source,
         },
+        userId,
       );
       touchedAccounts.add(holding.accountId);
       updated += 1;

@@ -15,6 +15,10 @@ import {
   requireSession,
 } from "./server/lib/session.js";
 import {
+  resolveSetupAuth,
+  SETUP_TOKEN_MIN_LENGTH,
+} from "./server/lib/setupAuth.js";
+import {
   getUserSecret,
   migrateLegacyUserSecrets,
   migrateUserSettingsSecrets,
@@ -75,13 +79,19 @@ app.use(
   }),
 );
 
-// Authentification HTTP Basic optionnelle mais fortement recommandée dès que
-// l'application est exposée sur Internet. Elle protège aussi les fichiers
-// statiques et l'API, pas seulement la page d'accueil.
+// Authentification HTTP Basic. Elle est obligatoire par défaut en production
+// et protège aussi les fichiers statiques et l'API, pas seulement la page
+// d'accueil.
 const BASIC_AUTH_USER = String(process.env.BASIC_AUTH_USER || "");
 const BASIC_AUTH_PASSWORD = String(process.env.BASIC_AUTH_PASSWORD || "");
 const authEnabled = Boolean(BASIC_AUTH_USER && BASIC_AUTH_PASSWORD);
-const requireAuth = process.env.REQUIRE_AUTH === "true";
+// En production, l'authentification HTTP Basic est obligatoire par défaut.
+// Un déploiement qui délègue explicitement cette protection à un reverse
+// proxy authentifiant doit le dire avec REQUIRE_AUTH=false.
+const requireAuth =
+  process.env.REQUIRE_AUTH === "true" ||
+  (process.env.NODE_ENV === "production" &&
+    process.env.REQUIRE_AUTH !== "false");
 const PLACEHOLDER_PASSWORD = "change-me-with-a-long-random-password";
 
 if (BASIC_AUTH_PASSWORD === PLACEHOLDER_PASSWORD) {
@@ -100,8 +110,33 @@ if (requireAuth && !authEnabled) {
 }
 if (!authEnabled && process.env.NODE_ENV === "production") {
   console.warn(
-    "⚠️  Application en production sans authentification applicative. " +
-      "Définissez BASIC_AUTH_USER et BASIC_AUTH_PASSWORD, ou protégez-la par un VPN/reverse proxy.",
+    "⚠️  REQUIRE_AUTH=false : authentification applicative désactivée. " +
+      "Un reverse proxy authentifiant (VPN, SSO, Basic Auth) doit impérativement protéger l'accès.",
+  );
+}
+
+// Création de profil : fermée par défaut en production, ouverte par
+// AUTH_SETUP_TOKEN. En développement local sans jeton, elle reste ouverte.
+const SETUP_AUTH = resolveSetupAuth();
+if (SETUP_AUTH.configured && !SETUP_AUTH.valid) {
+  console.error(
+    `❌ AUTH_SETUP_TOKEN doit comporter au moins ${SETUP_TOKEN_MIN_LENGTH} caractères.`,
+  );
+  if (process.env.NODE_ENV === "production") process.exit(1);
+}
+if (!SETUP_AUTH.enabled && process.env.NODE_ENV === "production") {
+  console.warn(
+    "⚠️  Création de profil désactivée : définissez AUTH_SETUP_TOKEN " +
+      "(openssl rand -hex 24) puis redémarrez, ou pré-créez les identifiants.",
+  );
+}
+if (
+  !SETUP_AUTH.configured &&
+  process.env.NODE_ENV !== "production" &&
+  process.env.NODE_ENV !== "test"
+) {
+  console.warn(
+    "⚠️  AUTH_SETUP_TOKEN non défini : /auth/setup est ouvert en développement local.",
   );
 }
 if (process.env.NODE_ENV === "production" && !process.env.APP_URL) {
@@ -1918,11 +1953,11 @@ app.put("/api/database/wallets/:id", (req, res) => {
     if (!existing || existing.user_id !== userId) {
       return res.status(404).json({ error: "Wallet not found" });
     }
-    dbManager.updateWallet(id, { ...walletData, user_id: userId });
+    dbManager.updateWallet(id, { ...walletData, user_id: userId }, userId);
 
     // Supprimer les anciens assets et NFTs
-    dbManager.deleteWalletAssets(id);
-    dbManager.deleteWalletNFTs(id);
+    dbManager.deleteWalletAssets(id, userId);
+    dbManager.deleteWalletNFTs(id, userId);
 
     // Ajouter les nouveaux assets
     if (assets && Array.isArray(assets)) {
@@ -1964,11 +1999,11 @@ app.delete("/api/database/wallets/:id", (req, res) => {
     }
 
     // Supprimer les assets et NFTs du wallet
-    dbManager.deleteWalletAssets(id);
-    dbManager.deleteWalletNFTs(id);
+    dbManager.deleteWalletAssets(id, userId);
+    dbManager.deleteWalletNFTs(id, userId);
 
     // Supprimer le wallet
-    const success = dbManager.deleteWallet(id);
+    const success = dbManager.deleteWallet(id, userId);
 
     if (success) {
       res.json({ message: "Wallet deleted successfully" });
@@ -2002,6 +2037,7 @@ app.put("/api/database/wallets/:id/assets/:index/visibility", (req, res) => {
       const success = dbManager.updateWalletAssetVisibility(
         assets[index].id,
         isHidden,
+        userId,
       );
 
       if (success) {
@@ -2043,6 +2079,7 @@ app.put("/api/database/wallets/:id/nfts/:index/visibility", (req, res) => {
     const success = dbManager.updateWalletNFTVisibility(
       nfts[nftIndex].id,
       isHidden,
+      userId,
     );
 
     if (success) {
@@ -2070,6 +2107,7 @@ app.use(
       process.env.ENABLE_BANKING_BASE_URL ||
       process.env.ENABLEBANKING_BASE_URL ||
       null,
+    setupAuth: SETUP_AUTH,
   }),
 );
 
@@ -2114,6 +2152,15 @@ app.listen(PORT, HOST, () => {
   console.log(`🌐 APP_URL: ${APP_URL}`);
   console.log(
     `🔐 Authentification applicative: ${authEnabled ? "activée" : "désactivée"}`,
+  );
+  console.log(
+    `🧑 Création de profil: ${
+      SETUP_AUTH.enabled
+        ? SETUP_AUTH.required
+          ? "protégée par AUTH_SETUP_TOKEN"
+          : "ouverte (développement local)"
+        : "désactivée"
+    }`,
   );
   console.log(
     `🔒 CORS: origines locales${configuredOrigins.length ? ` + ${configuredOrigins.join(", ")}` : ""}`,

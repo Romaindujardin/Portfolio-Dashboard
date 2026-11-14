@@ -56,13 +56,26 @@ ENABLE_BANKING_REDIRECT_URI=https://portfolio.tondomaine.fr/api/portfolio/connec
 BASIC_AUTH_USER=portfolio
 BASIC_AUTH_PASSWORD=un-mot-de-passe-long-et-unique
 REQUIRE_AUTH=true
+AUTH_SETUP_TOKEN=
 ```
 
-Pour le mot de passe, on peut générer une valeur sans caractères spéciaux :
+Renseigner `AUTH_SETUP_TOKEN` avec un jeton aléatoire (le laisser vide
+désactive la création de profil). Pour le mot de passe et le jeton
+d'initialisation, on peut générer des valeurs sans caractères spéciaux :
 
 ```bash
 openssl rand -hex 24
 ```
+
+`docker-compose.yml` impose `REQUIRE_AUTH=true` : sans
+`BASIC_AUTH_USER`/`BASIC_AUTH_PASSWORD`, le conteneur refuse de démarrer. Si un
+reverse proxy authentifie déjà les utilisateurs, cette protection ne doit être
+désactivée que par un override Compose explicite.
+
+`AUTH_SETUP_TOKEN` protège `/auth/setup`. En production, sans ce jeton, la
+création de profil est désactivée (les profils existants peuvent toujours se
+connecter). Le code est demandé une fois dans l'interface lors de la création
+d'un profil, puis pour chaque nouveau profil du foyer.
 
 Le nom de domaine doit être le même partout : `APP_DOMAIN`, `APP_URL` et l'URL
 de retour Enable Banking.

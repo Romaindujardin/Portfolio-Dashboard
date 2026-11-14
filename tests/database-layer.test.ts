@@ -126,6 +126,48 @@ describe("wallets (couche SQLite)", () => {
     expect(dbManager.getWalletNFTs(walletId)).toHaveLength(0);
   });
 
+  it("borne les écritures au propriétaire (défense en profondeur)", () => {
+    const scopedId = dbManager.createWallet({
+      user_id: "DbUser",
+      name: "Scoped",
+      address: "0xscope",
+      wallet_type: "metamask",
+      blockchains: ["ethereum"],
+      total_value: 1,
+    });
+    const assetId = dbManager.createWalletAsset({
+      wallet_id: scopedId,
+      symbol: "ETH",
+      name: "Ether",
+      balance: 1,
+      decimals: 18,
+      blockchain: "ethereum",
+    });
+
+    expect(dbManager.updateWallet(scopedId, { name: "Pirate" }, "Autre")).toBe(
+      false,
+    );
+    expect(dbManager.getWalletById(scopedId).name).toBe("Scoped");
+
+    expect(
+      dbManager.updateWalletAssetVisibility(assetId, true, "Autre"),
+    ).toBe(false);
+    expect(dbManager.getWalletAssets(scopedId)[0].is_hidden).toBe(0);
+
+    expect(dbManager.deleteWalletAssets(scopedId, "Autre")).toBe(false);
+    expect(dbManager.getWalletAssets(scopedId)).toHaveLength(1);
+
+    expect(dbManager.deleteWallet(scopedId, "Autre")).toBe(false);
+    expect(dbManager.getWalletById(scopedId)).toBeTruthy();
+
+    expect(dbManager.updateWallet(scopedId, { name: "Renommé" }, "DbUser")).toBe(
+      true,
+    );
+    expect(dbManager.deleteWalletAssets(scopedId, "DbUser")).toBe(true);
+    expect(dbManager.deleteWallet(scopedId, "DbUser")).toBe(true);
+    expect(dbManager.getWalletById(scopedId)).toBeUndefined();
+  });
+
   it("supprime le wallet", () => {
     expect(dbManager.deleteWallet(walletId)).toBe(true);
     expect(dbManager.deleteWallet(walletId)).toBe(false);

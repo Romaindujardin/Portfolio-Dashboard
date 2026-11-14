@@ -15,6 +15,7 @@ export interface TestServerInfo {
   baseUrl: string;
   dbPath: string;
   tmpDir: string;
+  setupToken: string;
 }
 
 if (!fs.existsSync(INFO_PATH)) {
@@ -117,7 +118,10 @@ export const ensureTestSession = async (user = "Romain"): Promise<string> => {
 
   const promise = (async () => {
     const password = testPasswordFor(clean);
-    const headers = { "Content-Type": "application/json" };
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Setup-Token": TEST_SERVER.setupToken,
+    };
     let response = await realFetch(
       `${TEST_SERVER.baseUrl}/api/portfolio/auth/setup`,
       {

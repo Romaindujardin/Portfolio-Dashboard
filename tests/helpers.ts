@@ -42,10 +42,14 @@ export async function apiJson<T = unknown>(
   return { status: res.status, body: body as T };
 }
 
-export const postJson = (pathname: string, payload: unknown): Promise<Response> =>
+export const postJson = (
+  pathname: string,
+  payload: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> =>
   api(pathname, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(payload),
   });
 

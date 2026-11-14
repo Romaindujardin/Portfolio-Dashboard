@@ -11,6 +11,12 @@ services:
       PORT: 3001
       SERVE_STATIC: "true"
       DATABASE_PATH: /app/data/portfolio.db
+      # Authentification HTTP Basic obligatoire par défaut. Un reverse proxy
+      # authentifiant doit être explicitement déclaré via un override si vous
+      # désactivez cette protection (REQUIRE_AUTH=false).
+      REQUIRE_AUTH: "true"
+      # AUTH_SETUP_TOKEN est lu depuis .env.production (env_file ci-dessus).
+      # Sans ce jeton, la création de profil est désactivée en production.
     volumes:
       # Base SQLite, clé de chiffrement locale et sauvegardes JSON.
       - ./data:/app/data

@@ -620,13 +620,17 @@ export class PortfolioRepository {
     const deleteTx = this.db.transaction(() => {
       for (const { oldId, oldRef, newId, newRef } of reassignments) {
         try {
+          // Le lien Tricount appartient au profil propriétaire de la
+          // transaction. Sans ce filtre, un identifiant de ligne bancaire
+          // pouvait réécrire la dépense d'un autre profil.
           this.db
             .prepare(
               `UPDATE tricount_expenses 
                SET bank_row_id = ?, bank_reference = ? 
-               WHERE bank_row_id = ? OR (bank_reference IS NOT NULL AND ? IS NOT NULL AND bank_reference = ?)`,
+               WHERE user_id = ?
+                 AND (bank_row_id = ? OR (bank_reference IS NOT NULL AND ? IS NOT NULL AND bank_reference = ?))`,
             )
-            .run(newId, newRef, oldId, oldRef, oldRef);
+            .run(newId, newRef, userId, oldId, oldRef, oldRef);
         } catch (_) {}
 
         try {
@@ -634,14 +638,17 @@ export class PortfolioRepository {
             .prepare(
               `UPDATE tricount_incomes 
                SET bank_row_id = ?, bank_reference = ? 
-               WHERE bank_row_id = ? OR (bank_reference IS NOT NULL AND ? IS NOT NULL AND bank_reference = ?)`,
+               WHERE user_id = ?
+                 AND (bank_row_id = ? OR (bank_reference IS NOT NULL AND ? IS NOT NULL AND bank_reference = ?))`,
             )
-            .run(newId, newRef, oldId, oldRef, oldRef);
+            .run(newId, newRef, userId, oldId, oldRef, oldRef);
         } catch (_) {}
       }
-      const deleteStmt = this.db.prepare(`DELETE FROM transactions WHERE id = ?`);
+      const deleteStmt = this.db.prepare(
+        `DELETE FROM transactions WHERE id = ? AND account_id = ? AND user_id = ?`,
+      );
       for (const id of idsToDelete) {
-        deleteStmt.run(id);
+        deleteStmt.run(id, accountId, userId);
       }
     });
 
@@ -655,47 +662,48 @@ export class PortfolioRepository {
   }
 
   syncDiskBackupsAfterReassignment(userId, reassignments) {
-    if (!reassignments || reassignments.length === 0) return;
-    const members = [userId, "Romain", "Sophie"];
+    if (!reassignments || reassignments.length === 0 || !userId) return;
     const reassignMap = new Map();
     for (const r of reassignments) {
       if (r.oldId) reassignMap.set(r.oldId, r);
       if (r.oldRef) reassignMap.set(r.oldRef, r);
     }
 
-    for (const m of new Set(members)) {
-      if (!m) continue;
-      const backupPath = path.resolve(process.cwd(), `data/tricount_${m}.json`);
-      if (fs.existsSync(backupPath)) {
-        try {
-          const content = JSON.parse(fs.readFileSync(backupPath, "utf8"));
-          let dirty = false;
-          if (Array.isArray(content.expenses)) {
-            for (const exp of content.expenses) {
-              const r = reassignMap.get(exp.bankRowId) || reassignMap.get(exp.bankReference);
-              if (r) {
-                exp.bankRowId = r.newId;
-                exp.bankReference = r.newRef;
-                dirty = true;
-              }
-            }
+    // Même périmètre que la mise à jour SQL : uniquement le miroir du profil
+    // propriétaire de la transaction nettoyée.
+    const backupPath = path.resolve(process.cwd(), `data/tricount_${userId}.json`);
+    if (!fs.existsSync(backupPath)) return;
+    try {
+      const content = JSON.parse(fs.readFileSync(backupPath, "utf8"));
+      let dirty = false;
+      if (Array.isArray(content.expenses)) {
+        for (const exp of content.expenses) {
+          const r =
+            reassignMap.get(exp.bankRowId) ||
+            reassignMap.get(exp.bankReference);
+          if (r) {
+            exp.bankRowId = r.newId;
+            exp.bankReference = r.newRef;
+            dirty = true;
           }
-          if (Array.isArray(content.incomes)) {
-            for (const inc of content.incomes) {
-              const r = reassignMap.get(inc.bankRowId) || reassignMap.get(inc.bankReference);
-              if (r) {
-                inc.bankRowId = r.newId;
-                inc.bankReference = r.newRef;
-                dirty = true;
-              }
-            }
-          }
-          if (dirty) {
-            fs.writeFileSync(backupPath, JSON.stringify(content, null, 2), "utf8");
-          }
-        } catch (_) {}
+        }
       }
-    }
+      if (Array.isArray(content.incomes)) {
+        for (const inc of content.incomes) {
+          const r =
+            reassignMap.get(inc.bankRowId) ||
+            reassignMap.get(inc.bankReference);
+          if (r) {
+            inc.bankRowId = r.newId;
+            inc.bankReference = r.newRef;
+            dirty = true;
+          }
+        }
+      }
+      if (dirty) {
+        fs.writeFileSync(backupPath, JSON.stringify(content, null, 2), "utf8");
+      }
+    } catch (_) {}
   }
 
   cleanAllAuthorizationDuplicates(userId) {
@@ -807,7 +815,12 @@ export class PortfolioRepository {
         .prepare(
           `UPDATE holdings SET isin = ?, ticker = ?, name = ?, quantity = ?, cost_basis = ?,
            price = ?, currency = ?, last_price_at = ?, metadata_json = ?, updated_at = ?
-           WHERE id = ?`,
+           WHERE id = ? AND (
+             user_id = ? OR account_id IN (
+               SELECT account_id FROM account_ownerships
+               WHERE owner_name = ? AND share_percent > 0
+             )
+           )`,
         )
         .run(
           data.isin || existing.isin,
@@ -821,6 +834,8 @@ export class PortfolioRepository {
           toJson(data.metadata || parseJson(existing.metadata_json, {})),
           now,
           existing.id,
+          userId,
+          userId,
         );
       return mapHolding(
         this.db.prepare("SELECT * FROM holdings WHERE id = ?").get(existing.id),
@@ -862,7 +877,8 @@ export class PortfolioRepository {
     );
   }
 
-  updateHolding(id, data) {
+  updateHolding(id, data, userId) {
+    if (!userId) throw new Error("user_id requis pour modifier une position");
     const fields = [];
     const values = [];
     if ("ticker" in data) { fields.push("ticker = ?"); values.push(data.ticker); }
@@ -873,24 +889,46 @@ export class PortfolioRepository {
     if ("metadata" in data) { fields.push("metadata_json = ?"); values.push(toJson(data.metadata)); }
     if (fields.length === 0) return;
     fields.push("updated_at = ?");
-    values.push(nowIso());
-    values.push(id);
-    this.db.prepare(`UPDATE holdings SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+    values.push(nowIso(), id, userId, userId);
+    this.db
+      .prepare(
+        `UPDATE holdings SET ${fields.join(", ")}
+         WHERE id = ? AND (
+           user_id = ? OR account_id IN (
+             SELECT account_id FROM account_ownerships
+             WHERE owner_name = ? AND share_percent > 0
+           )
+         )`,
+      )
+      .run(...values);
   }
 
-  updateHoldingPrice(id, price, lastPriceAt, metadata = null) {
+  updateHoldingPrice(id, price, lastPriceAt, metadata = null, userId) {
+    if (!userId) throw new Error("user_id requis pour modifier une position");
     if (metadata) {
       this.db
         .prepare(
-          "UPDATE holdings SET price = ?, last_price_at = ?, metadata_json = ?, updated_at = ? WHERE id = ?",
+          `UPDATE holdings SET price = ?, last_price_at = ?, metadata_json = ?, updated_at = ?
+           WHERE id = ? AND (
+             user_id = ? OR account_id IN (
+               SELECT account_id FROM account_ownerships
+               WHERE owner_name = ? AND share_percent > 0
+             )
+           )`,
         )
-        .run(price, lastPriceAt, toJson(metadata), nowIso(), id);
+        .run(price, lastPriceAt, toJson(metadata), nowIso(), id, userId, userId);
     } else {
       this.db
         .prepare(
-          "UPDATE holdings SET price = ?, last_price_at = ?, updated_at = ? WHERE id = ?",
+          `UPDATE holdings SET price = ?, last_price_at = ?, updated_at = ?
+           WHERE id = ? AND (
+             user_id = ? OR account_id IN (
+               SELECT account_id FROM account_ownerships
+               WHERE owner_name = ? AND share_percent > 0
+             )
+           )`,
         )
-        .run(price, lastPriceAt, nowIso(), id);
+        .run(price, lastPriceAt, nowIso(), id, userId, userId);
     }
   }
 

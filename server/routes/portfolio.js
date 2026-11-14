@@ -49,6 +49,10 @@ import {
   setSessionCookie,
 } from "../lib/session.js";
 import { createRateLimiter } from "../lib/rateLimit.js";
+import {
+  resolveSetupAuth,
+  setupTokenMatches,
+} from "../lib/setupAuth.js";
 import { encryptJson } from "../lib/secrets.js";
 import {
   SECRET_KEYS,
@@ -203,9 +207,19 @@ export const publicSyncResult = (result, seen = new WeakSet()) => {
   return clean;
 };
 
-export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) {
+export function createPortfolioRouter({
+  db,
+  enableBankingBaseUrl = null,
+  setupAuth = resolveSetupAuth(),
+} = {}) {
   if (!db) throw new Error("Base de données requise pour le routeur patrimoine");
   const router = express.Router();
+
+  const httpErrorWithCode = (status, message, code) => {
+    const error = new HttpError(status, message);
+    error.code = code;
+    return error;
+  };
   const repository = new PortfolioRepository(db);
   const connector = new EnableBankingConnector({
     repository,
@@ -287,7 +301,14 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
         throw new HttpError(400, err.message);
       }
       const hasPassword = hasUserPassword(db, cleanUsername);
-      res.json({ username: cleanUsername, hasPassword });
+      res.json({
+        username: cleanUsername,
+        hasPassword,
+        setup: {
+          enabled: Boolean(setupAuth.enabled),
+          tokenRequired: Boolean(setupAuth.required),
+        },
+      });
     }),
   );
 
@@ -295,6 +316,31 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
     "/auth/setup",
     authLimiter,
     asyncHandler(async (req, res) => {
+      if (!setupAuth.enabled) {
+        throw httpErrorWithCode(
+          403,
+          "La création de profil est désactivée sur ce serveur.",
+          "SETUP_DISABLED",
+        );
+      }
+      if (setupAuth.required) {
+        const providedToken = req.get("X-Setup-Token");
+        if (!providedToken) {
+          throw httpErrorWithCode(
+            403,
+            "Code d'initialisation requis pour créer un profil.",
+            "SETUP_TOKEN_REQUIRED",
+          );
+        }
+        if (!setupTokenMatches(providedToken, setupAuth.token)) {
+          throw httpErrorWithCode(
+            403,
+            "Code d'initialisation invalide.",
+            "SETUP_TOKEN_INVALID",
+          );
+        }
+      }
+
       const { username, password } = req.body || {};
       let cleanUsername;
       try {
@@ -1005,14 +1051,12 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       if (accountId) {
         const account = repository.getAccount(accountId, userId);
         if (!account) throw new HttpError(404, "Compte introuvable");
-        repository.cleanAuthorizationDuplicates(account.id, userId);
         transactions = repository.listTransactions(account.id, userId, {
           from: asDate(req.query.from),
           to: asDate(req.query.to),
           limit: asOptionalInteger(req.query.limit, { min: 1, max: 10000 }) || 2000,
         });
       } else {
-        repository.cleanAllAuthorizationDuplicates(userId);
         transactions = repository.listAllTransactions(userId, {
           from: asDate(req.query.from),
           to: asDate(req.query.to),
@@ -1029,13 +1073,35 @@ export function createPortfolioRouter({ db, enableBankingBaseUrl = null } = {}) 
       const userId = queryUserId(req);
       const account = repository.getAccount(req.params.id, userId);
       if (!account) throw new HttpError(404, "Compte introuvable");
-      repository.cleanAuthorizationDuplicates(account.id, userId);
       const transactions = repository.listTransactions(account.id, userId, {
         from: asDate(req.query.from),
         to: asDate(req.query.to),
         limit: asOptionalInteger(req.query.limit, { min: 1, max: 20000 }) || 500,
       });
       res.json({ transactions });
+    }),
+  );
+
+  // Nettoyage explicite des doublons d'autorisations bancaires. Il s'agit
+  // d'une écriture : elle n'est jamais déclenchée par un GET. Le même nettoyage
+  // est déjà exécuté après une synchronisation BoursoBank.
+  router.post(
+    "/transactions/cleanup-duplicates",
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const accountId = asOptionalString(
+        req.body?.account_id || req.body?.accountId,
+        100,
+      );
+      let cleaned = 0;
+      if (accountId) {
+        const account = repository.getAccount(accountId, userId);
+        if (!account) throw new HttpError(404, "Compte introuvable");
+        cleaned = repository.cleanAuthorizationDuplicates(account.id, userId);
+      } else {
+        cleaned = repository.cleanAllAuthorizationDuplicates(userId);
+      }
+      res.json({ cleaned });
     }),
   );
 

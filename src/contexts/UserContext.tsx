@@ -15,6 +15,11 @@ import {
   logoutSession,
 } from "../services/portfolioApi";
 
+export interface AuthSetupState {
+  enabled: boolean;
+  tokenRequired: boolean;
+}
+
 export interface UserContextType {
   currentUser: string;
   setCurrentUser: (user: string) => void;
@@ -27,6 +32,7 @@ export interface UserContextType {
   isUnlocked: boolean;
   authTargetUser: string;
   authMode: "setup" | "unlock" | null;
+  authSetup: AuthSetupState;
   isCheckingAuth: boolean;
   unlockUser: (user: string) => void;
   lockUser: (user?: string) => void;
@@ -126,6 +132,10 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   const [isLocked, setIsLocked] = useState<boolean>(() => !isSessionUnlocked(currentUser));
   const [authTargetUser, setAuthTargetUser] = useState<string>(currentUser);
   const [authMode, setAuthMode] = useState<"setup" | "unlock" | null>(null);
+  const [authSetup, setAuthSetup] = useState<AuthSetupState>({
+    enabled: true,
+    tokenRequired: false,
+  });
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
 
   // Vérification de l'état d'authentification pour un utilisateur donné
@@ -146,6 +156,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       // Session serveur absente ou appartenant à un autre profil.
       clearSessionUnlocked(user);
       const status = await getAuthStatus(user);
+      setAuthSetup(status.setup || { enabled: true, tokenRequired: false });
       setIsLocked(true);
       setAuthTargetUser(user);
       setAuthMode(status.hasPassword ? "unlock" : "setup");
@@ -255,6 +266,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     setIsCheckingAuth(true);
     try {
       const status = await getAuthStatus(targetUser);
+      setAuthSetup(status.setup || { enabled: true, tokenRequired: false });
       setAuthMode(status.hasPassword ? "unlock" : "setup");
     } catch (err) {
       console.warn("Erreur lors de la vérification de l'état d'authentification:", err);
@@ -331,6 +343,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
         isUnlocked: !isLocked,
         authTargetUser,
         authMode,
+        authSetup,
         isCheckingAuth,
         unlockUser,
         lockUser,

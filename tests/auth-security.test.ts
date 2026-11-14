@@ -11,7 +11,15 @@ import {
   generateSalt,
   compareTimingSafe,
 } from "../server/services/authService.js";
+import {
+  resolveSetupAuth,
+  setupTokenMatches,
+  SETUP_TOKEN_MIN_LENGTH,
+} from "../server/lib/setupAuth.js";
 import { apiJson, postJson } from "./helpers";
+import { TEST_SERVER } from "./shims";
+
+const setupHeaders = { "X-Setup-Token": TEST_SERVER.setupToken };
 
 describe("authService — sécurité des mots de passe", () => {
   it("génère des sels uniques et des hashs scrypt reproductibles avec le même sel", () => {
@@ -76,6 +84,50 @@ describe("authService — sécurité des mots de passe", () => {
   });
 });
 
+describe("protection de /auth/setup", () => {
+  const token = "un-jeton-de-test-suffisamment-long";
+
+  it("ferme la création de profil en production sans AUTH_SETUP_TOKEN", () => {
+    const config = resolveSetupAuth({ NODE_ENV: "production" });
+    expect(config.enabled).toBe(false);
+    expect(config.required).toBe(true);
+  });
+
+  it("active la création de profil avec un jeton assez long", () => {
+    const config = resolveSetupAuth({
+      NODE_ENV: "production",
+      AUTH_SETUP_TOKEN: token,
+    });
+    expect(config.enabled).toBe(true);
+    expect(config.required).toBe(true);
+    expect(config.valid).toBe(true);
+  });
+
+  it("reste ouverte en développement local sans jeton", () => {
+    const config = resolveSetupAuth({ NODE_ENV: "development" });
+    expect(config.enabled).toBe(true);
+    expect(config.required).toBe(false);
+  });
+
+  it("rejette un jeton trop court", () => {
+    const config = resolveSetupAuth({
+      NODE_ENV: "production",
+      AUTH_SETUP_TOKEN: "court",
+    });
+    expect(config.valid).toBe(false);
+    expect(config.enabled).toBe(false);
+    expect(SETUP_TOKEN_MIN_LENGTH).toBeGreaterThan(8);
+  });
+
+  it("compare les jetons en temps constant, y compris de longueurs différentes", () => {
+    expect(setupTokenMatches(token, token)).toBe(true);
+    expect(setupTokenMatches("mauvais-jeton", token)).toBe(false);
+    expect(setupTokenMatches("", token)).toBe(false);
+    expect(setupTokenMatches(token, "")).toBe(false);
+    expect(() => setupTokenMatches("x", token)).not.toThrow();
+  });
+});
+
 describe("API HTTP /api/portfolio/auth", () => {
   const testUser = `AuthUser_${Date.now()}`;
 
@@ -88,10 +140,14 @@ describe("API HTTP /api/portfolio/auth", () => {
     expect(statusBefore.body.hasPassword).toBe(false);
 
     // 2. Setup mot de passe
-    const setupRes = await postJson("/portfolio/auth/setup", {
-      username: testUser,
-      password: "InitialPassword123!",
-    });
+    const setupRes = await postJson(
+      "/portfolio/auth/setup",
+      {
+        username: testUser,
+        password: "InitialPassword123!",
+      },
+      setupHeaders,
+    );
     expect(setupRes.status).toBe(201);
 
     // 3. Status après setup
@@ -144,16 +200,24 @@ describe("API HTTP /api/portfolio/auth", () => {
     const userB = `UserB_${Date.now()}`;
 
     // Créer userA avec mot de passe A
-    await postJson("/portfolio/auth/setup", {
-      username: userA,
-      password: "PasswordUserA123!",
-    });
+    await postJson(
+      "/portfolio/auth/setup",
+      {
+        username: userA,
+        password: "PasswordUserA123!",
+      },
+      setupHeaders,
+    );
 
     // Créer userB avec mot de passe B
-    await postJson("/portfolio/auth/setup", {
-      username: userB,
-      password: "PasswordUserB456!",
-    });
+    await postJson(
+      "/portfolio/auth/setup",
+      {
+        username: userB,
+        password: "PasswordUserB456!",
+      },
+      setupHeaders,
+    );
 
     // Tenter de déverrouiller userB avec le mot de passe de userA -> doit être rejeté (401)
     const crossVerify = await postJson("/portfolio/auth/verify", {

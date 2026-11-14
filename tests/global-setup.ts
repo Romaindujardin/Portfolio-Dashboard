@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const TMP_DIR = path.join(REPO_ROOT, ".test-tmp");
+const SETUP_TOKEN = "test-setup-token-0123456789abcdef";
 
 let serverProcess: ChildProcess | null = null;
 
@@ -60,6 +61,7 @@ export async function setup() {
       PORT: String(port),
       DATABASE_PATH: dbPath,
       NODE_ENV: "test",
+      AUTH_SETUP_TOKEN: SETUP_TOKEN,
     },
     stdio: ["ignore", logFd, logFd],
   });
@@ -77,7 +79,11 @@ export async function setup() {
 
   fs.writeFileSync(
     path.join(TMP_DIR, "test-server.json"),
-    JSON.stringify({ port, baseUrl, dbPath, tmpDir: TMP_DIR }, null, 2),
+    JSON.stringify(
+      { port, baseUrl, dbPath, tmpDir: TMP_DIR, setupToken: SETUP_TOKEN },
+      null,
+      2,
+    ),
   );
 }
 

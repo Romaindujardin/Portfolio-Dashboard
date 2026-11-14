@@ -40,6 +40,12 @@ const jsonInit = (method: string, payload: unknown): RequestInit => ({
   body: JSON.stringify(payload),
 });
 
+const setupHeaders = { "X-Setup-Token": TEST_SERVER.setupToken };
+const setupInit = (payload: unknown): RequestInit => ({
+  ...jsonInit("POST", payload),
+  headers: { "Content-Type": "application/json", ...setupHeaders },
+});
+
 const openTestDb = () =>
   new Database(TEST_SERVER.dbPath, { readonly: true, fileMustExist: true });
 
@@ -69,6 +75,44 @@ describe("sessions serveur", () => {
     expect(health.status).toBe(200);
   });
 
+  it("refuse la création d'un profil sans code d'initialisation", async () => {
+    const user = `SecSetup_${suffix}`;
+    const payload = { username: user, password: "SetupPassword123!" };
+
+    const missing = await apiWithoutSession(
+      "/portfolio/auth/setup",
+      jsonInit("POST", payload),
+    );
+    expect(missing.status).toBe(403);
+    expect((await missing.json()).code).toBe("SETUP_TOKEN_REQUIRED");
+
+    const wrong = await apiWithoutSession("/portfolio/auth/setup", {
+      ...jsonInit("POST", payload),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Setup-Token": "mauvais-jeton-d-initialisation",
+      },
+    });
+    expect(wrong.status).toBe(403);
+    expect((await wrong.json()).code).toBe("SETUP_TOKEN_INVALID");
+
+    const status = await apiWithoutSession(
+      `/portfolio/auth/status?username=${encodeURIComponent(user)}`,
+    );
+    const statusBody = await status.json();
+    expect(statusBody.hasPassword).toBe(false);
+    expect(statusBody.setup).toEqual({
+      enabled: true,
+      tokenRequired: true,
+    });
+
+    const accepted = await apiWithoutSession(
+      "/portfolio/auth/setup",
+      setupInit(payload),
+    );
+    expect(accepted.status).toBe(201);
+  });
+
   it("émet un cookie HttpOnly, SameSite=Lax et expose /auth/me", async () => {
     await ensureTestSession(userA);
     const me = await apiAs(userA, "/portfolio/auth/me");
@@ -96,9 +140,10 @@ describe("sessions serveur", () => {
     const oldPassword = `Old-${user}-Password-123!`;
     const newPassword = `New-${user}-Password-456!`;
 
-    const setup = await apiWithoutSession("/portfolio/auth/setup", {
-      ...jsonInit("POST", { username: user, password: oldPassword }),
-    });
+    const setup = await apiWithoutSession(
+      "/portfolio/auth/setup",
+      setupInit({ username: user, password: oldPassword }),
+    );
     expect(setup.status).toBe(201);
     const oldCookie = (setup.headers.get("set-cookie") || "").split(";")[0];
     expect(oldCookie).toContain("portfolio_session=");
@@ -821,10 +866,14 @@ describe("suppression complète du profil", () => {
 
 describe("mot de passe et client Gemini", () => {
   it("refuse un mot de passe de moins de 8 caractères via l'API", async () => {
-    const response = await postJson("/portfolio/auth/setup", {
-      username: `SecShort_${suffix}`,
-      password: "1234567",
-    });
+    const response = await postJson(
+      "/portfolio/auth/setup",
+      {
+        username: `SecShort_${suffix}`,
+        password: "1234567",
+      },
+      setupHeaders,
+    );
     expect(response.status).toBe(400);
   });
 

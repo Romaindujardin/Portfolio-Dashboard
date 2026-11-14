@@ -11,6 +11,7 @@ export const AuthModal: React.FC = () => {
     isLocked,
     authTargetUser,
     authMode,
+    authSetup,
     unlockUser,
     cancelAuthModal,
     requestUserSwitch,
@@ -18,6 +19,7 @@ export const AuthModal: React.FC = () => {
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -29,6 +31,7 @@ export const AuthModal: React.FC = () => {
     if (authMode || isLocked) {
       setPassword("");
       setConfirmPassword("");
+      setSetupToken("");
       setError(null);
       setTimeout(() => inputRef.current?.focus(), 80);
     }
@@ -42,8 +45,14 @@ export const AuthModal: React.FC = () => {
 
   const strength = scorePassword(password);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
+  const setupTokenReady =
+    !authSetup.tokenRequired || setupToken.trim().length > 0;
   const canSubmit = isSetup
-    ? password.length >= 8 && passwordsMatch && !isSubmitting
+    ? authSetup.enabled &&
+      password.length >= 8 &&
+      passwordsMatch &&
+      setupTokenReady &&
+      !isSubmitting
     : password.length > 0 && !isSubmitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,6 +64,11 @@ export const AuthModal: React.FC = () => {
 
     try {
       if (isSetup) {
+        if (!authSetup.enabled) {
+          setError("La création de profil est désactivée sur ce serveur.");
+          setIsSubmitting(false);
+          return;
+        }
         if (password.length < 8) {
           setError("Le mot de passe doit comporter au moins 8 caractères.");
           setIsSubmitting(false);
@@ -65,7 +79,16 @@ export const AuthModal: React.FC = () => {
           setIsSubmitting(false);
           return;
         }
-        await setupPassword(targetUser, password);
+        if (authSetup.tokenRequired && !setupToken.trim()) {
+          setError("Le code d'initialisation est requis.");
+          setIsSubmitting(false);
+          return;
+        }
+        await setupPassword(
+          targetUser,
+          password,
+          authSetup.tokenRequired ? setupToken.trim() : undefined,
+        );
         unlockUser(targetUser);
       } else {
         await verifyPassword(targetUser, password);
@@ -136,7 +159,9 @@ export const AuthModal: React.FC = () => {
           </h2>
           <p className="text-sm text-[#8a8a8a] mt-1">
             {isSetup
-              ? `Définissez un mot de passe pour le profil de ${targetUser}`
+              ? authSetup.enabled
+                ? `Définissez un mot de passe pour le profil de ${targetUser}`
+                : "La création de profil est désactivée sur ce serveur."
               : authTargetUser && authTargetUser !== currentUser
                 ? `Ce compte est protégé. Saisissez le mot de passe de ${targetUser} pour y accéder.`
                 : `Saisissez votre mot de passe pour accéder à ${targetUser}`}
@@ -151,8 +176,38 @@ export const AuthModal: React.FC = () => {
           </div>
         )}
 
+        {isSetup && !authSetup.enabled && (
+          <div className="mb-5 p-3 rounded-xl bg-amber-950/40 border border-amber-500/30 flex items-center gap-2.5 text-amber-200 text-sm">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-400" />
+            <p className="flex-1">
+              Contactez l'administrateur du serveur : la création de profil
+              nécessite un code d'initialisation.
+            </p>
+          </div>
+        )}
+
         {/* Formulaire */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {isSetup && authSetup.enabled && authSetup.tokenRequired && (
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-[#8a8a8a] mb-1.5">
+                Code d'initialisation
+              </label>
+              <input
+                type="password"
+                value={setupToken}
+                onChange={(e) => setSetupToken(e.target.value)}
+                placeholder="Fourni par l'administrateur"
+                autoComplete="one-time-code"
+                required
+                className="w-full px-4 py-3 bg-[#1a1a1a] border border-[rgba(255,255,255,0.08)] focus:border-[#c8a55e] focus:outline-none rounded-xl text-[#f5f5f5] placeholder-[#555555] transition-all duration-200"
+              />
+              <p className="text-xs text-[#777777] mt-1.5">
+                Ce code protège la création de profil sur un serveur exposé.
+              </p>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-[#8a8a8a] mb-1.5">
               {isSetup ? "Nouveau mot de passe" : "Mot de passe"}
@@ -165,7 +220,8 @@ export const AuthModal: React.FC = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                className="w-full px-4 py-3 bg-[#1a1a1a] border border-[rgba(255,255,255,0.08)] focus:border-[#c8a55e] focus:outline-none rounded-xl text-[#f5f5f5] placeholder-[#555555] transition-all duration-200 pr-11"
+                disabled={isSetup && !authSetup.enabled}
+                className="w-full px-4 py-3 bg-[#1a1a1a] border border-[rgba(255,255,255,0.08)] focus:border-[#c8a55e] focus:outline-none rounded-xl text-[#f5f5f5] placeholder-[#555555] transition-all duration-200 pr-11 disabled:opacity-50"
               />
               <button
                 type="button"
@@ -216,7 +272,8 @@ export const AuthModal: React.FC = () => {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  className="w-full px-4 py-3 bg-[#1a1a1a] border border-[rgba(255,255,255,0.08)] focus:border-[#c8a55e] focus:outline-none rounded-xl text-[#f5f5f5] placeholder-[#555555] transition-all duration-200 pr-11"
+                  disabled={isSetup && !authSetup.enabled}
+                  className="w-full px-4 py-3 bg-[#1a1a1a] border border-[rgba(255,255,255,0.08)] focus:border-[#c8a55e] focus:outline-none rounded-xl text-[#f5f5f5] placeholder-[#555555] transition-all duration-200 pr-11 disabled:opacity-50"
                 />
                 {passwordsMatch && (
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-400 p-1">

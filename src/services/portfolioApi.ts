@@ -605,13 +605,24 @@ export const importAccountCsv = (
 // ─── Authentification & Sécurité des profils ────────────────────────────────
 
 export const getAuthStatus = (username: string) =>
-  request<{ username: string; hasPassword: boolean }>("/auth/status", {
+  request<{
+    username: string;
+    hasPassword: boolean;
+    setup: { enabled: boolean; tokenRequired: boolean };
+  }>("/auth/status", {
     query: { username },
   });
 
-export const setupPassword = (username: string, password: string) =>
+export const setupPassword = (
+  username: string,
+  password: string,
+  setupToken?: string,
+) =>
   request<{ success: boolean; username: string }>("/auth/setup", {
     ...json({ username, password }),
+    ...(setupToken
+      ? { headers: { "X-Setup-Token": setupToken } }
+      : {}),
   });
 
 export const verifyPassword = (username: string, password: string) =>

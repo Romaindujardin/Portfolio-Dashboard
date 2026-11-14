@@ -277,7 +277,7 @@ class DatabaseManager {
     return id;
   }
 
-  updateWallet(id, wallet) {
+  updateWallet(id, wallet, userId = null) {
     const db = this.getDatabase();
     // Whitelist des colonnes autorisées (protection contre l'injection SQL par nom de champ)
     const allowed = [
@@ -294,20 +294,33 @@ class DatabaseManager {
     const setClause = fields.map((field) => `${field} = ?`).join(", ");
     const values = fields.map((field) => wallet[field]);
 
-    const stmt = db.prepare(`
-      UPDATE wallets 
-      SET ${setClause}
-      WHERE id = ?
-    `);
+    // userId est optionnel pour les appels internes déjà vérifiés, mais les
+    // routes HTTP le fournissent systématiquement : la mise à jour reste alors
+    // bornée au propriétaire, même en cas de régression du contrôle amont.
+    const stmt = userId
+      ? db.prepare(`
+          UPDATE wallets
+          SET ${setClause}
+          WHERE id = ? AND user_id = ?
+        `)
+      : db.prepare(`
+          UPDATE wallets
+          SET ${setClause}
+          WHERE id = ?
+        `);
 
-    const result = stmt.run(...values, id);
+    const result = userId
+      ? stmt.run(...values, id, userId)
+      : stmt.run(...values, id);
     return result.changes > 0;
   }
 
-  deleteWallet(id) {
+  deleteWallet(id, userId = null) {
     const db = this.getDatabase();
-    const stmt = db.prepare("DELETE FROM wallets WHERE id = ?");
-    const result = stmt.run(id);
+    const stmt = userId
+      ? db.prepare("DELETE FROM wallets WHERE id = ? AND user_id = ?")
+      : db.prepare("DELETE FROM wallets WHERE id = ?");
+    const result = userId ? stmt.run(id, userId) : stmt.run(id);
     return result.changes > 0;
   }
 
@@ -367,19 +380,29 @@ class DatabaseManager {
     return id;
   }
 
-  deleteWalletAssets(walletId) {
+  deleteWalletAssets(walletId, userId = null) {
     const db = this.getDatabase();
-    const stmt = db.prepare("DELETE FROM wallet_assets WHERE wallet_id = ?");
-    const result = stmt.run(walletId);
+    const stmt = userId
+      ? db.prepare(
+          "DELETE FROM wallet_assets WHERE wallet_id = ? AND wallet_id IN (SELECT id FROM wallets WHERE user_id = ?)",
+        )
+      : db.prepare("DELETE FROM wallet_assets WHERE wallet_id = ?");
+    const result = userId ? stmt.run(walletId, userId) : stmt.run(walletId);
     return result.changes > 0;
   }
 
-  updateWalletAssetVisibility(id, isHidden) {
+  updateWalletAssetVisibility(id, isHidden, userId = null) {
     const db = this.getDatabase();
-    const stmt = db.prepare(
-      "UPDATE wallet_assets SET is_hidden = ? WHERE id = ?",
-    );
-    const result = stmt.run(isHidden ? 1 : 0, id);
+    const stmt = userId
+      ? db.prepare(
+          "UPDATE wallet_assets SET is_hidden = ? WHERE id = ? AND wallet_id IN (SELECT id FROM wallets WHERE user_id = ?)",
+        )
+      : db.prepare(
+          "UPDATE wallet_assets SET is_hidden = ? WHERE id = ?",
+        );
+    const result = userId
+      ? stmt.run(isHidden ? 1 : 0, id, userId)
+      : stmt.run(isHidden ? 1 : 0, id);
     return result.changes > 0;
   }
 
@@ -444,18 +467,29 @@ class DatabaseManager {
     return id;
   }
 
-  deleteWalletNFTs(walletId) {
+  deleteWalletNFTs(walletId, userId = null) {
     const db = this.getDatabase();
-    const stmt = db.prepare("DELETE FROM wallet_nfts WHERE wallet_id = ?");
-    stmt.run(walletId);
+    const stmt = userId
+      ? db.prepare(
+          "DELETE FROM wallet_nfts WHERE wallet_id = ? AND wallet_id IN (SELECT id FROM wallets WHERE user_id = ?)",
+        )
+      : db.prepare("DELETE FROM wallet_nfts WHERE wallet_id = ?");
+    if (userId) stmt.run(walletId, userId);
+    else stmt.run(walletId);
   }
 
-  updateWalletNFTVisibility(id, isHidden) {
+  updateWalletNFTVisibility(id, isHidden, userId = null) {
     const db = this.getDatabase();
-    const stmt = db.prepare(
-      "UPDATE wallet_nfts SET is_hidden = ? WHERE id = ?",
-    );
-    const result = stmt.run(isHidden ? 1 : 0, id);
+    const stmt = userId
+      ? db.prepare(
+          "UPDATE wallet_nfts SET is_hidden = ? WHERE id = ? AND wallet_id IN (SELECT id FROM wallets WHERE user_id = ?)",
+        )
+      : db.prepare(
+          "UPDATE wallet_nfts SET is_hidden = ? WHERE id = ?",
+        );
+    const result = userId
+      ? stmt.run(isHidden ? 1 : 0, id, userId)
+      : stmt.run(isHidden ? 1 : 0, id);
     return result.changes > 0;
   }
 
