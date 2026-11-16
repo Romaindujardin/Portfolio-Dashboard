@@ -321,7 +321,7 @@ export class SyncService {
         status: hasErrors ? "partial" : "success",
         accountsSynced,
         transactionsImported,
-        error: hasErrors ? JSON.stringify(errors) : null,
+        errors: hasErrors ? errors : null,
       });
 
       return {

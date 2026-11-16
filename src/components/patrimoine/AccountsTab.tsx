@@ -85,6 +85,8 @@ interface AccountsTabProps {
   userId: string;
   accounts: PortfolioAccount[];
   holdings?: Holding[];
+  /** Taux de change source -> EUR exposés par /overview. */
+  fxRates?: Record<string, number>;
   onReload: () => Promise<void>;
   notify: Notify;
 }
@@ -150,10 +152,21 @@ const resolveBankName = (account: PortfolioAccount | null): string | undefined =
   return account.name || undefined;
 };
 
+const fxRateToEur = (
+  fxRates: Record<string, number> | undefined,
+  currency?: string | null,
+): number => {
+  const code = String(currency || "EUR").toUpperCase();
+  if (code === "EUR") return 1;
+  const rate = Number(fxRates?.[code]);
+  return Number.isFinite(rate) && rate > 0 ? rate : 1;
+};
+
 const AccountsTab: React.FC<AccountsTabProps> = ({
   userId,
   accounts,
   holdings = [],
+  fxRates,
   onReload,
   notify,
 }) => {
@@ -572,11 +585,14 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
 
   const total = useMemo(
     () =>
-      visibleAccounts.reduce(
-        (sum, account) => sum + (account.type === "LOAN" ? -Math.abs(account.balance) : account.balance),
-        0,
-      ),
-    [visibleAccounts],
+      visibleAccounts.reduce((sum, account) => {
+        const amount =
+          account.type === "LOAN"
+            ? -Math.abs(account.balance)
+            : account.balance;
+        return sum + amount * fxRateToEur(fxRates, account.currency);
+      }, 0),
+    [visibleAccounts, fxRates],
   );
 
   const handleCreate = async () => {

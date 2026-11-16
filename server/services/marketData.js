@@ -7,6 +7,10 @@ import { round2 } from "../lib/validate.js";
 const YAHOO_BASE = "https://query1.finance.yahoo.com";
 const OPENFIGI_BASE = "https://api.openfigi.com";
 const CACHE_TTL_MS = 15 * 60 * 1000;
+// Un échec de taux est mis en cache plus brièvement qu'un succès : on évite de
+// rappeler Yahoo à chaque overview pour une devise indisponible, tout en
+// permettant une reprise rapide après une panne passagère.
+const FX_FAILURE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_VERIFIED_CANDIDATES = 3;
 
@@ -79,7 +83,18 @@ const fetchJson = async (url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) => {
 
 const fxCache = new Map();
 
-const getFxRateToEur = async (currency) => {
+/**
+ * Normalise un code devise pour la table de taux. Les pences britanniques
+ * (`GBp`/`GBX`) sont distinguées du pound (`GBP`).
+ */
+export const normalizeCurrencyCode = (currency) => {
+  const clean = String(currency || "").trim();
+  if (!clean) return "EUR";
+  if (clean === "GBp" || clean.toUpperCase() === "GBX") return "GBX";
+  return clean.toUpperCase();
+};
+
+export const getFxRateToEur = async (currency) => {
   const code = String(currency || "").trim();
   if (!code || code.toUpperCase() === "EUR") return 1;
   if (code === "GBp" || code.toUpperCase() === "GBX") {
@@ -88,7 +103,16 @@ const getFxRateToEur = async (currency) => {
   }
   const upper = code.toUpperCase();
   const cached = fxCache.get(upper);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.rate;
+  if (cached) {
+    const ttl = cached.rate > 0 ? CACHE_TTL_MS : FX_FAILURE_TTL_MS;
+    if (Date.now() - cached.at < ttl) {
+      if (cached.rate > 0) return cached.rate;
+      throw new MarketDataError(
+        `Taux de change ${upper}→EUR indisponible : ${cached.error || "échec précédent"}`,
+        { code: "FX_UNAVAILABLE", details: { currency: upper, cached: true } },
+      );
+    }
+  }
 
   try {
     const payload = await fetchJson(
@@ -99,6 +123,11 @@ const getFxRateToEur = async (currency) => {
     fxCache.set(upper, { rate, at: Date.now() });
     return rate;
   } catch (error) {
+    fxCache.set(upper, {
+      rate: null,
+      at: Date.now(),
+      error: error.message,
+    });
     throw new MarketDataError(
       `Taux de change ${upper}→EUR indisponible : ${error.message}`,
       { code: "FX_UNAVAILABLE", details: { currency: upper } },
@@ -324,6 +353,37 @@ export const convertBoursoSymbolToYahoo = (symbol) => {
 export class MarketDataService {
   constructor({ repository } = {}) {
     this.repository = repository;
+  }
+
+  /** Taux de change asynchrone (Yahoo Finance, cache 15 minutes). */
+  async getFxRateToEur(currency) {
+    return getFxRateToEur(currency);
+  }
+
+  /**
+   * Précharge plusieurs devises en parallèle. Les devises indisponibles sont
+   * simplement absentes de la map : `getOverview` les valorisera en 1:1 et les
+   * signalera dans `fx.missing`, sans interrompre l'affichage du patrimoine.
+   */
+  async preloadFxRates(currencies = []) {
+    const unique = [
+      ...new Set(
+        (currencies || [])
+          .map(normalizeCurrencyCode)
+          .filter((code) => code && code !== "EUR"),
+      ),
+    ];
+    const rates = { EUR: 1 };
+    if (unique.length === 0) return rates;
+    const settled = await Promise.allSettled(
+      unique.map(async (code) => [code, await this.getFxRateToEur(code)]),
+    );
+    for (const entry of settled) {
+      if (entry.status !== "fulfilled") continue;
+      const [code, rate] = entry.value;
+      if (Number.isFinite(rate) && rate > 0) rates[code] = rate;
+    }
+    return rates;
   }
 
   async getQuote(ticker, { force = false } = {}) {

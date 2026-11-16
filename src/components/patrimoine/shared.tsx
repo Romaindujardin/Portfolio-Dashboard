@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertCircle, CheckCircle2, Loader2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 import type { PortfolioAccountType } from "../../types/portfolio";
 import {
   formatMoney as formatMoneyUtil,
@@ -235,6 +235,31 @@ export const SuccessBanner: React.FC<{ message: string; onClose?: () => void }> 
     )}
   </div>
 );
+
+/**
+ * Signale les devises pour lesquelles aucun taux de change n'a pu être obtenu.
+ * Le serveur les valorise à parité 1:1 pour ne pas bloquer l'affichage.
+ */
+export const FxWarning: React.FC<{ currencies?: string[] | null }> = ({
+  currencies,
+}) => {
+  if (!currencies || currencies.length === 0) return null;
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)] px-3 py-2 text-xs text-[#fbbf24]">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+      <div className="flex-1">
+        <p className="font-medium">
+          Taux de change indisponible pour {currencies.join(", ")}
+        </p>
+        <p className="mt-0.5 text-[11px] text-[#d4a35a]">
+          Les montants dans ces devises sont temporairement convertis à parité
+          1:1 avec l'euro. Le patrimoine peut rester inexact jusqu'au prochain
+          rafraîchissement.
+        </p>
+      </div>
+    </div>
+  );
+};
 
 // ─── Modale ─────────────────────────────────────────────────────────────────
 

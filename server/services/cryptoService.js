@@ -8,7 +8,6 @@
 //  - Cotations EUR en direct via CoinGecko & Binance
 
 import crypto from "crypto";
-import { v4 as uuidv4 } from "uuid";
 import { nowIso, round2 } from "../lib/validate.js";
 import { decryptJson } from "../lib/secrets.js";
 import { getUserSecret, setUserSecret } from "./userSecretsService.js";
@@ -16,6 +15,60 @@ import { getUserSecret, setUserSecret } from "./userSecretsService.js";
 const COINGECKO_BASE = "https://api.coingecko.com/api/v3";
 const BINANCE_BASE = "https://api.binance.com";
 const TIMEOUT_MS = 15000;
+
+/**
+ * Erreur de récupération crypto. Elle est levée AVANT toute écriture afin de
+ * ne jamais remplacer des positions existantes par un résultat partiel.
+ */
+export class CryptoFetchError extends Error {
+  constructor(message, { code = "CRYPTO_FETCH_FAILED", details = null } = {}) {
+    super(message);
+    this.name = "CryptoFetchError";
+    this.status = 502;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+// Certains cours peuvent manquer temporairement : les stablecoins restent
+// valorisés avec une approximation prudente plutôt qu'à zéro.
+const STABLECOIN_EUR_FALLBACK = {
+  USDT: 0.92,
+  USDC: 0.92,
+  DAI: 0.92,
+  SUSD: 0.92,
+  EURC: 1,
+};
+
+/**
+ * Vérifie que chaque position détenue possède un cours exploitable.
+ * Un cours manquant ne doit jamais faire disparaître une position.
+ */
+const requireQuotes = (symbols, quotes, { context, fallbacks = {} } = {}) => {
+  const resolved = { ...(quotes || {}) };
+  const missing = [];
+  for (const symbol of symbols) {
+    const current = Number(resolved[symbol]);
+    if (Number.isFinite(current) && current > 0) continue;
+    const fallback = Number(fallbacks[symbol]);
+    if (Number.isFinite(fallback) && fallback > 0) {
+      resolved[symbol] = fallback;
+      continue;
+    }
+    missing.push(symbol);
+  }
+  if (missing.length > 0) {
+    throw new CryptoFetchError(
+      `Cours indisponibles pour ${missing.join(", ")} (${context}). ` +
+        "Synchronisation annulée pour préserver les positions existantes.",
+      {
+        code: "CRYPTO_QUOTES_UNAVAILABLE",
+        details: { context, missing },
+      },
+    );
+  }
+  return resolved;
+};
 
 // Mapping des symboles courants vers l'identifiant CoinGecko
 const COINGECKO_IDS = {
@@ -267,7 +320,10 @@ export async function fetchCryptoQuotes(symbols = []) {
  */
 export async function fetchBinanceHoldings({ apiKey, apiSecret }) {
   if (!apiKey || !apiSecret) {
-    throw new Error("Clé API et Clé Secrète Binance requises");
+    throw new CryptoFetchError(
+      "Clé API et Clé Secrète Binance requises. Synchronisation annulée.",
+      { code: "CRYPTO_BINANCE_KEYS_MISSING" },
+    );
   }
 
   const timestamp = Date.now();
@@ -278,32 +334,76 @@ export async function fetchBinanceHoldings({ apiKey, apiSecret }) {
     .digest("hex");
 
   const url = `${BINANCE_BASE}/api/v3/account?${queryString}&signature=${signature}`;
-  const response = await fetch(url, {
-    headers: {
-      "X-MBX-APIKEY": apiKey,
-    },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Erreur Binance API (${response.status}) : ${errText}`);
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "X-MBX-APIKEY": apiKey,
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new CryptoFetchError(
+      `Binance injoignable : ${error.message}. Synchronisation annulée.`,
+      { code: "CRYPTO_BINANCE_NETWORK" },
+    );
   }
 
-  const data = await response.json();
-  const balances = (data.balances || [])
-    .map((b) => ({
-      symbol: b.asset.toUpperCase(),
-      quantity: parseFloat(b.free) + parseFloat(b.locked),
-    }))
-    .filter((b) => b.quantity > 0.00000001);
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new CryptoFetchError(
+      `Erreur Binance API (${response.status}) : ${errText || "réponse vide"}. ` +
+        "Synchronisation annulée.",
+      {
+        code: "CRYPTO_BINANCE_API_ERROR",
+        details: { status: response.status },
+      },
+    );
+  }
 
-  // Prix en direct
-  const quotes = await fetchCryptoQuotes(balances.map((b) => b.symbol));
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw new CryptoFetchError(
+      `Réponse Binance illisible : ${error.message}. Synchronisation annulée.`,
+      { code: "CRYPTO_BINANCE_INVALID_JSON" },
+    );
+  }
+  if (!Array.isArray(data.balances)) {
+    throw new CryptoFetchError(
+      "Réponse Binance invalide : liste de soldes absente. Synchronisation annulée.",
+      { code: "CRYPTO_BINANCE_INVALID_RESPONSE" },
+    );
+  }
+  const balances = [];
+  for (const b of data.balances) {
+    const symbol = String(b.asset || "").toUpperCase();
+    const quantity = parseFloat(b.free) + parseFloat(b.locked);
+    if (!Number.isFinite(quantity) || quantity < 0) {
+      throw new CryptoFetchError(
+        `Solde Binance invalide pour ${symbol || "un actif"}. Synchronisation annulée.`,
+        { code: "CRYPTO_BINANCE_INVALID_BALANCE" },
+      );
+    }
+    if (symbol && quantity > 0.00000001) {
+      balances.push({ symbol, quantity });
+    }
+  }
+
+  if (balances.length === 0) return [];
+
+  // Prix en direct : un cours manquant annule la synchronisation.
+  const symbols = balances.map((b) => b.symbol);
+  const quotes = requireQuotes(
+    symbols,
+    await fetchCryptoQuotes(symbols),
+    { context: "Binance", fallbacks: STABLECOIN_EUR_FALLBACK },
+  );
 
   return balances
     .map((b) => {
-      const price = quotes[b.symbol] || 0;
+      const price = Number(quotes[b.symbol]);
       return {
         ticker: b.symbol,
         name: b.symbol,
@@ -327,6 +427,7 @@ export async function fetchEvmHoldings(address) {
   const cleanAddr = address.trim();
   const pad = padAddress(cleanAddr);
   const aggregated = {}; // symbol -> { quantity, name }
+  const failedNetworks = [];
 
   await Promise.allSettled(
     EVM_NETWORKS.map(async (net) => {
@@ -348,53 +449,86 @@ export async function fetchEvmHoldings(address) {
           signal: AbortSignal.timeout(8000),
         });
 
-        if (!res.ok) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (!Array.isArray(data)) return;
+        if (!Array.isArray(data)) throw new Error("réponse JSON-RPC invalide");
+        const rpcError = data.find((item) => item?.error);
+        if (rpcError) {
+          throw new Error(
+            rpcError.error?.message || "erreur JSON-RPC renvoyée par le nœud",
+          );
+        }
+        const resultsById = new Map(
+          data
+            .filter((item) => item && typeof item.id === "number")
+            .map((item) => [item.id, item]),
+        );
+        const parseQuantity = (value, label) => {
+          if (typeof value !== "string" || !/^0x[0-9a-fA-F]*$/.test(value)) {
+            throw new Error(`réponse JSON-RPC invalide pour ${label}`);
+          }
+          return value === "0x" ? 0n : BigInt(value);
+        };
 
-        for (const item of data) {
-          if (item.id === 0 && item.result) {
-            const bal = Number(BigInt(item.result)) / 1e18;
-            if (bal > 0.00001) {
-              if (!aggregated[net.symbol]) {
-                aggregated[net.symbol] = { quantity: 0, name: net.symbol };
-              }
-              aggregated[net.symbol].quantity += bal;
+        const native = resultsById.get(0);
+        if (!native || typeof native.result !== "string") {
+          throw new Error("réponse JSON-RPC incomplète (solde natif)");
+        }
+        const nativeBalance = parseQuantity(native.result, net.symbol);
+        const bal = Number(nativeBalance) / 1e18;
+        if (bal > 0.00001) {
+          if (!aggregated[net.symbol]) {
+            aggregated[net.symbol] = { quantity: 0, name: net.symbol };
+          }
+          aggregated[net.symbol].quantity += bal;
+        }
+
+        for (const [index, tok] of net.tokens.entries()) {
+          const item = resultsById.get(index + 1);
+          if (!item || typeof item.result !== "string") {
+            throw new Error(`réponse JSON-RPC incomplète pour ${tok.ticker}`);
+          }
+          const raw = parseQuantity(item.result, tok.ticker);
+          const val = Number(raw) / Math.pow(10, tok.decimals);
+          if (val > 0.00001) {
+            if (!aggregated[tok.ticker]) {
+              aggregated[tok.ticker] = { quantity: 0, name: tok.name };
             }
-          } else if (item.id > 0 && item.result && item.result !== "0x" && item.result !== "0x0") {
-            const tok = net.tokens[item.id - 1];
-            if (!tok) continue;
-            try {
-              const raw = BigInt(item.result);
-              const val = Number(raw) / Math.pow(10, tok.decimals);
-              if (val > 0.00001) {
-                if (!aggregated[tok.ticker]) {
-                  aggregated[tok.ticker] = { quantity: 0, name: tok.name };
-                }
-                aggregated[tok.ticker].quantity += val;
-              }
-            } catch (_) {}
+            aggregated[tok.ticker].quantity += val;
           }
         }
-      } catch (err) {
-        // Un RPC qui échoue ne bloque pas les autres chaînes
+      } catch (error) {
+        // Une chaîne en échec rend le résultat partiel : on annulera la
+        // synchronisation complète plutôt que de supprimer ses positions.
+        failedNetworks.push(`${net.name}: ${error.message}`);
       }
     }),
   );
 
+  if (failedNetworks.length > 0) {
+    throw new CryptoFetchError(
+      `Récupération EVM incomplète (${failedNetworks.length}/${EVM_NETWORKS.length} réseau(x) en échec). ` +
+        "Synchronisation annulée pour préserver les positions existantes.",
+      {
+        code: "CRYPTO_EVM_PARTIAL",
+        details: { failedNetworks },
+      },
+    );
+  }
+
   const symbols = Object.keys(aggregated);
   if (symbols.length === 0) return [];
 
-  const quotes = await fetchCryptoQuotes(symbols);
+  const quotes = requireQuotes(
+    symbols,
+    await fetchCryptoQuotes(symbols),
+    { context: "EVM", fallbacks: STABLECOIN_EUR_FALLBACK },
+  );
 
   return symbols
     .map((symbol) => {
       const { quantity, name } = aggregated[symbol];
-      let price = quotes[symbol] || 0;
-      if (price === 0) {
-        if (["USDT", "USDC", "DAI", "SUSD"].includes(symbol)) price = 0.92;
-        if (symbol === "EURC") price = 1.0;
-      }
+      const price = Number(quotes[symbol]);
       return {
         ticker: symbol,
         name,
@@ -419,30 +553,64 @@ export async function fetchHyperliquidHoldings(address) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "spotClearinghouseState", user: cleanAddr }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
-    }).catch(() => null),
+    }),
     fetch("https://api.hyperliquid.xyz/info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "allMids" }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
-    }).catch(() => null),
+    }),
     fetch("https://api.hyperliquid.xyz/info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "spotMetaAndAssetCtxs" }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
-    }).catch(() => null),
+    }),
   ]);
 
-  const spotData = spotRes?.ok ? await spotRes.json() : null;
-  const mids = midsRes?.ok ? await midsRes.json() : {};
-  const meta = metaRes?.ok ? await metaRes.json() : null;
-  const tokens = meta?.[0]?.tokens || [];
-  const ctxs = meta?.[1] || [];
+  if (!spotRes?.ok || !midsRes?.ok || !metaRes?.ok) {
+    throw new CryptoFetchError(
+      "API Hyperliquid indisponible. Synchronisation annulée pour préserver les positions existantes.",
+      {
+        code: "CRYPTO_HYPERLIQUID_UNAVAILABLE",
+        details: {
+          spot: spotRes?.status ?? null,
+          mids: midsRes?.status ?? null,
+          meta: metaRes?.status ?? null,
+        },
+      },
+    );
+  }
+
+  const spotData = await spotRes.json();
+  const mids = await midsRes.json();
+  const meta = await metaRes.json();
+  if (
+    !Array.isArray(spotData?.balances) ||
+    !mids ||
+    typeof mids !== "object" ||
+    Array.isArray(mids) ||
+    !Array.isArray(meta) ||
+    !Array.isArray(meta?.[0]?.tokens) ||
+    !Array.isArray(meta?.[1])
+  ) {
+    throw new CryptoFetchError(
+      "Réponse Hyperliquid invalide. Synchronisation annulée pour préserver les positions existantes.",
+      { code: "CRYPTO_HYPERLIQUID_INVALID_RESPONSE" },
+    );
+  }
+  const tokens = meta[0].tokens;
+  const ctxs = meta[1];
 
   const rawHoldings = [];
-  for (const b of spotData?.balances || []) {
+  for (const b of spotData.balances) {
     const qty = parseFloat(b.total || 0);
+    if (!Number.isFinite(qty) || qty < 0) {
+      throw new CryptoFetchError(
+        `Solde Hyperliquid invalide pour ${b.coin || "un actif"}. Synchronisation annulée.`,
+        { code: "CRYPTO_HYPERLIQUID_INVALID_BALANCE" },
+      );
+    }
     if (qty <= 0.000001) continue;
     let usdPrice = 0;
     if (b.coin === "USDC") {
@@ -469,27 +637,46 @@ export async function fetchHyperliquidHoldings(address) {
 
   if (rawHoldings.length === 0) return [];
 
-  // Obtenir les cours EUR
+  // Obtenir les cours EUR. Le taux USDC sert de repli pour les actifs dont
+  // seul le prix USD est connu ; un actif sans aucun cours annule la sync.
   const tickers = rawHoldings.map((h) => h.ticker);
   const quotes = await fetchCryptoQuotes([...tickers, "USDC"]);
-  const usdToEur = quotes["USDC"] > 0 ? quotes["USDC"] : 0.92;
-
-  return rawHoldings
-    .map((h) => {
-      let priceEur = quotes[h.ticker];
-      if (!priceEur || priceEur <= 0) {
+  const usdToEur =
+    Number(quotes["USDC"]) > 0 ? Number(quotes["USDC"]) : 0.92;
+  const unpriced = [];
+  const priced = rawHoldings.map((h) => {
+    let priceEur = Number(quotes[h.ticker]);
+    if (!Number.isFinite(priceEur) || priceEur <= 0) {
+      if (h.usdPrice > 0) {
         priceEur = h.usdPrice * usdToEur;
         if (priceEur >= 0.01) priceEur = round2(priceEur);
       }
-      return {
-        ticker: h.ticker,
-        name: h.name,
-        quantity: h.quantity,
-        price: priceEur,
-        value: round2(h.quantity * priceEur),
-      };
-    })
-    .filter((h) => h.quantity > 0.000001);
+    }
+    if (!Number.isFinite(priceEur) || priceEur <= 0) {
+      unpriced.push(h.ticker);
+      priceEur = 0;
+    }
+    return {
+      ticker: h.ticker,
+      name: h.name,
+      quantity: h.quantity,
+      price: priceEur,
+      value: round2(h.quantity * priceEur),
+    };
+  });
+
+  if (unpriced.length > 0) {
+    throw new CryptoFetchError(
+      `Cours indisponibles pour ${unpriced.join(", ")} (Hyperliquid). ` +
+        "Synchronisation annulée pour préserver les positions existantes.",
+      {
+        code: "CRYPTO_QUOTES_UNAVAILABLE",
+        details: { context: "Hyperliquid", missing: unpriced },
+      },
+    );
+  }
+
+  return priced.filter((h) => h.quantity > 0.000001);
 }
 
 /**
@@ -498,56 +685,91 @@ export async function fetchHyperliquidHoldings(address) {
 export async function fetchAptosHoldings(address) {
   if (!address) return [];
   const cleanAddr = address.trim();
+  let res;
   try {
-    const res = await fetch(
+    res = await fetch(
       `https://fullnode.mainnet.aptoslabs.com/v1/accounts/${cleanAddr}/resources`,
       { signal: AbortSignal.timeout(TIMEOUT_MS) }
     );
-    if (!res.ok) return [];
-    const resources = await res.json();
-    if (!Array.isArray(resources)) return [];
+  } catch (error) {
+    throw new CryptoFetchError(
+      `Nœud Aptos injoignable (${error.message}). Synchronisation annulée pour préserver les positions existantes.`,
+      { code: "CRYPTO_APTOS_UNAVAILABLE" },
+    );
+  }
+  if (!res.ok) {
+    throw new CryptoFetchError(
+      `Erreur Aptos HTTP ${res.status}. Synchronisation annulée pour préserver les positions existantes.`,
+      { code: "CRYPTO_APTOS_UNAVAILABLE", details: { status: res.status } },
+    );
+  }
+  let resources;
+  try {
+    resources = await res.json();
+  } catch (error) {
+    throw new CryptoFetchError(
+      `Réponse Aptos illisible (${error.message}). Synchronisation annulée.`,
+      { code: "CRYPTO_APTOS_INVALID_RESPONSE" },
+    );
+  }
+  if (!Array.isArray(resources)) {
+    throw new CryptoFetchError(
+      "Réponse Aptos invalide : liste de ressources absente. Synchronisation annulée.",
+      { code: "CRYPTO_APTOS_INVALID_RESPONSE" },
+    );
+  }
 
-    const coinStores = resources.filter((r) => r.type?.startsWith("0x1::coin::CoinStore<"));
-    const rawList = [];
+  const coinStores = resources.filter((r) => r.type?.startsWith("0x1::coin::CoinStore<"));
+  const rawList = [];
 
-    for (const cs of coinStores) {
-      const match = cs.type.match(/<(.+)>/);
-      if (!match) continue;
-      const coinType = match[1];
-      const rawVal = BigInt(cs.data?.coin?.value || "0");
-      let decimals = 8;
-      let symbol = "APT";
+  for (const cs of coinStores) {
+    const match = cs.type.match(/<(.+)>/);
+    if (!match) continue;
+    const coinType = match[1];
+    let rawVal;
+    try {
+      rawVal = BigInt(cs.data?.coin?.value || "0");
+    } catch {
+      throw new CryptoFetchError(
+        `Solde Aptos invalide pour ${coinType}. Synchronisation annulée.`,
+        { code: "CRYPTO_APTOS_INVALID_BALANCE" },
+      );
+    }
+    let decimals = 8;
+    let symbol = "APT";
 
-      if (coinType === "0x1::aptos_coin::AptosCoin") {
-        symbol = "APT";
-        decimals = 8;
-      } else {
-        const parts = coinType.split("::");
-        symbol = parts[parts.length - 1].toUpperCase();
-      }
-
-      const qty = Number(rawVal) / Math.pow(10, decimals);
-      if (qty > 0.0001) {
-        rawList.push({ ticker: symbol, name: symbol, quantity: qty });
-      }
+    if (coinType === "0x1::aptos_coin::AptosCoin") {
+      symbol = "APT";
+      decimals = 8;
+    } else {
+      const parts = coinType.split("::");
+      symbol = parts[parts.length - 1].toUpperCase();
     }
 
-    if (rawList.length === 0) return [];
-    const quotes = await fetchCryptoQuotes(rawList.map((h) => h.ticker));
-
-    return rawList.map((h) => {
-      const price = quotes[h.ticker] || 0;
-      return {
-        ticker: h.ticker,
-        name: h.name,
-        quantity: h.quantity,
-        price,
-        value: round2(h.quantity * price),
-      };
-    });
-  } catch (err) {
-    return [];
+    const qty = Number(rawVal) / Math.pow(10, decimals);
+    if (qty > 0.0001) {
+      rawList.push({ ticker: symbol, name: symbol, quantity: qty });
+    }
   }
+
+  if (rawList.length === 0) return [];
+  const tickers = rawList.map((h) => h.ticker);
+  const quotes = requireQuotes(
+    tickers,
+    await fetchCryptoQuotes(tickers),
+    { context: "Aptos", fallbacks: STABLECOIN_EUR_FALLBACK },
+  );
+
+  return rawList.map((h) => {
+    const price = Number(quotes[h.ticker]);
+    return {
+      ticker: h.ticker,
+      name: h.name,
+      quantity: h.quantity,
+      price,
+      value: round2(h.quantity * price),
+    };
+  });
 }
 
 /**
@@ -556,15 +778,41 @@ export async function fetchAptosHoldings(address) {
 export async function fetchBitcoinHoldings(address) {
   const cleanAddr = address.trim();
   const url = `https://blockstream.info/api/address/${cleanAddr}`;
-  const data = await fetchWithTimeout(url);
+  let data;
+  try {
+    data = await fetchWithTimeout(url);
+  } catch (error) {
+    throw new CryptoFetchError(
+      `Blockstream injoignable (${error.message}). Synchronisation annulée pour préserver les positions existantes.`,
+      { code: "CRYPTO_BITCOIN_UNAVAILABLE" },
+    );
+  }
 
-  const funded = Number(data?.chain_stats?.funded_txo_sum || 0);
-  const spent = Number(data?.chain_stats?.spent_txo_sum || 0);
+  const funded = Number(data?.chain_stats?.funded_txo_sum);
+  const spent = Number(data?.chain_stats?.spent_txo_sum);
+  if (
+    !data ||
+    typeof data.chain_stats !== "object" ||
+    !Number.isFinite(funded) ||
+    !Number.isFinite(spent) ||
+    funded < 0 ||
+    spent < 0
+  ) {
+    throw new CryptoFetchError(
+      "Réponse Blockstream invalide. Synchronisation annulée pour préserver les positions existantes.",
+      { code: "CRYPTO_BITCOIN_INVALID_RESPONSE" },
+    );
+  }
   const satoshis = funded - spent;
   const btc = satoshis / 1e8;
+  if (btc <= 0) return [];
 
-  const quotes = await fetchCryptoQuotes(["BTC"]);
-  const price = quotes["BTC"] || 0;
+  const quotes = requireQuotes(
+    ["BTC"],
+    await fetchCryptoQuotes(["BTC"]),
+    { context: "Bitcoin" },
+  );
+  const price = Number(quotes["BTC"]);
 
   return [
     {
@@ -582,21 +830,48 @@ export async function fetchBitcoinHoldings(address) {
  */
 export async function fetchSolanaHoldings(address) {
   const cleanAddr = address.trim();
-  const res = await fetch("https://api.mainnet-beta.solana.com", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "getBalance",
-      params: [cleanAddr],
-    }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let res;
+  try {
+    res = await fetch("https://api.mainnet-beta.solana.com", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getBalance",
+        params: [cleanAddr],
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new CryptoFetchError(
+      `RPC Solana injoignable (${error.message}). Synchronisation annulée pour préserver les positions existantes.`,
+      { code: "CRYPTO_SOLANA_UNAVAILABLE" },
+    );
+  }
 
-  if (!res.ok) throw new Error("Erreur RPC Solana");
-  const json = await res.json();
-  const lamports = Number(json?.result?.value || 0);
+  if (!res.ok) {
+    throw new CryptoFetchError(
+      `Erreur RPC Solana HTTP ${res.status}. Synchronisation annulée pour préserver les positions existantes.`,
+      { code: "CRYPTO_SOLANA_UNAVAILABLE", details: { status: res.status } },
+    );
+  }
+  let json;
+  try {
+    json = await res.json();
+  } catch (error) {
+    throw new CryptoFetchError(
+      `Réponse Solana illisible (${error.message}). Synchronisation annulée.`,
+      { code: "CRYPTO_SOLANA_INVALID_RESPONSE" },
+    );
+  }
+  const lamports = Number(json?.result?.value);
+  if (!Number.isFinite(lamports) || lamports < 0) {
+    throw new CryptoFetchError(
+      "Réponse Solana invalide : solde natif absent. Synchronisation annulée.",
+      { code: "CRYPTO_SOLANA_INVALID_RESPONSE" },
+    );
+  }
   const sol = lamports / 1e9;
 
   const rawHoldings = [];
@@ -604,9 +879,11 @@ export async function fetchSolanaHoldings(address) {
     rawHoldings.push({ ticker: "SOL", name: "Solana", quantity: sol });
   }
 
-  // Jetons SPL courants via getTokenAccountsByOwner
+  // Jetons SPL courants via getTokenAccountsByOwner. Un échec de cette
+  // seconde requête rend le résultat partiel : on annule la synchronisation.
+  let splRes;
   try {
-    const splRes = await fetch("https://api.mainnet-beta.solana.com", {
+    splRes = await fetch("https://api.mainnet-beta.solana.com", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -621,39 +898,67 @@ export async function fetchSolanaHoldings(address) {
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (splRes.ok) {
-      const splJson = await splRes.json();
-      const accounts = splJson?.result?.value || [];
-      const KNOWN_SPL = {
-        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { ticker: "USDC", name: "USD Coin" },
-        Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: { ticker: "USDT", name: "Tether USD" },
-        DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263: { ticker: "BONK", name: "Bonk" },
-        JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN: { ticker: "JUP", name: "Jupiter" },
-        HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3: { ticker: "PYTH", name: "Pyth Network" },
-        rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof: { ticker: "RENDER", name: "Render" },
-      };
-      for (const a of accounts) {
-        const info = a.account?.data?.parsed?.info;
-        const mint = info?.mint;
-        const amount = Number(info?.tokenAmount?.uiAmount || 0);
-        if (amount > 0.0001 && KNOWN_SPL[mint]) {
-          const meta = KNOWN_SPL[mint];
-          rawHoldings.push({
-            ticker: meta.ticker,
-            name: meta.name,
-            quantity: amount,
-          });
-        }
-      }
+  } catch (error) {
+    throw new CryptoFetchError(
+      `RPC Solana (jetons SPL) injoignable (${error.message}). Synchronisation annulée.`,
+      { code: "CRYPTO_SOLANA_SPL_UNAVAILABLE" },
+    );
+  }
+  if (!splRes.ok) {
+    throw new CryptoFetchError(
+      `Erreur RPC Solana (jetons SPL) HTTP ${splRes.status}. Synchronisation annulée.`,
+      { code: "CRYPTO_SOLANA_SPL_UNAVAILABLE", details: { status: splRes.status } },
+    );
+  }
+  let splJson;
+  try {
+    splJson = await splRes.json();
+  } catch (error) {
+    throw new CryptoFetchError(
+      `Réponse Solana (jetons SPL) illisible (${error.message}). Synchronisation annulée.`,
+      { code: "CRYPTO_SOLANA_SPL_INVALID_RESPONSE" },
+    );
+  }
+  const accounts = splJson?.result?.value;
+  if (!Array.isArray(accounts)) {
+    throw new CryptoFetchError(
+      "Réponse Solana invalide : liste des jetons SPL absente. Synchronisation annulée.",
+      { code: "CRYPTO_SOLANA_SPL_INVALID_RESPONSE" },
+    );
+  }
+  const KNOWN_SPL = {
+    EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { ticker: "USDC", name: "USD Coin" },
+    Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: { ticker: "USDT", name: "Tether USD" },
+    DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263: { ticker: "BONK", name: "Bonk" },
+    JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN: { ticker: "JUP", name: "Jupiter" },
+    HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3: { ticker: "PYTH", name: "Pyth Network" },
+    rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof: { ticker: "RENDER", name: "Render" },
+  };
+  for (const a of accounts) {
+    const info = a.account?.data?.parsed?.info;
+    const mint = info?.mint;
+    const amount = Number(info?.tokenAmount?.uiAmount || 0);
+    if (amount > 0.0001 && KNOWN_SPL[mint]) {
+      const meta = KNOWN_SPL[mint];
+      rawHoldings.push({
+        ticker: meta.ticker,
+        name: meta.name,
+        quantity: amount,
+      });
     }
-  } catch (_) {}
+  }
 
   if (rawHoldings.length === 0) return [];
 
-  const quotes = await fetchCryptoQuotes(rawHoldings.map((h) => h.ticker));
+  const tickers = rawHoldings.map((h) => h.ticker);
+  const quotes = requireQuotes(
+    tickers,
+    await fetchCryptoQuotes(tickers),
+    { context: "Solana", fallbacks: STABLECOIN_EUR_FALLBACK },
+  );
   return rawHoldings
     .map((h) => {
-      const price = quotes[h.ticker] || 0;
+      const price = Number(quotes[h.ticker]);
       return {
         ticker: h.ticker,
         name: h.name,
@@ -709,8 +1014,9 @@ export async function syncCryptoAccount(repository, accountId, userId) {
     }
 
     if (!apiKey || !apiSecret) {
-      throw new Error(
+      throw new CryptoFetchError(
         "Clés API Binance non configurées. Renseignez-les dans les paramètres.",
+        { code: "CRYPTO_BINANCE_KEYS_MISSING" },
       );
     }
     holdings = await fetchBinanceHoldings({ apiKey, apiSecret });
@@ -724,6 +1030,19 @@ export async function syncCryptoAccount(repository, accountId, userId) {
       fetchEvmHoldings(rawAddr),
     ]);
 
+    // Hyperliquid et EVM contribuent tous deux aux positions. Un seul échec
+    // rend le résultat partiel : mieux vaut conserver l'état précédent.
+    if (hlRes.status === "rejected" || evmRes.status === "rejected") {
+      const failures = [hlRes, evmRes]
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason?.message || "échec inconnu");
+      throw new CryptoFetchError(
+        `Récupération Hyperliquid/EVM incomplète (${failures.join(" ; ")}). ` +
+          "Synchronisation annulée pour préserver les positions existantes.",
+        { code: "CRYPTO_HYPERLIQUID_PARTIAL" },
+      );
+    }
+
     const map = new Map();
     const addHoldings = (list) => {
       for (const h of list) {
@@ -736,8 +1055,8 @@ export async function syncCryptoAccount(repository, accountId, userId) {
         }
       }
     };
-    if (hlRes.status === "fulfilled") addHoldings(hlRes.value);
-    if (evmRes.status === "fulfilled") addHoldings(evmRes.value);
+    addHoldings(hlRes.value);
+    addHoldings(evmRes.value);
     holdings = Array.from(map.values());
   } else if (
     provider === "aptos" ||
@@ -767,7 +1086,11 @@ export async function syncCryptoAccount(repository, accountId, userId) {
     const quotes = await fetchCryptoQuotes(symbols);
 
     holdings = currentHoldings.map((h) => {
-      const price = quotes[h.ticker] ?? h.price ?? 0;
+      const quotedPrice = Number(quotes[h.ticker]);
+      const price =
+        Number.isFinite(quotedPrice) && quotedPrice > 0
+          ? quotedPrice
+          : h.price ?? 0;
       return {
         ticker: h.ticker,
         name: h.name || h.ticker,
@@ -779,44 +1102,66 @@ export async function syncCryptoAccount(repository, accountId, userId) {
     });
   }
 
-  // Mettre à jour les positions dans SQLite
-  // On supprime les anciennes pour remplacer par le snapshot exact
-  repository.db
-    .prepare("DELETE FROM holdings WHERE account_id = ? AND user_id = ?")
-    .run(account.id, userId);
-
-  let totalBalance = 0;
-  for (const h of holdings) {
-    totalBalance += h.value;
-    repository.upsertHolding(userId, account.id, {
-      ticker: h.ticker,
-      name: h.name,
-      quantity: h.quantity,
-      costBasis: h.costBasis ?? null,
-      price: h.price,
-      currency: "EUR",
-      lastPriceAt: nowIso(),
-    });
+  if (!Array.isArray(holdings)) {
+    throw new CryptoFetchError(
+      "Résultat de synchronisation invalide. Aucune position n'a été modifiée.",
+      { code: "CRYPTO_INVALID_RESULT" },
+    );
   }
 
-  totalBalance = round2(totalBalance);
+  // Une synchronisation réussie peut légitimement renvoyer un portefeuille
+  // vide. En revanche, toute erreur réseau ou cotation a déjà levé avant ce
+  // point. L'écriture est atomique : DELETE + upserts + compte + snapshot.
+  const applySync = repository.db.transaction(() => {
+    repository.db
+      .prepare("DELETE FROM holdings WHERE account_id = ? AND user_id = ?")
+      .run(account.id, userId);
 
-  // Mettre à jour le solde du compte et lastSyncAt
-  const updated = repository.updateAccount(account.id, userId, {
-    balance: totalBalance,
-    cashBalance: 0,
-    lastSyncAt: nowIso(),
+    let totalBalance = 0;
+    for (const h of holdings) {
+      const value = Number(h.value);
+      if (!Number.isFinite(value) || value < 0) {
+        throw new CryptoFetchError(
+          `Valorisation invalide pour ${h.ticker || "une position"}. ` +
+            "Aucune position n'a été modifiée.",
+          { code: "CRYPTO_INVALID_VALUATION" },
+        );
+      }
+      totalBalance += value;
+      repository.upsertHolding(userId, account.id, {
+        ticker: h.ticker,
+        name: h.name,
+        quantity: h.quantity,
+        costBasis: h.costBasis ?? null,
+        price: h.price,
+        currency: "EUR",
+        lastPriceAt: nowIso(),
+      });
+    }
+
+    totalBalance = round2(totalBalance);
+
+    // Mettre à jour le solde du compte et lastSyncAt
+    const updatedAccount = repository.updateAccount(account.id, userId, {
+      balance: totalBalance,
+      cashBalance: 0,
+      lastSyncAt: nowIso(),
+    });
+
+    // Sauvegarder un snapshot de solde pour la courbe historique
+    repository.saveSnapshot(
+      userId,
+      account.id,
+      nowIso().slice(0, 10),
+      totalBalance,
+      "EUR",
+      "crypto_sync",
+    );
+
+    return updatedAccount;
   });
 
-  // Sauvegarder un snapshot de solde pour la courbe historique
-  repository.saveSnapshot(
-    userId,
-    account.id,
-    nowIso().slice(0, 10),
-    totalBalance,
-    "EUR",
-    "crypto_sync",
-  );
+  const updated = applySync();
 
   return {
     account: updated,
@@ -838,7 +1183,12 @@ export async function syncAllCryptoAccounts(repository, userId) {
       const res = await syncCryptoAccount(repository, acc.id, userId);
       results.push({ accountId: acc.id, success: true, balance: res.account.balance });
     } catch (err) {
-      results.push({ accountId: acc.id, success: false, error: err.message });
+      results.push({
+        accountId: acc.id,
+        success: false,
+        error: err.message,
+        code: err.code || "CRYPTO_SYNC_ERROR",
+      });
     }
   }
 

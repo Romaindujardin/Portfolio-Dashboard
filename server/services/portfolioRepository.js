@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { nowIso, round2 } from "../lib/validate.js";
+import { normalizeCurrencyCode } from "./marketData.js";
 
 const parseJson = (value, fallback = null) => {
   if (!value) return fallback;
@@ -1071,13 +1072,43 @@ export class PortfolioRepository {
     return id;
   }
 
-  finishSyncRun(id, { status, accountsSynced = 0, transactionsImported = 0, error = null }) {
+  finishSyncRun(
+    id,
+    {
+      status,
+      accountsSynced = 0,
+      transactionsImported = 0,
+      error = null,
+      errors = null,
+    },
+  ) {
+    // `error` reste accepté pour un message unique ; `errors` reçoit la liste
+    // structurée des échecs par compte (anciennement sérialisée à la main).
+    let serializedError = error == null ? null : String(error);
+    if (Array.isArray(errors) && errors.length > 0) {
+      serializedError = JSON.stringify(
+        errors.map((entry) =>
+          typeof entry === "string"
+            ? entry
+            : entry?.error || entry?.message || String(entry),
+        ),
+      );
+    } else if (errors && !Array.isArray(errors) && typeof errors === "object") {
+      serializedError = JSON.stringify(errors);
+    }
     this.db
       .prepare(
         `UPDATE sync_runs SET status = ?, finished_at = ?, accounts_synced = ?,
          transactions_imported = ?, error = ? WHERE id = ?`,
       )
-      .run(status, nowIso(), accountsSynced, transactionsImported, error, id);
+      .run(
+        status,
+        nowIso(),
+        accountsSynced,
+        transactionsImported,
+        serializedError,
+        id,
+      );
   }
 
   listSyncRuns(userId, { connectionId, limit = 20 } = {}) {
@@ -1555,8 +1586,34 @@ export class PortfolioRepository {
    * de marché ; on ajoute leur valeur au solde du compte d'investissement.
    * Le solde d'un compte REAL_ESTATE / LOAN est déjà la valeur (ou la dette)
    * à jour : pas de double comptage.
+   *
+   * Toutes les valeurs sont agrégées en EUR. `fxRates` est une map
+   * { DEVISE: taux } préchargée de façon asynchrone par la route. Les taux
+   * effectivement utilisés sont renvoyés dans `fx.rates` ; une devise absente
+   * est convertie en 1:1 et signalée dans `fx.missing`.
    */
-  getOverview(userId) {
+  getOverview(userId, { fxRates = {} } = {}) {
+    const rawFxRates =
+      fxRates instanceof Map ? Object.fromEntries(fxRates.entries()) : fxRates || {};
+    const normalizedFxRates = { EUR: 1 };
+    for (const [currency, value] of Object.entries(rawFxRates)) {
+      const code = normalizeCurrencyCode(currency);
+      const rate = Number(value);
+      if (code && Number.isFinite(rate) && rate > 0) {
+        normalizedFxRates[code] = rate;
+      }
+    }
+
+    const missingFx = new Set();
+    const getRate = (currency) => {
+      const code = normalizeCurrencyCode(currency);
+      if (code === "EUR") return 1;
+      const rate = Number(normalizedFxRates[code]);
+      if (Number.isFinite(rate) && rate > 0) return rate;
+      missingFx.add(code);
+      return 1;
+    };
+
     const accounts = this.listAccounts(userId);
     const ownerships = this.listAllOwnerships(userId);
     const ownershipByAccount = new Map();
@@ -1579,9 +1636,14 @@ export class PortfolioRepository {
     const perOwner = {};
 
     for (const account of accounts) {
+      const accountRate = getRate(account.currency);
       const holdings = holdingsByAccount.get(account.id) || [];
       const holdingsValue = holdings.reduce(
-        (sum, holding) => sum + (holding.quantity || 0) * (holding.price || 0),
+        (sum, holding) =>
+          sum +
+          (holding.quantity || 0) *
+            (holding.price || 0) *
+            getRate(holding.currency || account.currency),
         0,
       );
       const isInvestment = ["PEA", "SECURITIES", "CRYPTO", "EMPLOYEE_SAVINGS"].includes(
@@ -1589,8 +1651,8 @@ export class PortfolioRepository {
       );
       const value =
         isInvestment && holdings.length > 0
-          ? (account.cashBalance ?? 0) + holdingsValue
-          : account.balance;
+          ? (account.cashBalance ?? 0) * accountRate + holdingsValue
+          : account.balance * accountRate;
 
       if (account.type === "LOAN" || value < 0) debts += Math.abs(value);
       else assets += value;
@@ -1629,6 +1691,11 @@ export class PortfolioRepository {
       perOwner: Object.fromEntries(
         Object.entries(perOwner).map(([name, value]) => [name, round2(value)]),
       ),
+      fx: {
+        base: "EUR",
+        rates: normalizedFxRates,
+        missing: [...missingFx].sort(),
+      },
       accounts: accounts.map((account) => ({
         ...account,
         holdings: holdingsByAccount.get(account.id) || [],

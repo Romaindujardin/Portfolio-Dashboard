@@ -253,14 +253,24 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       ...prev,
       redirectUri: prev.redirectUri || status.redirectUri || "",
     }));
-    if (!status.configured) setConfigOpen(true);
+    if (status.canManage === false) setConfigOpen(false);
+    else if (!status.configured) setConfigOpen(true);
   }, [status]);
 
   const configured = Boolean(status?.configured);
+  // Tant que le statut n'est pas chargé, aucun contrôle d'administration n'est
+  // affiché : le serveur reste seul juge des permissions.
+  const canManage = Boolean(status) && status?.canManage !== false;
 
   const runSearch = async () => {
     if (!configured) {
-      setConfigOpen(true);
+      if (canManage) {
+        setConfigOpen(true);
+      } else {
+        setSearchError(
+          "Aucune configuration Enable Banking n'est disponible. Contactez l'administrateur.",
+        );
+      }
       return;
     }
     setSearching(true);
@@ -299,6 +309,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   };
 
   const saveConfig = async () => {
+    if (!canManage) return;
     setConfigBusy(true);
     setConfigError("");
     try {
@@ -319,6 +330,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   };
 
   const removeConfig = async () => {
+    if (!canManage) return;
     if (!window.confirm("Supprimer les identifiants Enable Banking enregistrés ?")) return;
     try {
       await deleteIntegrationSettings();
@@ -430,10 +442,12 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <KeyRound className="h-3 w-3" /> À configurer
                 </Badge>
               )}
-              <Button size="sm" onClick={() => setConfigOpen((open) => !open)}>
-                {configOpen ? "Fermer" : configured ? "Modifier" : "Configurer"}
-              </Button>
-              {configured && (
+              {canManage && (
+                <Button size="sm" onClick={() => setConfigOpen((open) => !open)}>
+                  {configOpen ? "Fermer" : configured ? "Modifier" : "Configurer"}
+                </Button>
+              )}
+              {canManage && configured && (
                 <Button size="sm" variant="danger" onClick={removeConfig}>
                   <Trash2 className="h-3.5 w-3.5" /> Identifiants
                 </Button>
@@ -442,7 +456,15 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           }
         />
 
-        {!configured && !configOpen && (
+        {status && !canManage && (
+          <div className="mt-3 rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs text-[#b0b0b0]">
+            La configuration Enable Banking est globale et réservée à
+            l'administrateur de l'application. Vous pouvez utiliser une
+            configuration existante, mais pas la modifier ni la supprimer.
+          </div>
+        )}
+
+        {!configured && !configOpen && canManage && (
           <div className="mt-3 rounded-lg border border-[rgba(200,165,94,0.2)] bg-[rgba(200,165,94,0.05)] px-3 py-2 text-xs text-[#b0b0b0]">
             Renseignez l'application ID et la clé privée de votre application Enable
             Banking. Aucune donnée bancaire ne transite par un service tiers autre
@@ -450,7 +472,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           </div>
         )}
 
-        {configOpen && (
+        {configOpen && canManage && (
           <div className="mt-4 space-y-3">
             {configError && (
               <ErrorBanner message={configError} onClose={() => setConfigError("")} />

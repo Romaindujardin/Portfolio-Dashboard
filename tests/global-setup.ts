@@ -62,6 +62,9 @@ export async function setup() {
       DATABASE_PATH: dbPath,
       NODE_ENV: "test",
       AUTH_SETUP_TOKEN: SETUP_TOKEN,
+      // Le profil Romain est créé en premier par les tests : il est
+      // administrateur de la configuration Enable Banking globale.
+      ADMIN_USERS: "Romain",
     },
     stdio: ["ignore", logFd, logFd],
   });

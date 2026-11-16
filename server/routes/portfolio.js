@@ -49,6 +49,7 @@ import {
   setSessionCookie,
 } from "../lib/session.js";
 import { createRateLimiter } from "../lib/rateLimit.js";
+import { isAdminUser } from "../lib/admin.js";
 import {
   resolveSetupAuth,
   setupTokenMatches,
@@ -64,6 +65,7 @@ import {
 } from "../services/userSecretsService.js";
 import { deleteUserData } from "../services/userDataService.js";
 import {
+  CryptoFetchError,
   syncCryptoAccount,
   syncAllCryptoAccounts,
 } from "../services/cryptoService.js";
@@ -96,6 +98,19 @@ const requireSessionUserId = (req) => {
     throw new HttpError(401, "Authentification requise");
   }
   return req.sessionUser;
+};
+
+/**
+ * Les erreurs de récupération crypto sont des erreurs de fournisseur (502),
+ * pas des erreurs internes : la synchronisation a été annulée avant écriture.
+ */
+const replyCryptoError = (res, error) => {
+  if (!(error instanceof CryptoFetchError)) return false;
+  res.status(502).json({
+    error: error.message,
+    code: error.code || "CRYPTO_FETCH_FAILED",
+  });
+  return true;
 };
 
 const bodyUserId = (req) => {
@@ -211,6 +226,8 @@ export function createPortfolioRouter({
   db,
   enableBankingBaseUrl = null,
   setupAuth = resolveSetupAuth(),
+  adminUsers = null,
+  authRateLimits = {},
 } = {}) {
   if (!db) throw new Error("Base de données requise pour le routeur patrimoine");
   const router = express.Router();
@@ -228,6 +245,34 @@ export function createPortfolioRouter({
   const syncService = new SyncService({ repository, connector });
   const market = new MarketDataService({ repository });
   const realEstate = new RealEstateService({ repository });
+
+  const integrationStatus = (userId) => ({
+    ...connector.getStatus(),
+    canManage: isAdminUser(db, userId, { adminUsers }),
+  });
+
+  // Précharge les taux de change des devises réellement utilisées par les
+  // comptes et positions du profil. Une devise en échec est valorisée en 1:1
+  // et signalée dans overview.fx.missing.
+  const loadFxRates = async (userId) => {
+    const currencies = new Set();
+    for (const account of repository.listAccounts(userId)) {
+      if (account.currency) currencies.add(account.currency);
+    }
+    for (const holding of repository.listAllHoldings(userId)) {
+      if (holding.currency) currencies.add(holding.currency);
+    }
+    return market.preloadFxRates([...currencies]);
+  };
+
+  const requireIntegrationAdmin = (userId) => {
+    if (!isAdminUser(db, userId, { adminUsers })) {
+      throw new HttpError(
+        403,
+        "Seul un administrateur peut modifier la configuration Enable Banking globale.",
+      );
+    }
+  };
 
   /** Source de vérité d'un compte géré par un bien ou un prêt. */
   const managedAccountSource = (userId, account) => {
@@ -254,18 +299,28 @@ export function createPortfolioRouter({
     "/health",
     asyncHandler(async (req, res) => {
       const userId = queryUserId(req);
-      const overview = repository.getOverview(userId);
+      const fxRates = await loadFxRates(userId);
+      const overview = repository.getOverview(userId, { fxRates });
       res.json({
         ok: true,
         userId,
-        enableBanking: connector.getStatus(),
+        enableBanking: integrationStatus(userId),
         counts: overview.counts,
+        fx: overview.fx,
         timestamp: nowIso(),
       });
     }),
   );
 
   // ─── Authentification & Sécurité des profils ──────────────────────────────
+
+  // Aucune réponse d'authentification ne doit être mise en cache par un
+  // navigateur ou un proxy.
+  router.use("/auth", (req, res, next) => {
+    res.set("Cache-Control", "no-store");
+    res.set("Pragma", "no-cache");
+    next();
+  });
 
   const authKey = (req) =>
     `${req.ip || req.socket?.remoteAddress || "unknown"}:${String(
@@ -274,15 +329,32 @@ export function createPortfolioRouter({
       .trim()
       .slice(0, 64)
       .toLowerCase()}`;
+  // Limite par IP + profil : ralentit les attaques ciblées sur un compte.
+  const {
+    authWindowMs = 5 * 60 * 1000,
+    authMax = 12,
+    authIpWindowMs = 15 * 60 * 1000,
+    authIpMax = 200,
+    statusWindowMs = 60 * 1000,
+    statusMax = 60,
+  } = authRateLimits;
   const authLimiter = createRateLimiter({
-    windowMs: 5 * 60 * 1000,
-    max: 12,
+    windowMs: authWindowMs,
+    max: authMax,
     keyPrefix: "auth",
     keyGenerator: authKey,
   });
+  // Limite globale par IP : protège aussi les créations de profils et les
+  // attaques qui feraient varier le nom d'utilisateur. Seuil volontairement
+  // haut pour ne pas pénaliser un foyer derrière un NAT.
+  const authIpLimiter = createRateLimiter({
+    windowMs: authIpWindowMs,
+    max: authIpMax,
+    keyPrefix: "auth-ip",
+  });
   const statusLimiter = createRateLimiter({
-    windowMs: 60 * 1000,
-    max: 60,
+    windowMs: statusWindowMs,
+    max: statusMax,
     keyPrefix: "auth-status",
   });
 
@@ -300,9 +372,12 @@ export function createPortfolioRouter({
       } catch (err) {
         throw new HttpError(400, err.message);
       }
+      // Réponse minimale : le nom validé n'est pas renvoyé en écho, seul
+      // l'état nécessaire au formulaire de connexion est exposé. `hasPassword`
+      // reste utile pour choisir entre création et déverrouillage ; il ne
+      // révèle pas le nom et l'énumération est bornée par les limiteurs.
       const hasPassword = hasUserPassword(db, cleanUsername);
       res.json({
-        username: cleanUsername,
         hasPassword,
         setup: {
           enabled: Boolean(setupAuth.enabled),
@@ -314,6 +389,7 @@ export function createPortfolioRouter({
 
   router.post(
     "/auth/setup",
+    authIpLimiter,
     authLimiter,
     asyncHandler(async (req, res) => {
       if (!setupAuth.enabled) {
@@ -366,6 +442,7 @@ export function createPortfolioRouter({
 
   router.post(
     "/auth/verify",
+    authIpLimiter,
     authLimiter,
     asyncHandler(async (req, res) => {
       const { username, password } = req.body || {};
@@ -704,7 +781,9 @@ export function createPortfolioRouter({
           // Un prêt incomplet ne doit pas bloquer toute la synthèse.
         }
       }
-      const overview = repository.getOverview(userId);
+      const overview = repository.getOverview(userId, {
+        fxRates: await loadFxRates(userId),
+      });
       res.json({
         ...overview,
         accounts: (overview.accounts || []).map(publicAccount),
@@ -1032,11 +1111,16 @@ export function createPortfolioRouter({
         });
       }
       if (account.provider === "crypto" || account.type === "CRYPTO") {
-        const result = await syncCryptoAccount(repository, account.id, userId);
-        return res.json({
-          result: publicSyncResult(result),
-          account: publicAccount(repository.getAccount(account.id, userId)),
-        });
+        try {
+          const result = await syncCryptoAccount(repository, account.id, userId);
+          return res.json({
+            result: publicSyncResult(result),
+            account: publicAccount(repository.getAccount(account.id, userId)),
+          });
+        } catch (error) {
+          if (replyCryptoError(res, error)) return undefined;
+          throw error;
+        }
       }
       throw new HttpError(400, "Ce compte ne supporte pas la synchronisation directe.");
     }),
@@ -1286,7 +1370,7 @@ export function createPortfolioRouter({
       }));
       res.json({
         connections,
-        status: connector.getStatus(),
+        status: integrationStatus(userId),
       });
     }),
   );
@@ -1294,7 +1378,8 @@ export function createPortfolioRouter({
   router.get(
     "/connections/status",
     asyncHandler(async (req, res) => {
-      res.json({ status: connector.getStatus() });
+      const userId = requireSessionUserId(req);
+      res.json({ status: integrationStatus(userId) });
     }),
   );
 
@@ -1320,6 +1405,8 @@ export function createPortfolioRouter({
   router.put(
     "/connections/settings",
     asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      requireIntegrationAdmin(userId);
       const body = req.body || {};
       const existingConfig = connector.storedConfig() || {};
       const applicationId = asString(body.applicationId, { max: 120 }) || existingConfig.applicationId || "";
@@ -1344,16 +1431,18 @@ export function createPortfolioRouter({
         encryptJson({ applicationId, privateKey, redirectUri }),
       );
       connector.invalidateConfig();
-      res.json({ status: connector.getStatus() });
+      res.json({ status: integrationStatus(userId) });
     }),
   );
 
   router.delete(
     "/connections/settings",
     asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      requireIntegrationAdmin(userId);
       repository.deleteIntegration(PROVIDERS.ENABLE_BANKING);
       connector.invalidateConfig();
-      res.json({ status: connector.getStatus() });
+      res.json({ status: integrationStatus(userId) });
     }),
   );
 
@@ -2180,8 +2269,13 @@ export function createPortfolioRouter({
       let syncResult;
       try {
         syncResult = await syncCryptoAccount(repository, account.id, userId);
-      } catch (err) {
-        syncResult = { account, holdings: repository.listHoldings(account.id, userId) };
+      } catch (error) {
+        // La création est atomique du point de vue de l'utilisateur : si la
+        // première synchronisation échoue, le compte vide est retiré et
+        // l'erreur est remontée (502 pour une erreur de fournisseur).
+        repository.deleteAccount(account.id, userId);
+        if (replyCryptoError(res, error)) return undefined;
+        throw error;
       }
 
       res.status(201).json(publicSyncResult(syncResult));
@@ -2192,8 +2286,13 @@ export function createPortfolioRouter({
     "/crypto/sync/:id",
     asyncHandler(async (req, res) => {
       const userId = bodyUserId(req);
-      const result = await syncCryptoAccount(repository, req.params.id, userId);
-      res.json(publicSyncResult(result));
+      try {
+        const result = await syncCryptoAccount(repository, req.params.id, userId);
+        return res.json(publicSyncResult(result));
+      } catch (error) {
+        if (replyCryptoError(res, error)) return undefined;
+        throw error;
+      }
     }),
   );
 
@@ -2258,7 +2357,8 @@ export function createPortfolioRouter({
       (error instanceof ConnectorError ||
       error instanceof ValuationError ||
       error instanceof LoanError ||
-      error instanceof OwnershipError
+      error instanceof OwnershipError ||
+      error instanceof CryptoFetchError
         ? error.status
         : 500);
     if (status >= 500) {

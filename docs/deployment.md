@@ -57,6 +57,10 @@ BASIC_AUTH_USER=portfolio
 BASIC_AUTH_PASSWORD=un-mot-de-passe-long-et-unique
 REQUIRE_AUTH=true
 AUTH_SETUP_TOKEN=
+# Administrateurs de la configuration Enable Banking (liste CSV).
+ADMIN_USERS=Romain
+# CSP : report-only par défaut, enforce après analyse des rapports.
+CSP_MODE=report-only
 ```
 
 Renseigner `AUTH_SETUP_TOKEN` avec un jeton aléatoire (le laisser vide
@@ -76,6 +80,18 @@ désactivée que par un override Compose explicite.
 création de profil est désactivée (les profils existants peuvent toujours se
 connecter). Le code est demandé une fois dans l'interface lors de la création
 d'un profil, puis pour chaque nouveau profil du foyer.
+
+`ADMIN_USERS` est une liste de noms séparés par des virgules (par exemple
+`Romain,Sophie`). Seuls ces profils peuvent modifier ou supprimer la
+configuration globale Enable Banking. Si la variable est absente, le profil
+créé en premier devient administrateur ; les autres profils reçoivent
+`canManage=false` et l'API refuse leurs mutations avec `403`.
+
+`CSP_MODE` contrôle l'en-tête Content-Security-Policy émis par Express :
+`report-only` (défaut) collecte les violations sur `/api/csp-report`, tandis
+que `enforce` bloque les ressources non autorisées. Caddy ne duplique pas cet
+en-tête pour que le mode choisi s'applique réellement ; il conserve les autres
+en-têtes de sécurité.
 
 Le nom de domaine doit être le même partout : `APP_DOMAIN`, `APP_URL` et l'URL
 de retour Enable Banking.
@@ -273,7 +289,22 @@ Sauvegarde cohérente à chaud (API backup SQLite) :
 npm run db:backup
 # ou, en Docker (sauvegarde persistée dans le volume data) :
 docker compose exec -e BACKUP_DIR=/app/data/backups app node scripts/backup-database.js
+
+# Purge selon la politique de rétention (30 jours par défaut) :
+npm run db:prune-backups
+npm run db:prune-backups -- --days 7 --dry-run
 ```
+
+`BACKUP_RETENTION_DAYS` permet de modifier la rétention. La purge est aussi
+exécutée après chaque sauvegarde réussie, et supprime les fichiers annexes
+`-wal`/`-shm` des sauvegardes retirées.
+
+Lors de la suppression d'un profil, le serveur applique immédiatement la même
+suppression logique aux sauvegardes accessibles dans `BACKUP_DIR`, puis
+compacte chaque copie et restaure sa date de modification d'origine. Les
+copies externes, hors ligne ou déjà sorties de `BACKUP_DIR` ne peuvent pas être
+modifiées : elles restent soumises à la rétention et doivent être détruites
+manuellement si nécessaire.
 
 Restauration : arrêter le serveur, puis :
 

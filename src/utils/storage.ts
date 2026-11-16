@@ -150,7 +150,9 @@ export const deleteUserData = async (userId: string): Promise<void> => {
     );
   }
 
-  // Nettoyage des miroirs locaux (les sauvegardes serveur sont déjà purgées).
+  // Nettoyage des miroirs locaux. Les sauvegardes serveur accessibles sont
+  // purgées de ce profil par l'API de suppression ; les copies externes
+  // restent soumises à la rétention documentée.
   const keys = [
     `user_settings_${userId}`,
     `wealth_history_${userId}`,

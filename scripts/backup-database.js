@@ -6,6 +6,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import {
+  DEFAULT_BACKUP_RETENTION_DAYS,
+  pruneBackups,
+} from "./backup-retention.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -72,3 +76,18 @@ try {
 
 const sizeMb = (fs.statSync(destination).size / (1024 * 1024)).toFixed(2);
 console.log(`✅ Sauvegarde créée : ${destination} (${sizeMb} MB)`);
+
+// Les sauvegardes sont des copies immuables : on applique la politique de
+// rétention à chaque nouvelle sauvegarde pour éviter l'accumulation de copies
+// contenant des profils supprimés.
+const configuredRetention = Number(process.env.BACKUP_RETENTION_DAYS);
+const retentionDays =
+  Number.isFinite(configuredRetention) && configuredRetention >= 0
+    ? Math.floor(configuredRetention)
+    : DEFAULT_BACKUP_RETENTION_DAYS;
+const retention = pruneBackups({ backupDir, retentionDays });
+if (retention.removed.length > 0) {
+  console.log(
+    `🧹 ${retention.removed.length} sauvegarde(s) de plus de ${retentionDays} jour(s) purgée(s).`,
+  );
+}

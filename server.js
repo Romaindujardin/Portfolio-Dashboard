@@ -9,6 +9,8 @@ import os from "os";
 import DatabaseManager from "./src/utils/database/database.js";
 import { initializePortfolioSchema } from "./server/db/portfolioSchema.js";
 import { createPortfolioRouter } from "./server/routes/portfolio.js";
+import { createRateLimiter } from "./server/lib/rateLimit.js";
+import { createSecurityHeaders } from "./server/lib/securityHeaders.js";
 import {
   getSessionUser,
   rejectUserMismatch,
@@ -57,6 +59,10 @@ if (
   app.set("trust proxy", 1);
 }
 app.disable("x-powered-by");
+
+// En-têtes de sécurité appliqués à toutes les réponses (API et statique).
+// La CSP est en Report-Only par défaut ; CSP_MODE=enforce pour bloquer.
+app.use(createSecurityHeaders());
 
 // Middleware — CORS : origines locales + origine publique configurée.
 // Les requêtes sans Origin (curl, clients natifs) restent autorisées.
@@ -165,7 +171,13 @@ const safeEqual = (left, right) => {
 if (authEnabled) {
   app.use((req, res, next) => {
     if (req.method === "OPTIONS") return next();
-    if (req.path === "/api/health" || req.path === "/healthz") return next();
+    if (
+      req.path === "/api/health" ||
+      req.path === "/healthz" ||
+      req.path === "/api/csp-report"
+    ) {
+      return next();
+    }
 
     const header = String(req.headers.authorization || "");
     if (!header.startsWith("Basic ")) {
@@ -220,6 +232,7 @@ const PUBLIC_AUTH_PATHS = new Set([
 
 const isPublicApiRequest = (req) => {
   if (req.path === "/api/health" || req.path === "/api/test") return true;
+  if (req.path === "/api/csp-report") return true;
   if (PUBLIC_AUTH_PATHS.has(req.path)) return true;
   if (
     req.method === "GET" &&
@@ -255,6 +268,21 @@ app.use((req, res, next) => {
 });
 // Le corps JSON n'est analysé qu'après le contrôle de session sur les routes
 // protégées : une requête non authentifiée ne peut pas faire parser 10 Mo.
+//
+// Les routes d'authentification et la collecte de rapports CSP n'ont besoin
+// que d'un petit corps : on leur applique un parseur limité à 64 Ko avant le
+// parseur général. body-parser ignore un corps déjà analysé.
+const authBodyParser = express.json({ limit: "64kb" });
+app.use("/api/portfolio/auth", authBodyParser);
+const cspReportParser = express.json({
+  limit: "64kb",
+  type: [
+    "application/json",
+    "application/csp-report",
+    "application/reports+json",
+  ],
+});
+app.use("/api/csp-report", cspReportParser);
 app.use(express.json({ limit: "10mb" }));
 app.use(rejectUserMismatch);
 
@@ -269,6 +297,27 @@ app.get("/api/health", (req, res) => {
   });
 });
 app.get("/healthz", (req, res) => res.status(200).send("ok"));
+
+// Collecte des violations CSP. Endpoint public : les rapports navigateur ne
+// portent pas de cookie. Le corps est borné à 64 Ko et n'est jamais renvoyé.
+const cspReportLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyPrefix: "csp-report",
+});
+app.post("/api/csp-report", cspReportLimiter, (req, res) => {
+  try {
+    const payload = req.body?.["csp-report"] ?? req.body;
+    const summary = Array.isArray(payload) ? payload[0] : payload;
+    if (summary && typeof summary === "object") {
+      const line = JSON.stringify(summary).slice(0, 2000);
+      console.warn(`[CSP] ${line}`);
+    }
+  } catch {
+    // Un rapport mal formé ne doit jamais faire échouer l'endpoint.
+  }
+  res.status(204).end();
+});
 
 // ===== PERSISTANCE DE SECOURS SUR DISQUE (DOUBLE PROTECTION) =====
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -2108,6 +2157,17 @@ app.use(
       process.env.ENABLEBANKING_BASE_URL ||
       null,
     setupAuth: SETUP_AUTH,
+    // Les tests créent de nombreux profils éphémères dans un serveur unique :
+    // on relève les seuils pour éviter des 429 de bruit, sans toucher aux
+    // limites de production.
+    authRateLimits:
+      process.env.NODE_ENV === "test"
+        ? {
+            authMax: 10_000,
+            authIpMax: 100_000,
+            statusMax: 100_000,
+          }
+        : {},
   }),
 );
 
@@ -2140,8 +2200,16 @@ if (SERVE_STATIC && fs.existsSync(indexHtmlPath)) {
 }
 
 app.use((err, req, res, next) => {
-  console.error("Erreur serveur non gérée:", err);
   if (res.headersSent) return next(err);
+  // Erreurs du parseur JSON : 413 pour un corps trop volumineux, 400 pour un
+  // JSON invalide. Sans cela, le client recevrait une erreur 500 opaque.
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "Corps de requête trop volumineux" });
+  }
+  if (err?.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "JSON invalide" });
+  }
+  console.error("Erreur serveur non gérée:", err);
   return res.status(500).json({ error: "Internal server error" });
 });
 

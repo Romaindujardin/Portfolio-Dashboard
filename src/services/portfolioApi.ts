@@ -606,7 +606,6 @@ export const importAccountCsv = (
 
 export const getAuthStatus = (username: string) =>
   request<{
-    username: string;
     hasPassword: boolean;
     setup: { enabled: boolean; tokenRequired: boolean };
   }>("/auth/status", {

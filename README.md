@@ -1,4 +1,4 @@
-# Portfolio — Gestion de Budget, Épargne & Patrimoine
+# 🪙 Portfolio — Gestion de Budget, Épargne & Patrimoine
 
 Application personnelle et complète de gestion de patrimoine, de budget de foyer et de stratégie financière : connexion bancaire PSD2 multi-banques (Enable Banking), valorisation immobilière automatisée, suivi des prêts avec amortissement, budget partagé façon **Tricount**, stratégie d'épargne avec calcul d'objectifs, et **Conseiller IA (Gemini 2.5 Flash)** contextualisé avec vos finances réelles.
 
@@ -6,36 +6,36 @@ Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sé
 
 ---
 
-## Fonctionnalités Clés
+## ✨ Fonctionnalités Clés
 
-### Patrimoine & Open Banking (Nouveau)
+### 🏛️ Patrimoine & Open Banking (Nouveau)
 - **Multi-banques via Enable Banking (PSD2 / Open Banking)** : connexion directe et synchronisation de plus de 2000 banques européennes (BoursoBank, BNP Paribas, Crédit Agricole, Société Générale, etc.).
 - **Immobilier automatisé** : estimation de valeur basée sur l'Open Data des transactions réelles (DVF / Cerema), géocodage officiel IGN et ré-indexation trimestrielle INSEE, complétée par des coefficients déclaratifs (étage, terrasse, DPE, travaux).
 - **Prêts & Emprunts** : calcul des mensualités, du capital restant dû et tableau d'amortissement complet synchronisé avec le patrimoine net.
 - **Marchés & Titres** : suivi des cours d'actions, ETF et cryptos via Yahoo Finance avec conversion en euros et résolution automatique des codes ISIN via OpenFIGI.
 - **Répartition & Parts de propriété** : affectation au prorata pour les comptes joints et les biens immobiliers partagés au sein du foyer (Romain / Sophie).
 
-### Budget Foyer & Tricount
+### 🧾 Budget Foyer & Tricount
 - **Suivi des dépenses et revenus au mois le mois** : qui a payé quoi, répartition personnalisée (50/50, au prorata des revenus ou sur-mesure).
 - **Équilibrage automatique des comptes** : calcul instantané des dettes croisées pour savoir qui doit rembourser qui en fin de mois.
 - **Enveloppes & Poches budgétaires** : suivi des charges fixes, dépenses courantes, loisirs et épargne programmée.
 
-### Stratégie & Objectifs d'Épargne
+### 🎯 Stratégie & Objectifs d'Épargne
 - **Poches d'épargne dédiées** : fonds de secours, projets d'achat, investissements.
 - **Simulateur d'effort d'épargne** : calcul dynamique de la capacité d'épargne mensuelle nécessaire pour atteindre un objectif financier à une date donnée.
 - **Simulation avec intérêts composés** : projection temporelle de la valorisation du capital.
 
-### Conseiller IA Intégré (Gemini 2.5 Flash)
+### 🤖 Conseiller IA Intégré (Gemini 2.5 Flash)
 - **Chatbot financier contextualisé** : Gemini dispose en direct d'une vue d'ensemble de vos finances (comptes bancaires, soldes, cryptos, poches d'épargne, budget du mois) pour vous offrir un conseil sur-mesure en français et en euros.
 - **Thématiques couvertes** : capacité d'emprunt, rééquilibrage de portefeuille, choix d'allocation, fiscalité, optimisation de budget.
 - **Contrôle de la vie privée** : vous sélectionnez quelles catégories de données transmettre à l'IA avant chaque question.
 
-### Banque & Catégorisation Intelligente
+### 🏦 Banque & Catégorisation Intelligente
 - **Import de relevés CSV bancaires** : support natif des formats Boursorama et banques françaises avec mapping flexible de colonnes.
 - **Catégorisation automatique par IA** : analyse sémantique des libellés d'opérations pour assigner la bonne catégorie et sous-catégorie.
 - **Passerelle vers le budget** : liaison en un clic d'une opération bancaire vers une dépense Tricount.
 
-### Portefeuille Crypto & Web3
+### ⚡ Portefeuille Crypto & Web3
 - **Suivi des portefeuilles on-chain (EVM)** : synchronisation via l'API Etherscan.
 - **Centralized Exchanges (CEX)** : connexion en lecture seule à votre compte Binance.
 - **NFTs & Objets numériques** : affichage et valorisation de votre collection OpenSea.
@@ -43,7 +43,7 @@ Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sé
 
 ---
 
-## Architecture & Technologies
+## 🏗️ Architecture & Technologies
 
 | Couche | Technologie |
 | :--- | :--- |
@@ -58,7 +58,7 @@ Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sé
 
 ---
 
-## Pourquoi Docker, Dockerfile & Caddy ?
+## 🐳 Pourquoi Docker, Dockerfile & Caddy ?
 
 Vous trouverez à la racine un `Dockerfile`, un `docker-compose.yml` et un dossier `deploy/Caddyfile` :
 - **Pour le local au quotidien** : Vous n'avez pas besoin de Docker (`npm start` suffit).
@@ -76,7 +76,7 @@ Pour plus de détails, consultez le guide complet dans [`docs/deployment.md`](do
 
 ---
 
-## Démarrage Rapide
+## 🚀 Démarrage Rapide
 
 ### Prérequis
 - Node.js 18 ou version supérieure
@@ -102,20 +102,21 @@ Cette commande démarre simultanément :
 
 ---
 
-## Sécurité & données sensibles
+## 🔐 Sécurité & données sensibles
 
 - **Authentification par profil** : chaque profil (Romain / Sophie) possède son propre mot de passe (8 caractères minimum). Le serveur émet un cookie de session `portfolio_session` **HttpOnly**, `SameSite=Lax`, valable 7 jours. Les routes `/api` protégées refusent toute requête sans session (seules la santé, la connexion et le callback OAuth restent publics), et un `user_id` différent de la session est rejeté (`403 USER_MISMATCH`). Un changement de mot de passe invalide les anciens jetons.
 - **Création de profil protégée** : en production, `/auth/setup` exige `AUTH_SETUP_TOKEN` (16 caractères minimum, à générer avec `openssl rand -hex 24`). Sans ce jeton, la création de profil est désactivée ; les profils existants continuent de fonctionner. Le code est saisi une fois dans l'interface, puis pour chaque nouveau profil.
 - **GET sans effet de bord** : le nettoyage des doublons d'autorisations bancaires n'est plus déclenché par une lecture. Il s'exécute après une synchronisation BoursoBank ou via `POST /api/portfolio/transactions/cleanup-duplicates`.
-- **Écritures bornées au profil** : les mises à jour de comptes, positions, transactions, wallets et liens Tricount sont filtrées par `user_id` (ou par un partage de propriété explicite). Un identifiant d'un autre profil ne peut donc pas être modifié, même en cas de régression d'un contrôle amont.
 - **Coffre de secrets** : les clés API Gemini, Binance, Etherscan, CoinGecko et OpenSea, ainsi que les identifiants du sidecar BoursoBank, ne sont plus stockés dans le navigateur ni dans `user_settings`. Ils sont chiffrés au repos en **AES-256-GCM** dans la table `user_secrets`, rattachés au profil, et ne sont jamais renvoyés en clair par l'API. Les appels authentifiés Gemini, Etherscan, CoinGecko, Binance et OpenSea passent par des proxies serveur.
+- **Administration** : la configuration globale Enable Banking (Application ID, clé PEM, URL de retour) n'est modifiable que par les profils listés dans `ADMIN_USERS` (séparés par des virgules). Si la variable est absente, le profil le plus ancien fait office d'administrateur ; `canManage=false` est renvoyé aux autres profils et l'API répond `403` sur toute mutation.
+- **En-têtes de sécurité** : Express applique une CSP **Report-Only** par défaut et collecte les violations sur `/api/csp-report`. Après analyse, `CSP_MODE=enforce` active le blocage. Caddy ne duplique pas la CSP : Express reste la source unique pour que le mode soit réellement appliqué. Les autres en-têtes (HSTS, `X-Frame-Options`, `Permissions-Policy`, COOP/CORP) sont posés par les deux couches.
 - **Clés locales** : `data/.portfolio-secret` (chiffrement des secrets) et `data/.portfolio-session-secret` (signature des sessions) sont générés automatiquement en `0600`. Sauvegardez-les avec la base : sans eux, les secrets et sessions existants ne peuvent plus être déchiffrés/validés. On peut aussi fournir `PORTFOLIO_SECRET_KEY` et `PORTFOLIO_SESSION_SECRET`.
-- **Sauvegardes** : `npm run db:backup` crée une sauvegarde SQLite cohérente dans `backups/`. Pour restaurer, arrêtez le serveur puis lancez `npm run db:restore -- [fichier.db]` (le script refuse de s'exécuter si des fichiers `-wal`/`-shm` indiquent un serveur actif, sauf `--force`).
-- **Suppression de profil** : `DELETE /api/portfolio/users/:username` supprime les données du profil, ses secrets et ses identifiants, puis invalide sa session.
+- **Sauvegardes** : `npm run db:backup` crée une sauvegarde SQLite cohérente dans `backups/`. Les sauvegardes de plus de **30 jours** (`BACKUP_RETENTION_DAYS`) sont purgées automatiquement ; la purge peut aussi être lancée avec `npm run db:prune-backups` (`-- --days 7`, `-- --dry-run`). La suppression d'un profil purge immédiatement les copies accessibles dans `BACKUP_DIR` avant de compacter chaque fichier ; les copies externes ou hors ligne restent soumises à la rétention. Pour restaurer, arrêtez le serveur puis lancez `npm run db:restore -- [fichier.db]` (le script refuse de s'exécuter si des fichiers `-wal`/`-shm` indiquent un serveur actif, sauf `--force`).
+- **Suppression de profil** : `DELETE /api/portfolio/users/:username` supprime les données du profil, ses secrets, ses identifiants et ses miroirs disque, purge les sauvegardes accessibles, puis invalide sa session. Les comptes partagés sont transférés à un co-owner avant la suppression.
 
 ---
 
-## Configuration d'Enable Banking (Multi-Banques)
+## 🔒 Configuration d'Enable Banking (Multi-Banques)
 
 1. Créez un compte et une application sur le portail [Enable Banking](https://enablebanking.com/).
 2. Téléchargez votre clé privée RSA (fichier `.pem`) et notez votre **Application ID**.
@@ -128,37 +129,40 @@ Cette commande démarre simultanément :
 5. Cliquez sur **« Configurer l'intégration »**, renseignez votre Application ID et collez le contenu de votre clé privée PEM.
 6. Recherchez votre établissement bancaire (ex: *BoursoBank*, *BNP*, *Crédit Agricole*), lancez la connexion et validez l'authentification forte sur l'application de votre banque !
 
+> [!NOTE]
+> La configuration globale Enable Banking est partagée par tous les profils mais sa modification est réservée aux administrateurs définis par `ADMIN_USERS` (par exemple `ADMIN_USERS=Romain,Sophie`). Sans cette variable, le profil créé en premier est administrateur. Les autres profils peuvent connecter leurs banques et synchroniser leurs comptes, mais ne peuvent ni modifier ni supprimer les identifiants de l'application.
+
 ---
 
-## Feuille de Route (Roadmap)
+## 🗺️ Feuille de Route (Roadmap)
 
 Les grandes fonctionnalités (marché live, ETF look-through, passerelle Enable
 Banking → Tricount, conseiller IA enrichi) sont déjà implémentées. Les
 prochains chantiers portent sur la robustesse et l'exploitation :
 
-### 1. Finaliser le modèle multi-profils
+### 🔐 1. Finaliser le modèle multi-profils
 - Permissions co-owner explicites (lecture/écriture vs opérations destructives).
 - Clés `localStorage` Tricount/Savings préfixées par profil.
 - Paramètres d'intégration Enable Banking / BoursoBank par profil.
 
-### 2. Fiabiliser la persistance
+### 🗄️ 2. Fiabiliser la persistance
 - Migrations versionnées (`user_version` + table `schema_migrations`).
 - `busy_timeout` SQLite et transactions explicites pour les opérations multi-étapes.
 - Planification automatique des sauvegardes et test de restauration régulier.
 
-### 3. Dette technique et déploiement
+### 🚀 3. Dette technique et déploiement
 - Migration React Router v6 → v7 (corrige les 2 advisories `npm audit`).
 - Code-splitting des routes pour réduire le bundle JavaScript (> 1,2 Mo).
 - CI GitHub Actions : tests, type-check, lint, build, audit.
 
 ---
 
-## Tests & Qualité
+## 🧪 Tests & Qualité
 
-Le projet dispose d'une suite de tests complète (225 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement, des sessions et des synchronisations :
+Le projet dispose d'une suite de tests complète (248 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement, des sessions et des synchronisations :
 
 ```bash
-npm test              # Exécute l'ensemble des 225 tests
+npm test              # Exécute l'ensemble des 248 tests
 npm run test:watch    # Mode surveillance interactif
 npm run test:coverage # Rapport de couverture de code
 npm run type-check    # Vérification stricte TypeScript
@@ -169,6 +173,6 @@ Les tests s'exécutent sur une base SQLite temporaire isolée sans jamais altér
 
 ---
 
-## Licence
+## 📄 Licence
 
 Ce projet est distribué sous licence MIT.

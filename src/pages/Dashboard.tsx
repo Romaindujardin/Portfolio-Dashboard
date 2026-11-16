@@ -43,6 +43,7 @@ import {
 } from "../services/portfolioApi";
 import MarketClock from "../components/MarketClock";
 import CashflowSpaghetti from "../components/CashflowSpaghetti";
+import { FxWarning } from "../components/patrimoine/shared";
 import { useUser } from "../contexts/UserContext";
 import { useCurrency } from "../contexts/CurrencyContext";
 import {
@@ -70,6 +71,17 @@ const PIE_COLORS = [
   "#eab308",
   "#a855f7",
 ];
+
+/** Convertit un montant natif en EUR avec les taux exposés par /overview. */
+const fxRateToEur = (
+  rates: Record<string, number> | undefined,
+  currency?: string | null,
+): number => {
+  const code = String(currency || "EUR").toUpperCase();
+  if (code === "EUR") return 1;
+  const rate = Number(rates?.[code]);
+  return Number.isFinite(rate) && rate > 0 ? rate : 1;
+};
 
 export interface UnifiedHolding {
   id: string;
@@ -275,16 +287,18 @@ const Dashboard: React.FC = () => {
       setAllHoldings(holdingsData || []);
 
       const accounts = overviewData?.accounts || [];
+      const fxRates = overviewData?.fx?.rates;
       const holdingsByAcc = new Map<string, Holding[]>();
       for (const h of holdingsData || []) {
         if (!holdingsByAcc.has(h.accountId)) holdingsByAcc.set(h.accountId, []);
         holdingsByAcc.get(h.accountId)!.push(h);
       }
 
-      // Convertir les transactions réelles en flux bancaires
+      // Convertir les transactions réelles en flux bancaires, en EUR.
       const bankTxsFormatted = (txsData || []).map((t) => ({
         date: new Date(t.date),
-        amount: Number(t.amount) || 0,
+        amount:
+          (Number(t.amount) || 0) * fxRateToEur(fxRates, t.currency),
         label: t.label || "",
         category: t.category || "Autre",
         subCategory: t.category || "",
@@ -319,14 +333,17 @@ const Dashboard: React.FC = () => {
           a.type === "CHECKING" ||
           (a.type === "SAVINGS" && (holdingsByAcc.get(a.id)?.length || 0) === 0),
       );
-      const totalCash = checkingAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
+      const totalCash = checkingAccounts.reduce(
+        (sum, a) => sum + (a.balance || 0) * fxRateToEur(fxRates, a.currency),
+        0,
+      );
 
       checkingAccounts.forEach((acc) => {
         summaries.push({
           id: acc.id,
           label: acc.name,
           kind: "bank",
-          balance: acc.balance,
+          balance: (acc.balance || 0) * fxRateToEur(fxRates, acc.currency),
           income: 0,
           expenses: 0,
           net: 0,
@@ -346,12 +363,23 @@ const Dashboard: React.FC = () => {
 
       investmentAccounts.forEach((acc) => {
         const accHoldings = holdingsByAcc.get(acc.id) || [];
-        const hVal = accHoldings.reduce((s, h) => s + (h.quantity || 0) * (h.price || 0), 0);
-        const hCost = accHoldings.reduce(
-          (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
+        const accRate = fxRateToEur(fxRates, acc.currency);
+        const hVal = accHoldings.reduce(
+          (s, h) =>
+            s +
+            (h.quantity || 0) *
+              (h.price || 0) *
+              fxRateToEur(fxRates, h.currency || acc.currency),
           0,
         );
-        const bal = Math.max(acc.balance, hVal);
+        const hCost = accHoldings.reduce(
+          (s, h) =>
+            s +
+            (h.costBasis ?? (h.quantity || 0) * (h.price || 0)) *
+              fxRateToEur(fxRates, h.currency || acc.currency),
+          0,
+        );
+        const bal = Math.max((acc.balance || 0) * accRate, hVal);
         const pnl = hVal > 0 ? hVal - hCost : 0;
 
         totalInvBalance += bal;
@@ -591,7 +619,8 @@ const Dashboard: React.FC = () => {
 
   // ===== Crypto total (comptes patrimoine crypto) =====
   const cryptoTotalValue = cryptoAccounts.reduce(
-    (sum, acc) => sum + (acc.balance || 0),
+    (sum, acc) =>
+      sum + (acc.balance || 0) * fxRateToEur(overview?.fx?.rates, acc.currency),
     0,
   );
 
@@ -632,9 +661,11 @@ const Dashboard: React.FC = () => {
   const unifiedHoldings = useMemo<UnifiedHolding[]>(() => {
     const accountsMap = new Map<string, PortfolioAccount>();
     (overview?.accounts || []).forEach((a) => accountsMap.set(a.id, a));
+    const fxRates = overview?.fx?.rates;
 
     const list: UnifiedHolding[] = allHoldings.map((h, idx) => {
       const account = accountsMap.get(h.accountId);
+      const holdingRate = fxRateToEur(fxRates, h.currency || account?.currency);
       const isCrypto =
         account?.type === "CRYPTO" ||
         h.ticker?.toUpperCase() === "BTC" ||
@@ -671,9 +702,10 @@ const Dashboard: React.FC = () => {
         : "stock";
 
       const qty = Number(h.quantity || 0);
-      const lastPrice = Number(h.price || 0);
+      const lastPrice = Number(h.price || 0) * holdingRate;
       const totalVal = qty * lastPrice;
-      const investedVal = h.costBasis != null ? Number(h.costBasis) : totalVal;
+      const investedVal =
+        h.costBasis != null ? Number(h.costBasis) * holdingRate : totalVal;
       const pnl = totalVal - investedVal;
       const pnlPercent = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
 
@@ -689,7 +721,10 @@ const Dashboard: React.FC = () => {
         envelopeLabel,
         type,
         quantity: qty,
-        buyingPrice: qty > 0 && h.costBasis != null ? h.costBasis / qty : lastPrice,
+        buyingPrice:
+          qty > 0 && h.costBasis != null
+            ? (h.costBasis * holdingRate) / qty
+            : lastPrice,
         lastPrice,
         totalValue: totalVal,
         investedValue: investedVal,
@@ -743,6 +778,7 @@ const Dashboard: React.FC = () => {
     ];
 
     const accounts = overview?.accounts || [];
+    const fxRates = overview?.fx?.rates;
     const holdingsByAcc = new Map<string, Holding[]>();
     for (const h of allHoldings) {
       if (!holdingsByAcc.has(h.accountId)) holdingsByAcc.set(h.accountId, []);
@@ -758,30 +794,43 @@ const Dashboard: React.FC = () => {
     nonCryptoAccounts.forEach((acc, idx) => {
       const accHoldings = holdingsByAcc.get(acc.id) || [];
       const hasHoldings = accHoldings.length > 0;
+      const accRate = fxRateToEur(fxRates, acc.currency);
+      const balanceEur = (acc.balance || 0) * accRate;
+      const cashEur =
+        acc.cashBalance != null ? (acc.cashBalance || 0) * accRate : null;
       const holdingsTotal = accHoldings.reduce(
-        (s, h) => s + (h.quantity || 0) * (h.price || 0),
+        (s, h) =>
+          s +
+          (h.quantity || 0) *
+            (h.price || 0) *
+            fxRateToEur(fxRates, h.currency || acc.currency),
         0,
       );
       const holdingsCost = accHoldings.reduce(
-        (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
+        (s, h) =>
+          s +
+          (h.costBasis ?? (h.quantity || 0) * (h.price || 0)) *
+            fxRateToEur(fxRates, h.currency || acc.currency),
         0,
       );
       const cash =
-        acc.cashBalance != null
-          ? Math.max(0, acc.cashBalance)
+        cashEur != null
+          ? Math.max(0, cashEur)
           : hasHoldings
-          ? Math.max(0, (acc.balance || 0) - holdingsTotal)
-          : (acc.balance || 0);
+          ? Math.max(0, balanceEur - holdingsTotal)
+          : balanceEur;
 
       const totalVal = hasHoldings
-        ? Math.max(acc.balance || 0, holdingsTotal + (acc.cashBalance ?? 0))
-        : (acc.balance || 0);
+        ? Math.max(balanceEur, holdingsTotal + (cashEur ?? 0))
+        : balanceEur;
 
       const pnl = hasHoldings ? holdingsTotal - holdingsCost : 0;
       const holdingsVal = hasHoldings ? holdingsTotal : 0;
       const investedVal = hasHoldings
-        ? (holdingsCost > 0 ? holdingsCost : holdingsVal)
-        : (acc.balance || 0);
+        ? holdingsCost > 0
+          ? holdingsCost
+          : holdingsVal
+        : balanceEur;
       const pnlPct = investedVal > 0 ? (pnl / investedVal) * 100 : 0;
 
       const upper = acc.name.toUpperCase();
@@ -854,9 +903,16 @@ const Dashboard: React.FC = () => {
         const a = accounts.find((acc) => acc.id === h.accountId);
         return a?.type === "CRYPTO";
       });
-      const cryptoTotal = cryptoAccs.reduce((sum, a) => sum + (a.balance || 0), 0);
+      const cryptoTotal = cryptoAccs.reduce(
+        (sum, a) =>
+          sum + (a.balance || 0) * fxRateToEur(fxRates, a.currency),
+        0,
+      );
       const cryptoCost = cryptoHoldings.reduce(
-        (s, h) => s + (h.costBasis ?? (h.quantity || 0) * (h.price || 0)),
+        (s, h) =>
+          s +
+          (h.costBasis ?? (h.quantity || 0) * (h.price || 0)) *
+            fxRateToEur(fxRates, h.currency),
         0,
       );
       const cryptoPnl = cryptoTotal > 0 && cryptoCost > 0 ? cryptoTotal - cryptoCost : 0;
@@ -1008,6 +1064,8 @@ const Dashboard: React.FC = () => {
       {accountsLoading && (
         <div className="text-xs text-[#8a8a8a]">Chargement des comptes...</div>
       )}
+
+      <FxWarning currencies={overview?.fx?.missing} />
 
       {/* Horloge des bourses */}
       <div className="flex justify-center">

@@ -26,6 +26,7 @@ import {
   Button,
   Card,
   ErrorBanner,
+  FxWarning,
   Spinner,
   SuccessBanner,
   cn,
@@ -194,6 +195,8 @@ const Patrimoine: React.FC = () => {
           </p>
         </div>
       )}
+
+      <FxWarning currencies={overview?.fx?.missing} />
 
       {/* Cartes de synthèse */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -365,6 +368,7 @@ const Patrimoine: React.FC = () => {
             userId={currentUser}
             accounts={overview.accounts.filter((a) => a.type !== "CRYPTO")}
             holdings={holdings}
+            fxRates={overview.fx?.rates}
             onReload={loadAll}
             notify={notify}
           />

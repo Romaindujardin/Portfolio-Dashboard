@@ -113,6 +113,8 @@ export interface IntegrationStatus {
   applicationId: string | null;
   redirectUri: string;
   baseUrl: string;
+  /** Seul un administrateur peut modifier la configuration globale. */
+  canManage?: boolean;
 }
 
 export interface Institution {
@@ -292,6 +294,13 @@ export interface Overview {
   };
   byType: Partial<Record<PortfolioAccountType, number>>;
   perOwner: Record<string, number>;
+  /** Conversion des soldes en EUR (devises sans taux : 1:1 + signalement). */
+  fx?: {
+    base: "EUR";
+    /** Taux utilisés pour la conversion, devise source -> EUR. */
+    rates?: Record<string, number>;
+    missing: string[];
+  };
   accounts: PortfolioAccount[];
   properties: Property[];
   loans: Loan[];

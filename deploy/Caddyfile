@@ -7,10 +7,18 @@
 	encode zstd gzip
 	reverse_proxy app:3001
 
+	# La CSP est gérée uniquement par Express (Report-Only par défaut, ou
+	# enforce avec CSP_MODE=enforce). Caddy ne la duplique pas : une double
+	# politique empêcherait le mode enforce de s'appliquer correctement au
+	# niveau du proxy. Les autres en-têtes restent une défense en profondeur.
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
-		Strict-Transport-Security "max-age=31536000"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy same-origin
+		Cross-Origin-Resource-Policy same-origin
+		Reporting-Endpoints "csp-endpoint=\"/api/csp-report\""
 	}
 }

@@ -157,9 +157,19 @@ beforeAll(async () => {
 
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  // Le routeur est monté sans le middleware de session global de server.js :
+  // on simule ici une session administrateur, comme en production.
+  app.use((req, _res, next) => {
+    req.sessionUser = "ebintegration";
+    next();
+  });
   app.use(
     "/api/portfolio",
-    createPortfolioRouter({ db, enableBankingBaseUrl: fakeBase }),
+    createPortfolioRouter({
+      db,
+      enableBankingBaseUrl: fakeBase,
+      adminUsers: ["ebintegration"],
+    }),
   );
   appServer = createServer(app);
   await listen(appServer);

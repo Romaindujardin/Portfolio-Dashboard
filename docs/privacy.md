@@ -79,8 +79,16 @@ Les données sont conservées localement tant que l'utilisateur ne les supprime
 pas. La suppression d'un profil via l'application efface ses données, ses
 secrets et ses identifiants, et invalide sa session. La suppression d'une
 connexion bancaire révoque la session associée lorsque la banque le permet.
-Les sauvegardes éventuelles suivent la même durée de conservation que les
-données d'origine.
+
+Les sauvegardes SQLite sont conservées **30 jours par défaut**
+(`BACKUP_RETENTION_DAYS`). La purge est appliquée après chaque sauvegarde
+réussie et peut être lancée manuellement avec `npm run db:prune-backups`. Lors
+de la suppression d'un profil, ses données, secrets et identifiants sont
+également retirés immédiatement des sauvegardes accessibles dans `BACKUP_DIR`
+avant compactage. Les copies externes, hors ligne ou déjà déplacées hors de ce
+répertoire ne peuvent pas être modifiées automatiquement : elles restent
+soumises à la rétention ou doivent être détruites manuellement. Pour purger
+toutes les sauvegardes immédiatement, lancer la purge avec `--days 0`.
 
 ## 7. Sécurité
 
