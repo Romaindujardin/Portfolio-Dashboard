@@ -248,61 +248,200 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
     };
   }, [effectiveUserId]);
 
-  const findTricountItem = (t: Transaction): TricountExpense | TricountIncome | null => {
-    // 1. Correspondance exacte par identifiant bancaire ou référence
-    const expense = tricountExpenses.find(
-      (e) =>
-        e.bankRowId === t.id ||
-        (t.externalId && e.bankReference === t.externalId) ||
-        (t.dedupKey && e.bankReference === t.dedupKey),
-    );
-    if (expense) return expense;
+  // Filtrage intelligent des doublons : autorisations CB ou opérations Base64 temporaires remplacées par le débit réel
+  const { displayTransactions, supersededMap } = useMemo(() => {
+    const isCandidate = (t: Transaction) => {
+      const cat = (t.category || "").toLowerCase();
+      const label = (t.label || "").toLowerCase();
+      const isBase64 = Boolean(
+        (t.externalId && t.externalId.startsWith("eyJ")) ||
+        (t.dedupKey && t.dedupKey.startsWith("bourso:eyJ"))
+      );
+      return (
+        cat.includes("autorisation") ||
+        cat.includes("authorization") ||
+        label.includes("autorisation") ||
+        label.includes("authorization") ||
+        Boolean(t.pending) ||
+        isBase64
+      );
+    };
 
-    const income = tricountIncomes.find(
-      (i) =>
-        i.bankRowId === t.id ||
-        (t.externalId && i.bankReference === t.externalId) ||
-        (t.dedupKey && i.bankReference === t.dedupKey),
-    );
-    if (income) return income;
-
-    // 2. Rapprochement heuristique si l'autorisation ou l'opération temporaire a été consolidée
-    const tAmt = Math.abs(t.amount);
-    const tTime = Date.parse(t.date) || 0;
-    const tLabel = (t.label || "").toLowerCase();
-
-    if (t.amount < 0) {
-      const expCandidate = tricountExpenses.find((e) => {
-        if (Math.abs(Number(e.amount) - tAmt) > 0.01) return false;
-        const eTime = Date.parse(e.date) || 0;
-        if (tTime && eTime && Math.abs(tTime - eTime) > 7 * 86400000) return false;
-        const eLabel = (e.label || "").toLowerCase();
-        const eTokens = eLabel.replace(/[^a-z0-9]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
-        const tTokens = tLabel.replace(/[^a-z0-9]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
-        const sharesToken = eTokens.some((tok) => tTokens.some((st) => st.includes(tok) || tok.includes(st)));
-        const specialMatch =
-          (eLabel.includes("tgtg") && tLabel.includes("too good to go")) ||
-          (tLabel.includes("tgtg") && eLabel.includes("too good to go")) ||
-          (eLabel.includes("leclerc") && tLabel.includes("leclerc")) ||
-          (eLabel.includes("sanef") && tLabel.includes("sanef"));
-        return sharesToken || specialMatch;
-      });
-      if (expCandidate) return expCandidate;
-    } else {
-      const incCandidate = tricountIncomes.find((i) => {
-        if (Math.abs(Number(i.amount) - tAmt) > 0.01) return false;
-        const iTime = Date.parse(i.date) || 0;
-        if (tTime && iTime && Math.abs(tTime - iTime) > 7 * 86400000) return false;
-        const iLabel = (i.label || "").toLowerCase();
-        return (
-          (iLabel.includes("travail") && tLabel.includes("travail")) ||
-          (iLabel.includes("france") && tLabel.includes("france"))
-        );
-      });
-      if (incCandidate) return incCandidate;
+    const candidates = transactions.filter(isCandidate);
+    if (candidates.length === 0) {
+      return { displayTransactions: transactions, supersededMap: new Map<string, string>() };
     }
 
-    return null;
+    const settled = transactions.filter((t) => !isCandidate(t));
+    const supersededIds = new Set<string>();
+    const supersededMap = new Map<string, string>(); // cand.id -> settled.id
+
+    for (const cand of candidates) {
+      const candAmount = Math.abs(Number(cand.amount) || 0);
+      const candDate = Date.parse(cand.date) || 0;
+      const candIsIncome = Number(cand.amount) > 0;
+      const candTokens = (cand.label || "")
+        .toLowerCase()
+        .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
+        .replace(/cb\*\d+/gi, " ")
+        .split(/[\s\-_/.,;:!?'"()]+/)
+        .filter((w) => w.length >= 3);
+
+      for (const s of settled) {
+        if (Math.abs(candAmount - Math.abs(Number(s.amount) || 0)) > 0.01) continue;
+        if ((Number(s.amount) > 0) !== candIsIncome) continue;
+        const sDate = Date.parse(s.date) || 0;
+        if (candDate && sDate && Math.abs(sDate - candDate) / (1000 * 3600 * 24) > 14) continue;
+        const sTokens = (s.label || "")
+          .toLowerCase()
+          .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
+          .replace(/cb\*\d+/gi, " ")
+          .split(/[\s\-_/.,;:!?'"()]+/)
+          .filter((w) => w.length >= 3);
+        const hasCommon = candTokens.some((at) => sTokens.some((st) => st.includes(at) || at.includes(st)));
+        const compactCand = (cand.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const compactSettled = (s.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const match =
+          hasCommon ||
+          Boolean(compactCand && compactSettled && (compactCand.includes(compactSettled) || compactSettled.includes(compactCand))) ||
+          ((cand.label || "").toLowerCase().includes("tgtg") && (s.label || "").toLowerCase().includes("too good to go")) ||
+          ((cand.label || "").toLowerCase().includes("travail") && (s.label || "").toLowerCase().includes("travail"));
+        if (match) {
+          supersededIds.add(cand.id);
+          supersededMap.set(cand.id, s.id);
+          break;
+        }
+      }
+    }
+
+    return {
+      displayTransactions: supersededIds.size === 0 ? transactions : transactions.filter((t) => !supersededIds.has(t.id)),
+      supersededMap,
+    };
+  }, [transactions]);
+
+  // Rapprochement biunivoque (1-to-1) strict entre transactions bancaires et dépenses/revenus Tricount
+  const matchedTricountByTxId = useMemo(() => {
+    const map = new Map<string, TricountExpense | TricountIncome>();
+    const usedTricountIds = new Set<string>();
+
+    // 1. Correspondance exacte directe par bankRowId, externalId ou dedupKey
+    for (const t of displayTransactions) {
+      const expense = tricountExpenses.find(
+        (e) =>
+          !usedTricountIds.has(e.id) &&
+          (e.bankRowId === t.id ||
+            (t.externalId && e.bankReference === t.externalId) ||
+            (t.dedupKey && e.bankReference === t.dedupKey)),
+      );
+      if (expense) {
+        map.set(t.id, expense);
+        usedTricountIds.add(expense.id);
+        continue;
+      }
+
+      const income = tricountIncomes.find(
+        (i) =>
+          !usedTricountIds.has(i.id) &&
+          (i.bankRowId === t.id ||
+            (t.externalId && i.bankReference === t.externalId) ||
+            (t.dedupKey && i.bankReference === t.dedupKey)),
+      );
+      if (income) {
+        map.set(t.id, income);
+        usedTricountIds.add(income.id);
+      }
+    }
+
+    // 2. Correspondance des opérations temporaires remplacées (superseded)
+    for (const [candId, settledTxId] of supersededMap.entries()) {
+      if (map.has(settledTxId)) continue;
+
+      const expense = tricountExpenses.find(
+        (e) => !usedTricountIds.has(e.id) && e.bankRowId === candId,
+      );
+      if (expense) {
+        map.set(settledTxId, expense);
+        usedTricountIds.add(expense.id);
+        continue;
+      }
+
+      const income = tricountIncomes.find(
+        (i) => !usedTricountIds.has(i.id) && i.bankRowId === candId,
+      );
+      if (income) {
+        map.set(settledTxId, income);
+        usedTricountIds.add(income.id);
+      }
+    }
+
+    // 3. Rapprochement heuristique UNIQUEMENT pour les dépenses/revenus orphelins (sans bankRowId connu)
+    const allKnownTxIds = new Set(transactions.map((t) => t.id));
+
+    for (const t of displayTransactions) {
+      if (map.has(t.id)) continue;
+
+      const tAmt = Math.abs(t.amount);
+      const tTime = Date.parse(t.date) || 0;
+      const tLabel = (t.label || "").toLowerCase();
+
+      if (t.amount < 0) {
+        const expCandidate = tricountExpenses.find((e) => {
+          if (usedTricountIds.has(e.id)) return false;
+          // Si l'opération a déjà un bankRowId pointant vers une transaction bancaire connue, elle ne peut pas être un doublon de t
+          if (e.bankRowId && allKnownTxIds.has(e.bankRowId) && e.bankRowId !== t.id) {
+            return false;
+          }
+          if (Math.abs(Number(e.amount) - tAmt) > 0.01) return false;
+          const eTime = Date.parse(e.date) || 0;
+          if (tTime && eTime && Math.abs(tTime - eTime) > 7 * 86400000) return false;
+
+          const eLabel = (e.label || "").toLowerCase();
+          const eTokens = eLabel.replace(/[^a-z0-9]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
+          const tTokens = tLabel.replace(/[^a-z0-9]/g, " ").split(/\s+/).filter((w) => w.length >= 3);
+          const sharesToken = eTokens.some((tok) => tTokens.some((st) => st.includes(tok) || tok.includes(st)));
+          const specialMatch =
+            (eLabel.includes("tgtg") && tLabel.includes("too good to go")) ||
+            (tLabel.includes("tgtg") && eLabel.includes("too good to go")) ||
+            (eLabel.includes("leclerc") && tLabel.includes("leclerc")) ||
+            (eLabel.includes("sanef") && tLabel.includes("sanef"));
+
+          return sharesToken || specialMatch;
+        });
+
+        if (expCandidate) {
+          map.set(t.id, expCandidate);
+          usedTricountIds.add(expCandidate.id);
+        }
+      } else {
+        const incCandidate = tricountIncomes.find((i) => {
+          if (usedTricountIds.has(i.id)) return false;
+          if (i.bankRowId && allKnownTxIds.has(i.bankRowId) && i.bankRowId !== t.id) {
+            return false;
+          }
+          if (Math.abs(Number(i.amount) - tAmt) > 0.01) return false;
+          const iTime = Date.parse(i.date) || 0;
+          if (tTime && iTime && Math.abs(tTime - iTime) > 7 * 86400000) return false;
+
+          const iLabel = (i.label || "").toLowerCase();
+          return (
+            (iLabel.includes("travail") && tLabel.includes("travail")) ||
+            (iLabel.includes("france") && tLabel.includes("france"))
+          );
+        });
+
+        if (incCandidate) {
+          map.set(t.id, incCandidate);
+          usedTricountIds.add(incCandidate.id);
+        }
+      }
+    }
+
+    return map;
+  }, [displayTransactions, transactions, tricountExpenses, tricountIncomes, supersededMap]);
+
+  const findTricountItem = (t: Transaction): TricountExpense | TricountIncome | null => {
+    return matchedTricountByTxId.get(t.id) || null;
   };
 
   const openTricountForTx = (t: Transaction) => {
@@ -491,71 +630,7 @@ const AccountsTab: React.FC<AccountsTabProps> = ({
     }
   };
 
-  // Filtrage intelligent des doublons : autorisations CB ou opérations Base64 temporaires remplacées par le débit réel
-  const displayTransactions = useMemo(() => {
-    const isCandidate = (t: Transaction) => {
-      const cat = (t.category || "").toLowerCase();
-      const label = (t.label || "").toLowerCase();
-      const isBase64 = Boolean(
-        (t.externalId && t.externalId.startsWith("eyJ")) ||
-        (t.dedupKey && t.dedupKey.startsWith("bourso:eyJ"))
-      );
-      return (
-        cat.includes("autorisation") ||
-        cat.includes("authorization") ||
-        label.includes("autorisation") ||
-        label.includes("authorization") ||
-        Boolean(t.pending) ||
-        isBase64
-      );
-    };
 
-    const candidates = transactions.filter(isCandidate);
-    if (candidates.length === 0) return transactions;
-
-    const settled = transactions.filter((t) => !isCandidate(t));
-    const supersededIds = new Set<string>();
-
-    for (const cand of candidates) {
-      const candAmount = Math.abs(Number(cand.amount) || 0);
-      const candDate = Date.parse(cand.date) || 0;
-      const candIsIncome = Number(cand.amount) > 0;
-      const candTokens = (cand.label || "")
-        .toLowerCase()
-        .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
-        .replace(/cb\*\d+/gi, " ")
-        .split(/[\s\-_/.,;:!?'"()]+/)
-        .filter((w) => w.length >= 3);
-
-      for (const s of settled) {
-        if (Math.abs(candAmount - Math.abs(Number(s.amount) || 0)) > 0.01) continue;
-        if ((Number(s.amount) > 0) !== candIsIncome) continue;
-        const sDate = Date.parse(s.date) || 0;
-        if (candDate && sDate && Math.abs(sDate - candDate) / (1000 * 3600 * 24) > 14) continue;
-        const sTokens = (s.label || "")
-          .toLowerCase()
-          .replace(/(?:carte|retrait|avoir)\s+\d{2}\/\d{2}\/\d{2,4}/gi, " ")
-          .replace(/cb\*\d+/gi, " ")
-          .split(/[\s\-_/.,;:!?'"()]+/)
-          .filter((w) => w.length >= 3);
-        const hasCommon = candTokens.some((at) => sTokens.some((st) => st.includes(at) || at.includes(st)));
-        const compactCand = (cand.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const compactSettled = (s.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const match =
-          hasCommon ||
-          Boolean(compactCand && compactSettled && (compactCand.includes(compactSettled) || compactSettled.includes(compactCand))) ||
-          ((cand.label || "").toLowerCase().includes("tgtg") && (s.label || "").toLowerCase().includes("too good to go")) ||
-          ((cand.label || "").toLowerCase().includes("travail") && (s.label || "").toLowerCase().includes("travail"));
-        if (match) {
-          supersededIds.add(cand.id);
-          break;
-        }
-      }
-    }
-
-    if (supersededIds.size === 0) return transactions;
-    return transactions.filter((t) => !supersededIds.has(t.id));
-  }, [transactions]);
 
   const exportTransactionsCsv = () => {
     if (!txAccount || displayTransactions.length === 0) return;
