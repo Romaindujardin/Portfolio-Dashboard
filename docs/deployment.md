@@ -167,11 +167,11 @@ sur la machine hôte et rendez leurs commandes accessibles au processus Node.
 
 ```bash
 # BNP Paribas
-pipx install "git+https://github.com/Romaindujardin/bnp-cli.git"
+pipx install "git+https://github.com/Romaindujardin/bnp-cli.git@v0.2.0"
 pipx inject bnp-cli curl-cffi
 
 # Fortuneo
-pipx install "git+https://github.com/Romaindujardin/fortuneo-cli.git"
+pipx install "git+https://github.com/Romaindujardin/fortuneo-cli.git@v0.2.0"
 ```
 
 Puis dans `.env.production` :

@@ -137,7 +137,7 @@ Cette commande démarre simultanément :
 
 ## 🔌 Sidecars Bancaires Locaux (BoursoBank, BNP, Fortuneo)
 
-Pour trois banques, l'application peut utiliser un **sidecar local en lecture seule** à la place d'Enable Banking. Le sidecar contourne les limites DSP2 (historique de 90 jours, PEA/CTO exclus) et importe l'intégralité des comptes, opérations et positions.
+Pour trois banques, l'application peut utiliser un **sidecar local en lecture seule** à la place d'Enable Banking. Le sidecar contourne les limites DSP2 (historique de 90 jours, PEA/CTO exclus) et importe l'intégralité des comptes et opérations, ainsi que les positions lorsque le CLI les expose.
 
 | Banque | Dépôt | Commande détectée | Identifiants |
 | :--- | :--- | :--- | :--- |
@@ -156,11 +156,11 @@ Pour trois banques, l'application peut utiliser un **sidecar local en lecture se
 
 ```bash
 # BNP Paribas
-pipx install "git+https://github.com/Romaindujardin/bnp-cli.git"
+pipx install "git+https://github.com/Romaindujardin/bnp-cli.git@v0.2.0"
 pipx inject bnp-cli curl-cffi
 
 # Fortuneo
-pipx install "git+https://github.com/Romaindujardin/fortuneo-cli.git"
+pipx install "git+https://github.com/Romaindujardin/fortuneo-cli.git@v0.2.0"
 ```
 
 Installez BoursoBank selon son propre dépôt, puis vérifiez que la commande est dans le `PATH` ou définissez `BOURSO_CLI_PATH`, `BNP_CLI_PATH` et `FORTUNEO_CLI_PATH` dans `.env`.
