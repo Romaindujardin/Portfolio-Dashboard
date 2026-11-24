@@ -53,9 +53,11 @@ export const detectBankKey = (connection) => {
       ? connection.metadata
       : {};
   const aspspName = metadata.aspsp?.name || connection.aspspName || "";
-  const haystack = `${connection.aspspName || ""} ${
-    connection.label || ""
-  } ${aspspName}`.toLowerCase();
+  // Le libellé est fourni par l'utilisateur : il ne sert que de repli quand le
+  // nom officiel de la banque est absent, pour éviter les faux positifs.
+  const haystack = String(
+    aspspName || connection.aspspName || connection.label || "",
+  ).toLowerCase();
   for (const definition of Object.values(SIDECAR_BANKS)) {
     if (definition.aliases.some((alias) => haystack.includes(alias))) {
       return definition.key;
