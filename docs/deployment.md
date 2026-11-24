@@ -159,6 +159,38 @@ ENABLE_BANKING_PRIVATE_KEY_PATH=/app/secrets/enablebanking.pem
 Les variables d'environnement sont prioritaires sur la configuration stockée
 en base.
 
+## Sidecars bancaires (optionnel)
+
+Les sidecars BoursoBank, BNP Paribas et Fortuneo sont des CLI Python locaux.
+Ils ne sont pas inclus dans l'image Docker : pour les utiliser, installez-les
+sur la machine hôte et rendez leurs commandes accessibles au processus Node.
+
+```bash
+# BNP Paribas
+pipx install "git+https://github.com/Romaindujardin/bnp-cli.git"
+pipx inject bnp-cli curl-cffi
+
+# Fortuneo
+pipx install "git+https://github.com/Romaindujardin/fortuneo-cli.git"
+```
+
+Puis dans `.env.production` :
+
+```bash
+BOURSO_CLI_PATH=/home/portfolio/.local/bin/bourso-cli
+BNP_CLI_PATH=/home/portfolio/.local/bin/bnp-direct
+FORTUNEO_CLI_PATH=/home/portfolio/.local/bin/fortuneo-sidecar
+BNP_MFA_TIMEOUT_SECONDS=180
+BNP_TIMEOUT_MS=300000
+FORTUNEO_TIMEOUT_MS=180000
+```
+
+Avec Docker, montez les binaires et leurs dépendances dans le conteneur, ou
+lancez l'application directement avec `npm start` sur l'hôte. Le sidecar est
+prioritaire sur Enable Banking dès qu'une connexion sidecar existe pour la
+banque. Le code secret BNP et le mot de passe Fortuneo sont demandés à chaque
+synchronisation et ne sont jamais enregistrés.
+
 ## 4. Lancer
 
 Arrêter d'abord l'éventuel `npm start` local sur le port 3001, sinon Docker ne
@@ -256,9 +288,10 @@ Chaque profil « Romain / Sophie » possède désormais son propre mot de passe
 SameSite=Lax, valable 7 jours, et refuse toute route `/api` protégée sans
 session ou avec un `user_id` différent du profil authentifié (les routes de
 santé, de connexion et le callback OAuth restent publics). Les clés API et les
-identifiants du sidecar BoursoBank sont chiffrés côté serveur, rattachés au
-profil, ne sont plus stockés dans le navigateur et ne sont jamais renvoyés en
-clair par l'API.
+identifiants BoursoBank, le numéro client BNP et l'identifiant Fortuneo sont
+chiffrés côté serveur, rattachés au profil, ne sont plus stockés dans le
+navigateur et ne sont jamais renvoyés en clair par l'API. Les mots de passe et
+codes secrets BNP/Fortuneo ne sont jamais persistés.
 
 La protection HTTP Basic reste utile en défense en profondeur, mais elle ne
 remplace pas les mots de passe des profils. Pour un accès public, utiliser un

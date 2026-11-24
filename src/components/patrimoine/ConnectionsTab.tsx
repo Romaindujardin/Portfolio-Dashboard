@@ -23,18 +23,31 @@ import type {
 } from "../../types/portfolio";
 import {
   BoursoSidecarStatus,
+  BnpSidecarJob,
+  BnpSidecarStatus,
+  FortuneoSidecarStatus,
+  PortfolioApiError,
+  cancelBnpSidecarJob,
   completeConnection,
   connectBoursoSidecar,
+  deleteBnpSidecarCredentials,
   deleteBoursoSidecarCredentials,
+  deleteFortuneoSidecarCredentials,
   deleteIntegrationSettings,
   disconnect,
+  getBnpSidecarJob,
+  getBnpSidecarStatus,
   getBoursoSidecarStatus,
   getCountries,
+  getFortuneoSidecarStatus,
   saveIntegrationSettings,
   searchInstitutions,
+  startBnpSidecarSync,
   startConnection,
+  submitBnpSidecarMfa,
   syncAllConnections,
   syncConnection,
+  syncFortuneoSidecar,
 } from "../../services/portfolioApi";
 import { getDefaultEnableBankingCallbackUrl } from "../../utils/apiBase";
 import {
@@ -73,19 +86,25 @@ const defaultCallbackUrl = getDefaultEnableBankingCallbackUrl();
 
 const ConnectionLogo: React.FC<{ connection: Connection }> = ({ connection }) => {
   const [logoError, setLogoError] = useState(false);
-  const isSidecar = connection.provider === "bourso-sidecar";
+  const isSidecar = connection.provider.endsWith("-sidecar");
+  const bankName = `${connection.aspspName || ""} ${connection.label || ""}`.toLowerCase();
   const isBourso =
-    isSidecar ||
-    (connection.aspspName || "").toLowerCase().includes("bourso") ||
-    (connection.label || "").toLowerCase().includes("bourso");
+    (isSidecar && connection.provider === "bourso-sidecar") ||
+    bankName.includes("bourso");
+  const isBnp = bankName.includes("bnp") || bankName.includes("paribas");
+  const isFortuneo = bankName.includes("fortuneo");
 
   const logoUrl =
     connection.logo ||
     (isBourso
       ? "https://enablebanking.com/brands/FR/Boursorama%20Banque/"
-      : connection.aspspName
-      ? `https://enablebanking.com/brands/${encodeURIComponent(connection.aspspCountry || "FR")}/${encodeURIComponent(connection.aspspName)}/`
-      : null);
+      : isBnp
+        ? "https://enablebanking.com/brands/FR/BNP%20Paribas/"
+        : isFortuneo
+          ? "https://enablebanking.com/brands/FR/Fortuneo/"
+          : connection.aspspName
+            ? `https://enablebanking.com/brands/${encodeURIComponent(connection.aspspCountry || "FR")}/${encodeURIComponent(connection.aspspName)}/`
+            : null);
 
   if (logoUrl && !logoError) {
     return (
@@ -154,6 +173,105 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   const [boursoBusy, setBoursoBusy] = useState(false);
   const [boursoError, setBoursoError] = useState("");
 
+  // ===== Sidecar BNP Paribas =====
+  const [bnpStatus, setBnpStatus] = useState<BnpSidecarStatus | null>(null);
+  const [bnpModalOpen, setBnpModalOpen] = useState(false);
+  const [bnpTargetConnectionId, setBnpTargetConnectionId] = useState<string | null>(null);
+  const [bnpForm, setBnpForm] = useState({
+    customerId: "",
+    password: "",
+    saveCustomerId: true,
+    since: "",
+  });
+  const [bnpBusy, setBnpBusy] = useState(false);
+  const [bnpError, setBnpError] = useState("");
+  const [bnpJobId, setBnpJobId] = useState<string | null>(null);
+  const [bnpJob, setBnpJob] = useState<BnpSidecarJob | null>(null);
+  const [bnpMfaCode, setBnpMfaCode] = useState("");
+
+  // ===== Sidecar Fortuneo =====
+  const [fortuneoStatus, setFortuneoStatus] = useState<FortuneoSidecarStatus | null>(null);
+  const [fortuneoModalOpen, setFortuneoModalOpen] = useState(false);
+  const [fortuneoTargetConnectionId, setFortuneoTargetConnectionId] = useState<string | null>(null);
+  const [fortuneoForm, setFortuneoForm] = useState({
+    login: "",
+    password: "",
+    otp: "",
+    saveLogin: true,
+    since: "",
+  });
+  const [fortuneoBusy, setFortuneoBusy] = useState(false);
+  const [fortuneoError, setFortuneoError] = useState("");
+  const [fortuneoOtpRequired, setFortuneoOtpRequired] = useState(false);
+
+  const reloadBnpStatus = () => {
+    void getBnpSidecarStatus()
+      .then((st) => setBnpStatus(st))
+      .catch(() => {});
+  };
+
+  const reloadFortuneoStatus = () => {
+    void getFortuneoSidecarStatus()
+      .then((st) => setFortuneoStatus(st))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    reloadBnpStatus();
+    reloadFortuneoStatus();
+  }, []);
+
+  // Polling du job BNP : la validation forte peut survenir plusieurs minutes
+  // après le lancement. Le mot de passe n'est jamais renvoyé au navigateur.
+  useEffect(() => {
+    if (!bnpJobId) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      try {
+        const job = await getBnpSidecarJob(bnpJobId);
+        if (!active) return;
+        setBnpJob(job);
+        if (job.status === "success") {
+          setBnpBusy(false);
+          setBnpJobId(null);
+          setBnpModalOpen(false);
+          setBnpForm((prev) => ({ ...prev, password: "" }));
+          setBnpMfaCode("");
+          setBnpTargetConnectionId(null);
+          reloadBnpStatus();
+          await onReload();
+          const result = job.result;
+          notify(
+            "success",
+            `BNP Paribas synchronisée via le sidecar ! ${result?.accountsSynced ?? 0} compte(s), ${result?.transactionsImported ?? 0} transaction(s).`,
+          );
+          return;
+        }
+        if (job.status === "error") {
+          setBnpBusy(false);
+          setBnpJobId(null);
+          setBnpError(job.error || "Synchronisation BNP interrompue.");
+          return;
+        }
+        timer = setTimeout(tick, job.status === "mfa_required" ? 1500 : 900);
+      } catch (err) {
+        if (!active) return;
+        setBnpError(
+          err instanceof Error ? err.message : "Impossible de suivre la synchronisation BNP.",
+        );
+        timer = setTimeout(tick, 2500);
+      }
+    };
+    void tick();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+    // Le polling ne doit pas redémarrer si les callbacks du parent changent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bnpJobId]);
+
   const reloadBoursoStatus = () => {
     void getBoursoSidecarStatus()
       .then((st) => setBoursoStatus(st))
@@ -168,6 +286,45 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     const name = (inst.name || "").toLowerCase();
     const id = (inst.id || "").toLowerCase();
     return name.includes("bourso") || id.includes("bourso");
+  };
+
+  const isBnpInstitution = (inst: Institution) => {
+    const name = (inst.name || "").toLowerCase();
+    const id = (inst.id || "").toLowerCase();
+    return (
+      name.includes("bnp") ||
+      name.includes("paribas") ||
+      id.includes("bnp") ||
+      id.includes("paribas")
+    );
+  };
+
+  const isFortuneoInstitution = (inst: Institution) => {
+    const name = (inst.name || "").toLowerCase();
+    const id = (inst.id || "").toLowerCase();
+    return name.includes("fortuneo") || id.includes("fortuneo");
+  };
+
+  const sidecarKindForInstitution = (
+    inst: Institution,
+  ): "bourso" | "bnp" | "fortuneo" | null => {
+    if (isBnpInstitution(inst)) return "bnp";
+    if (isFortuneoInstitution(inst)) return "fortuneo";
+    if (isBoursoInstitution(inst)) return "bourso";
+    return null;
+  };
+
+  const sidecarKindForConnection = (
+    connection: Connection,
+  ): "bourso" | "bnp" | "fortuneo" | null => {
+    if (connection.provider === "bnp-sidecar") return "bnp";
+    if (connection.provider === "fortuneo-sidecar") return "fortuneo";
+    if (connection.provider === "bourso-sidecar") return "bourso";
+    const bank = `${connection.aspspName || ""} ${connection.label || ""}`.toLowerCase();
+    if (bank.includes("bnp") || bank.includes("paribas")) return "bnp";
+    if (bank.includes("fortuneo")) return "fortuneo";
+    if (bank.includes("bourso")) return "bourso";
+    return null;
   };
 
   const handleConnectBourso = async () => {
@@ -234,6 +391,200 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     }
   };
 
+  const openBnpModal = (connectionId: string | null = null) => {
+    setBnpTargetConnectionId(connectionId);
+    setBnpError("");
+    reloadBnpStatus();
+    setBnpModalOpen(true);
+  };
+
+  const closeBnpModal = async () => {
+    if (bnpJobId) {
+      try {
+        await cancelBnpSidecarJob(bnpJobId);
+      } catch {
+        // La tâche est peut-être déjà terminée.
+      }
+    }
+    setBnpJobId(null);
+    setBnpJob(null);
+    setBnpBusy(false);
+    setBnpModalOpen(false);
+    setBnpError("");
+    setBnpMfaCode("");
+    setBnpForm((prev) => ({ ...prev, password: "" }));
+  };
+
+  const handleStartBnp = async () => {
+    const customerId = bnpForm.customerId.trim();
+    const password = bnpForm.password;
+    if (!bnpStatus?.configured && !customerId) {
+      setBnpError("Numéro client BNP requis (7 à 10 chiffres).");
+      return;
+    }
+    if (customerId && !/^[0-9]{7,10}$/.test(customerId)) {
+      setBnpError("Le numéro client BNP doit contenir 7 à 10 chiffres.");
+      return;
+    }
+    if (!/^[0-9]{6}$/.test(password)) {
+      setBnpError("Le code secret BNP doit contenir exactement 6 chiffres.");
+      return;
+    }
+    setBnpBusy(true);
+    setBnpError("");
+    setBnpJob(null);
+    setBnpMfaCode("");
+    try {
+      const job = await startBnpSidecarSync(userId, {
+        customerId: customerId || undefined,
+        password,
+        saveCustomerId: bnpForm.saveCustomerId,
+        since: bnpForm.since || undefined,
+        connectionId: bnpTargetConnectionId || undefined,
+      });
+      setBnpJobId(job.jobId);
+      setBnpForm((prev) => ({ ...prev, password: "" }));
+    } catch (err) {
+      setBnpBusy(false);
+      setBnpError(
+        err instanceof Error ? err.message : "Impossible de lancer la synchronisation BNP.",
+      );
+    }
+  };
+
+  const handleBnpMfaSubmit = async (payload: {
+    code?: string;
+    action?: number;
+  }) => {
+    if (!bnpJobId) return;
+    if (payload.code != null && !/^[0-9]{4,10}$/.test(payload.code.trim())) {
+      setBnpError("Le code de validation BNP doit contenir 4 à 10 chiffres.");
+      return;
+    }
+    setBnpError("");
+    try {
+      await submitBnpSidecarMfa(bnpJobId, {
+        ...(payload.code != null ? { code: payload.code.trim() } : {}),
+        ...(payload.action != null ? { action: payload.action } : {}),
+      });
+      if (payload.code != null) setBnpMfaCode("");
+    } catch (err) {
+      setBnpError(
+        err instanceof Error ? err.message : "Validation BNP impossible.",
+      );
+    }
+  };
+
+  const handleForgetBnpCredentials = async () => {
+    if (
+      !window.confirm(
+        "Supprimer le numéro client BNP enregistré ? Le code secret n'a jamais été conservé.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteBnpSidecarCredentials();
+      setBnpStatus((prev) => (prev ? { ...prev, configured: false } : prev));
+      setBnpForm((prev) => ({ ...prev, customerId: "" }));
+      notify("success", "Numéro client BNP supprimé.");
+    } catch (err) {
+      notify(
+        "error",
+        err instanceof Error
+          ? err.message
+          : "Impossible de supprimer le numéro client BNP.",
+      );
+    }
+  };
+
+  const openFortuneoModal = (connectionId: string | null = null) => {
+    setFortuneoTargetConnectionId(connectionId);
+    setFortuneoError("");
+    setFortuneoOtpRequired(false);
+    reloadFortuneoStatus();
+    setFortuneoModalOpen(true);
+  };
+
+  const closeFortuneoModal = () => {
+    setFortuneoModalOpen(false);
+    setFortuneoError("");
+    setFortuneoOtpRequired(false);
+    setFortuneoForm((prev) => ({ ...prev, password: "", otp: "" }));
+  };
+
+  const handleSyncFortuneo = async () => {
+    const login = fortuneoForm.login.trim();
+    if (!fortuneoStatus?.configured && !login) {
+      setFortuneoError("Identifiant Fortuneo requis.");
+      return;
+    }
+    if (!fortuneoForm.password) {
+      setFortuneoError("Mot de passe Fortuneo requis pour chaque synchronisation.");
+      return;
+    }
+    const otp = fortuneoForm.otp.trim();
+    if (otp && !/^[0-9]{4,8}$/.test(otp)) {
+      setFortuneoError("Le code de validation Fortuneo doit contenir 4 à 8 chiffres.");
+      return;
+    }
+    setFortuneoBusy(true);
+    setFortuneoError("");
+    try {
+      const res = await syncFortuneoSidecar(userId, {
+        login: login || undefined,
+        password: fortuneoForm.password,
+        otp: otp || undefined,
+        saveLogin: fortuneoForm.saveLogin,
+        since: fortuneoForm.since || undefined,
+        connectionId: fortuneoTargetConnectionId || undefined,
+      });
+      setFortuneoModalOpen(false);
+      setFortuneoOtpRequired(false);
+      setFortuneoForm((prev) => ({ ...prev, password: "", otp: "" }));
+      setFortuneoTargetConnectionId(null);
+      reloadFortuneoStatus();
+      await onReload();
+      notify(
+        "success",
+        `Fortuneo synchronisé via le sidecar ! ${res.accountsSynced} compte(s), ${res.transactionsImported} transaction(s), ${res.holdingsSynced ?? 0} position(s).`,
+      );
+    } catch (err) {
+      const code = err instanceof PortfolioApiError ? err.code : undefined;
+      if (code === "OTP_REQUIRED" || code === "ACTION_REQUIRED" || code === "UNSUPPORTED_AUTH") {
+        setFortuneoOtpRequired(true);
+      }
+      setFortuneoError(
+        err instanceof Error ? err.message : "Synchronisation Fortuneo impossible.",
+      );
+    } finally {
+      setFortuneoBusy(false);
+    }
+  };
+
+  const handleForgetFortuneoCredentials = async () => {
+    if (
+      !window.confirm(
+        "Supprimer l'identifiant Fortuneo enregistré ? Le mot de passe n'a jamais été conservé.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteFortuneoSidecarCredentials();
+      setFortuneoStatus((prev) => (prev ? { ...prev, configured: false } : prev));
+      setFortuneoForm((prev) => ({ ...prev, login: "" }));
+      notify("success", "Identifiant Fortuneo supprimé.");
+    } catch (err) {
+      notify(
+        "error",
+        err instanceof Error
+          ? err.message
+          : "Impossible de supprimer l'identifiant Fortuneo.",
+      );
+    }
+  };
+
   useEffect(() => {
     void getCountries()
       .then((list) => {
@@ -288,8 +639,17 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     if (connectingId) return;
     setSearchError("");
 
-    // Détection d'un sidecar disponible pour BoursoBank :
-    // On propose directement le sidecar natif pour éviter les limitations DSP2 (PEA, livrets, 90j)
+    // Détection d'un sidecar disponible pour BoursoBank, BNP ou Fortuneo :
+    // On propose directement le sidecar natif pour éviter les limitations DSP2
+    // (PEA, livrets, historique limité à 90 jours).
+    if (isBnpInstitution(institution)) {
+      openBnpModal();
+      return;
+    }
+    if (isFortuneoInstitution(institution)) {
+      openFortuneoModal();
+      return;
+    }
     if (isBoursoInstitution(institution)) {
       setTargetConnectionId(null);
       reloadBoursoStatus();
@@ -359,6 +719,21 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   };
 
   const syncOne = async (connection: Connection) => {
+    const sidecarKind = sidecarKindForConnection(connection);
+    if (sidecarKind === "bnp") {
+      openBnpModal(connection.id);
+      return;
+    }
+    if (sidecarKind === "fortuneo") {
+      openFortuneoModal(connection.id);
+      return;
+    }
+    if (sidecarKind === "bourso" && connection.provider !== "bourso-sidecar") {
+      setTargetConnectionId(connection.id);
+      reloadBoursoStatus();
+      setBoursoModalOpen(true);
+      return;
+    }
     setSyncingId(connection.id);
     try {
       const result = await syncConnection(connection.id, userId, true);
@@ -391,12 +766,18 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       const ok = results.filter(
         (result) => result.status === "OK" && (result.errors?.length ?? 0) === 0,
       ).length;
-      const failed = results.length - ok;
+      const credentialsRequired = results.filter(
+        (result) => result.status === "CREDENTIALS_REQUIRED",
+      ).length;
+      const failed = results.length - ok - credentialsRequired;
       notify(
-        failed > 0 ? "error" : "success",
-        `${ok} connexion(s) synchronisée(s)${
-          failed ? `, ${failed} à vérifier` : ""
-        }.`,
+        failed > 0 || credentialsRequired > 0 ? "error" : "success",
+        `${ok} connexion(s) synchronisée(s)` +
+          (credentialsRequired
+            ? `, ${credentialsRequired} sidecar(s) en attente de votre code secret (BNP/Fortuneo)`
+            : "") +
+          (failed ? `, ${failed} à vérifier` : "") +
+          ".",
       );
     } catch (error) {
       notify("error", error instanceof Error ? error.message : "Synchronisation impossible.");
@@ -575,6 +956,12 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
               >
                 <Zap className="h-3.5 w-3.5 text-[#c8a55e]" /> Sidecar BoursoBank
               </Button>
+              <Button size="sm" onClick={() => openBnpModal()}>
+                <Zap className="h-3.5 w-3.5 text-[#c8a55e]" /> Sidecar BNP
+              </Button>
+              <Button size="sm" onClick={() => openFortuneoModal()}>
+                <Zap className="h-3.5 w-3.5 text-[#c8a55e]" /> Sidecar Fortuneo
+              </Button>
               <Button size="sm" onClick={() => setManualOpen(true)}>
                 <Link2 className="h-3.5 w-3.5" /> J'ai déjà l'URL de retour
               </Button>
@@ -625,7 +1012,14 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         ) : institutions.length > 0 ? (
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {institutions.map((institution) => {
-              const hasSidecar = isBoursoInstitution(institution);
+              const sidecarKind = sidecarKindForInstitution(institution);
+              const hasSidecar = Boolean(sidecarKind);
+              const sidecarDescription =
+                sidecarKind === "bnp"
+                  ? "Tous les comptes & historique complet"
+                  : sidecarKind === "fortuneo"
+                    ? "Comptes, titres & historique complet"
+                    : "PEA, livrets & historique complet";
               return (
                 <div
                   key={institution.id}
@@ -663,7 +1057,7 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     </div>
                     <p className="text-[10px] text-[#6a6a6a]">
                       {hasSidecar
-                        ? "PEA, livrets & historique complet"
+                        ? sidecarDescription
                         : `${institution.country}${institution.psuType === "business" ? " · pro" : ""}${institution.beta ? " · bêta" : ""}`}
                     </p>
                   </div>
@@ -723,11 +1117,16 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         ) : (
           <div className="mt-3 space-y-2">
             {connections.map((connection) => {
-              const isSidecar = connection.provider === "bourso-sidecar";
-              const isBourso =
-                isSidecar ||
-                (connection.aspspName || "").toLowerCase().includes("bourso") ||
-                (connection.label || "").toLowerCase().includes("bourso");
+              const isSidecar = connection.provider.endsWith("-sidecar");
+              const sidecarKind = sidecarKindForConnection(connection);
+              const isBnp = sidecarKind === "bnp";
+              const isFortuneo = sidecarKind === "fortuneo";
+              const isBourso = sidecarKind === "bourso";
+              const sidecarLabel = isBnp
+                ? "BNP Paribas"
+                : isFortuneo
+                  ? "Fortuneo"
+                  : "BoursoBank";
               return (
                 <div
                   key={connection.id}
@@ -759,12 +1158,32 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       </div>
                       <p className="mt-0.5 text-[11px] text-[#6a6a6a]">
                         {isSidecar
-                          ? "Sidecar local BoursoBank"
+                          ? `Sidecar local ${sidecarLabel}`
                           : `Consentement jusqu'au ${formatDate(connection.validUntil)}`}{" "}
                         · dernière synchro {connection.lastSyncAt ? formatDate(connection.lastSyncAt) : "jamais"}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
+                      {isBnp && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => openBnpModal(connection.id)}
+                          title="Synchroniser BNP Paribas via le Sidecar"
+                        >
+                          <Zap className="h-3.5 w-3.5" /> Sidecar
+                        </Button>
+                      )}
+                      {isFortuneo && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => openFortuneoModal(connection.id)}
+                          title="Synchroniser Fortuneo via le Sidecar"
+                        >
+                          <Zap className="h-3.5 w-3.5" /> Sidecar
+                        </Button>
+                      )}
                       {isBourso && (
                         <Button
                           size="sm"
@@ -958,6 +1377,313 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   className="rounded border-[rgba(255,255,255,0.2)] bg-[#141414] text-[#c8a55e] focus:ring-0"
                 />
                 Mémoriser de façon chiffrée
+              </label>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Sidecar BNP Paribas */}
+      <Modal
+        open={bnpModalOpen}
+        title="Connexion Sidecar BNP Paribas"
+        onClose={() => {
+          void closeBnpModal();
+        }}
+        footer={
+          <>
+            <Button
+              onClick={() => {
+                void closeBnpModal();
+              }}
+            >
+              Annuler
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleStartBnp}
+              loading={bnpBusy}
+              disabled={bnpBusy || Boolean(bnpJobId)}
+            >
+              <Zap className="h-3.5 w-3.5" /> Synchroniser via Sidecar
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {bnpError && (
+            <ErrorBanner message={bnpError} onClose={() => setBnpError("")} />
+          )}
+          {bnpStatus && !bnpStatus.available && (
+            <ErrorBanner message="CLI bnp-cli introuvable sur le serveur. Installez-le ou définissez BNP_CLI_PATH." />
+          )}
+          <div className="rounded-lg border border-[#c8a55e]/25 bg-[#c8a55e]/5 p-3 text-xs text-[#d4d4d4]">
+            <p className="font-semibold text-[#c8a55e] flex items-center gap-1.5 mb-1">
+              <Sparkles className="h-3.5 w-3.5" />
+              Accès complet aux comptes BNP Paribas
+            </p>
+            <p className="text-[11px] text-[#a0a0a0]">
+              Le sidecar local extrait tous les comptes (courants, livrets, PEA, titres,
+              assurance-vie) et tout l'historique disponible. Le code secret est saisi à
+              chaque exécution et n'est jamais enregistré.
+            </p>
+          </div>
+
+          <Field
+            label="Numéro client BNP"
+            hint={
+              bnpStatus?.configured
+                ? "Numéro client déjà mémorisé. Laissez vide pour le réutiliser."
+                : "7 à 10 chiffres, visible sur vos relevés BNP."
+            }
+            required={!bnpStatus?.configured}
+          >
+            <Input
+              value={bnpForm.customerId}
+              onChange={(e) => setBnpForm({ ...bnpForm, customerId: e.target.value })}
+              placeholder={bnpStatus?.customerIdSaved ? "•••••••• (mémorisé)" : "Ex: 12345678"}
+              autoComplete="username"
+            />
+          </Field>
+
+          <Field
+            label="Code secret BNP"
+            hint="Exactement 6 chiffres. Jamais enregistré, jamais réutilisé entre deux connexions."
+            required
+          >
+            <Input
+              type="password"
+              value={bnpForm.password}
+              onChange={(e) => setBnpForm({ ...bnpForm, password: e.target.value })}
+              placeholder="6 chiffres"
+              autoComplete="off"
+              inputMode="numeric"
+            />
+          </Field>
+
+          {bnpStatus?.configured && (
+            <button
+              type="button"
+              onClick={handleForgetBnpCredentials}
+              className="inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Oublier le numéro client enregistré
+            </button>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <Field label="Historique depuis" hint="Facultatif (défaut : 1 an)">
+              <Input
+                type="date"
+                value={bnpForm.since}
+                onChange={(e) => setBnpForm({ ...bnpForm, since: e.target.value })}
+              />
+            </Field>
+            <div className="flex items-center pt-5">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-[#d4d4d4]">
+                <input
+                  type="checkbox"
+                  checked={bnpForm.saveCustomerId}
+                  onChange={(e) =>
+                    setBnpForm({ ...bnpForm, saveCustomerId: e.target.checked })
+                  }
+                  className="rounded border-[rgba(255,255,255,0.2)] bg-[#141414] text-[#c8a55e] focus:ring-0"
+                />
+                Mémoriser le numéro client
+              </label>
+            </div>
+          </div>
+
+          {bnpJobId && !bnpJob?.challenge && (
+            <Spinner label="Connexion BNP et extraction des comptes en cours…" />
+          )}
+
+          {bnpJob?.challenge && (
+            <div className="rounded-lg border border-[#c8a55e]/30 bg-[#141414] p-3">
+              <p className="text-xs font-semibold text-[#c8a55e]">
+                Validation forte demandée par BNP
+              </p>
+              <p className="mt-0.5 text-[11px] text-[#8a8a8a]">
+                {bnpJob.challenge.page?.host}
+                {bnpJob.challenge.page?.path}
+              </p>
+              {bnpJob.challenge.codeRequired ? (
+                <div className="mt-2 flex items-end gap-2">
+                  <Field label="Code reçu par SMS" className="flex-1">
+                    <Input
+                      value={bnpMfaCode}
+                      onChange={(e) => setBnpMfaCode(e.target.value)}
+                      placeholder="4 à 10 chiffres"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                    />
+                  </Field>
+                  <Button
+                    variant="primary"
+                    onClick={() => handleBnpMfaSubmit({ code: bnpMfaCode })}
+                  >
+                    Valider
+                  </Button>
+                </div>
+              ) : (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {bnpJob.challenge.actions.map((action) => (
+                    <Button
+                      key={action.index}
+                      variant={action.index === 0 ? "primary" : "secondary"}
+                      onClick={() => handleBnpMfaSubmit({ action: action.index })}
+                    >
+                      {action.label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  void closeBnpModal();
+                }}
+                className="mt-2 text-[11px] text-red-400 hover:text-red-300"
+              >
+                Annuler cette synchronisation
+              </button>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Modal Sidecar Fortuneo */}
+      <Modal
+        open={fortuneoModalOpen}
+        title="Connexion Sidecar Fortuneo"
+        onClose={closeFortuneoModal}
+        footer={
+          <>
+            <Button onClick={closeFortuneoModal}>Annuler</Button>
+            <Button
+              variant="primary"
+              onClick={handleSyncFortuneo}
+              loading={fortuneoBusy}
+              disabled={
+                !fortuneoForm.password ||
+                (!fortuneoStatus?.configured && !fortuneoForm.login.trim())
+              }
+            >
+              <Zap className="h-3.5 w-3.5" /> Synchroniser via Sidecar
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {fortuneoError && (
+            <ErrorBanner
+              message={fortuneoError}
+              onClose={() => setFortuneoError("")}
+            />
+          )}
+          {fortuneoStatus && !fortuneoStatus.available && (
+            <ErrorBanner message="CLI fortuneo-sidecar introuvable sur le serveur. Installez-le ou définissez FORTUNEO_CLI_PATH." />
+          )}
+          <div className="rounded-lg border border-[#c8a55e]/25 bg-[#c8a55e]/5 p-3 text-xs text-[#d4d4d4]">
+            <p className="font-semibold text-[#c8a55e] flex items-center gap-1.5 mb-1">
+              <Sparkles className="h-3.5 w-3.5" />
+              Accès complet aux comptes Fortuneo
+            </p>
+            <p className="text-[11px] text-[#a0a0a0]">
+              Le sidecar local extrait les comptes, l'historique des opérations et les
+              positions (PEA, compte-titres, assurance-vie). Le mot de passe est saisi à
+              chaque exécution et n'est jamais enregistré.
+            </p>
+          </div>
+
+          <Field
+            label="Identifiant Fortuneo"
+            hint={
+              fortuneoStatus?.configured
+                ? "Identifiant déjà mémorisé. Laissez vide pour le réutiliser."
+                : "Votre identifiant client Fortuneo."
+            }
+            required={!fortuneoStatus?.configured}
+          >
+            <Input
+              value={fortuneoForm.login}
+              onChange={(e) => setFortuneoForm({ ...fortuneoForm, login: e.target.value })}
+              placeholder={
+                fortuneoStatus?.loginSaved ? "•••••••• (mémorisé)" : "Identifiant Fortuneo"
+              }
+              autoComplete="username"
+            />
+          </Field>
+
+          <Field
+            label="Mot de passe Fortuneo"
+            hint="Requis à chaque synchronisation, jamais enregistré."
+            required
+          >
+            <Input
+              type="password"
+              value={fortuneoForm.password}
+              onChange={(e) =>
+                setFortuneoForm({ ...fortuneoForm, password: e.target.value })
+              }
+              placeholder="Mot de passe Fortuneo"
+              autoComplete="off"
+            />
+          </Field>
+
+          <Field
+            label="Code de validation 2FA"
+            hint="Facultatif. À saisir si Fortuneo envoie un code par SMS."
+          >
+            <Input
+              value={fortuneoForm.otp}
+              onChange={(e) => setFortuneoForm({ ...fortuneoForm, otp: e.target.value })}
+              placeholder="4 à 8 chiffres"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+            />
+          </Field>
+
+          {fortuneoOtpRequired && (
+            <p className="rounded-lg border border-[#c8a55e]/25 bg-[#c8a55e]/5 px-3 py-2 text-[11px] text-[#d4d4d4]">
+              Fortuneo a demandé une validation 2FA. Saisissez le code reçu par SMS,
+              puis relancez la synchronisation avec votre mot de passe.
+            </p>
+          )}
+
+          {fortuneoStatus?.configured && (
+            <button
+              type="button"
+              onClick={handleForgetFortuneoCredentials}
+              className="inline-flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Oublier l'identifiant enregistré
+            </button>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <Field label="Historique depuis" hint="Facultatif">
+              <Input
+                type="date"
+                value={fortuneoForm.since}
+                onChange={(e) =>
+                  setFortuneoForm({ ...fortuneoForm, since: e.target.value })
+                }
+              />
+            </Field>
+            <div className="flex items-center pt-5">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-[#d4d4d4]">
+                <input
+                  type="checkbox"
+                  checked={fortuneoForm.saveLogin}
+                  onChange={(e) =>
+                    setFortuneoForm({ ...fortuneoForm, saveLogin: e.target.checked })
+                  }
+                  className="rounded border-[rgba(255,255,255,0.2)] bg-[#141414] text-[#c8a55e] focus:ring-0"
+                />
+                Mémoriser l'identifiant
               </label>
             </div>
           </div>

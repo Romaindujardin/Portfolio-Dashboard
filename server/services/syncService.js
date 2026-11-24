@@ -15,6 +15,13 @@ import {
 } from "./transactions.js";
 import { todayIso } from "../lib/validate.js";
 import { syncBoursoSidecar } from "./boursoSidecarService.js";
+import {
+  detectBankKey,
+  filterSyncableConnections,
+  isConnectionReplacedBySidecar,
+  isSidecarProvider,
+  unmarkSidecarPriority,
+} from "./sidecarPriority.js";
 
 const SYNC_COOLDOWN_MS = 4 * 3600 * 1000;
 
@@ -49,6 +56,18 @@ export class SyncService {
     // Le state porte l'utilisateur : le callback OAuth ne transporte que code+state.
     const state = `${userId}.${cryptoRandomState()}`;
     const auth = await this.connector.startAuth({ institutionId, state });
+    // Les banques disposant d'un sidecar local ne passent plus par la DSP2 :
+    // le sidecar fournit tous les comptes, y compris PEA/CTO et l'historique
+    // complet, sans les restrictions de 90 jours d'Enable Banking.
+    const bankKey = detectBankKey({
+      aspspName: auth.institution.name,
+    });
+    if (bankKey) {
+      throw new ConnectorError(
+        `${auth.institution.name} dispose d'un sidecar local. Utilisez la connexion Sidecar pour synchroniser cette banque.`,
+        { status: 409, code: "SIDECAR_PRIORITY" },
+      );
+    }
     const connection = this.repository.createConnector(userId, {
       provider: PROVIDERS.ENABLE_BANKING,
       label: label || auth.institution.name,
@@ -173,12 +192,28 @@ export class SyncService {
       throw new ConnectorError("Connexion introuvable", { status: 404, code: "NOT_FOUND" });
     }
 
-    if (connection.provider === PROVIDERS.BOURSO_SIDECAR || connection.provider === "bourso-sidecar") {
-      return syncBoursoSidecar({
-        repository: this.repository,
-        userId,
-        connectionId: connection.id,
-      });
+    if (isSidecarProvider(connection.provider)) {
+      if (connection.provider === PROVIDERS.BOURSO_SIDECAR) {
+        return syncBoursoSidecar({
+          repository: this.repository,
+          userId,
+          connectionId: connection.id,
+        });
+      }
+      throw new ConnectorError(
+        connection.provider === PROVIDERS.BNP_SIDECAR
+          ? "La synchronisation BNP exige le code secret à chaque exécution. Utilisez la connexion Sidecar BNP pour saisir vos identifiants."
+          : "La synchronisation Fortuneo exige le mot de passe à chaque exécution. Utilisez la connexion Sidecar Fortuneo pour saisir vos identifiants.",
+        { status: 428, code: "SIDECAR_CREDENTIALS_REQUIRED" },
+      );
+    }
+
+    const connections = this.repository.listConnectors(userId);
+    if (isConnectionReplacedBySidecar(connection, connections)) {
+      throw new ConnectorError(
+        "Cette connexion Enable Banking est remplacée par un sidecar local. Synchronisez la connexion Sidecar correspondante.",
+        { status: 409, code: "SIDECAR_PRIORITY" },
+      );
     }
 
     if (!connection.sessionId) {
@@ -354,12 +389,48 @@ export class SyncService {
   }
 
   async syncAll(userId, { force = false } = {}) {
-    const connections = this.repository
-      .listConnectors(userId)
-      .filter((connection) => connection.provider === PROVIDERS.ENABLE_BANKING)
-      .filter((connection) => connection.sessionId);
+    const connections = filterSyncableConnections(
+      this.repository.listConnectors(userId),
+    ).filter(
+      (connection) =>
+        isSidecarProvider(connection.provider) || Boolean(connection.sessionId),
+    );
     const results = [];
     for (const connection of connections) {
+      if (isSidecarProvider(connection.provider)) {
+        if (connection.provider === PROVIDERS.BOURSO_SIDECAR) {
+          try {
+            const result = await this.syncConnection(connection.id, userId, {
+              force,
+            });
+            results.push({
+              connectionId: connection.id,
+              label: connection.label,
+              ...result,
+            });
+          } catch (error) {
+            results.push({
+              connectionId: connection.id,
+              label: connection.label,
+              status: "ERROR",
+              error: error.message,
+              code: error.code || "SYNC_ERROR",
+            });
+          }
+          continue;
+        }
+        // BNP et Fortuneo exigent un code secret à chaque exécution : la
+        // synchronisation automatique ne peut pas les lancer sans lui.
+        results.push({
+          connectionId: connection.id,
+          label: connection.label,
+          status: "CREDENTIALS_REQUIRED",
+          code: "SIDECAR_CREDENTIALS_REQUIRED",
+          message:
+            "Saisissez votre code secret dans la connexion Sidecar pour synchroniser cette banque.",
+        });
+        continue;
+      }
       try {
         const result = await this.syncConnection(connection.id, userId, { force });
         results.push({ connectionId: connection.id, label: connection.label, ...result });
@@ -396,6 +467,22 @@ export class SyncService {
       this.repository.detachAccountsFromConnection(connectionId, userId);
     }
     this.repository.deleteConnector(connectionId, userId);
+
+    // Lorsqu'un sidecar est retiré, les connexions Enable Banking de la même
+    // banque redeviennent synchronisables si aucun autre sidecar ne subsiste.
+    if (isSidecarProvider(connection.provider)) {
+      const bankKey = detectBankKey(connection);
+      const remainingSidecars = this.repository
+        .listConnectors(userId)
+        .filter(
+          (candidate) =>
+            isSidecarProvider(candidate.provider) &&
+            detectBankKey(candidate) === bankKey,
+        );
+      if (bankKey && remainingSidecars.length === 0) {
+        unmarkSidecarPriority({ repository: this.repository, userId, bankKey });
+      }
+    }
     return true;
   }
 }

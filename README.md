@@ -9,7 +9,8 @@ Conçue selon une philosophie **Local-First** avec **SQLite**, ultra-rapide, sé
 ## ✨ Fonctionnalités Clés
 
 ### 🏛️ Patrimoine & Open Banking (Nouveau)
-- **Multi-banques via Enable Banking (PSD2 / Open Banking)** : connexion directe et synchronisation de plus de 2000 banques européennes (BoursoBank, BNP Paribas, Crédit Agricole, Société Générale, etc.).
+- **Multi-banques via Enable Banking (PSD2 / Open Banking)** : connexion directe et synchronisation de plus de 2000 banques européennes (Crédit Agricole, Société Générale, etc.).
+- **Sidecars bancaires locaux** : pour BoursoBank, BNP Paribas et Fortuneo, un sidecar open source peut remplacer Enable Banking et fournir tous les comptes (courants, livrets, PEA, compte-titres, assurance-vie) ainsi que l'historique complet, sans la limite DSP2 de 90 jours. Le sidecar est utilisé en priorité dès qu'il est configuré.
 - **Immobilier automatisé** : estimation de valeur basée sur l'Open Data des transactions réelles (DVF / Cerema), géocodage officiel IGN et ré-indexation trimestrielle INSEE, complétée par des coefficients déclaratifs (étage, terrasse, DPE, travaux).
 - **Prêts & Emprunts** : calcul des mensualités, du capital restant dû et tableau d'amortissement complet synchronisé avec le patrimoine net.
 - **Marchés & Titres** : suivi des cours d'actions, ETF et cryptos via Yahoo Finance avec conversion en euros et résolution automatique des codes ISIN via OpenFIGI.
@@ -106,8 +107,8 @@ Cette commande démarre simultanément :
 
 - **Authentification par profil** : chaque profil (Romain / Sophie) possède son propre mot de passe (8 caractères minimum). Le serveur émet un cookie de session `portfolio_session` **HttpOnly**, `SameSite=Lax`, valable 7 jours. Les routes `/api` protégées refusent toute requête sans session (seules la santé, la connexion et le callback OAuth restent publics), et un `user_id` différent de la session est rejeté (`403 USER_MISMATCH`). Un changement de mot de passe invalide les anciens jetons.
 - **Création de profil protégée** : en production, `/auth/setup` exige `AUTH_SETUP_TOKEN` (16 caractères minimum, à générer avec `openssl rand -hex 24`). Sans ce jeton, la création de profil est désactivée ; les profils existants continuent de fonctionner. Le code est saisi une fois dans l'interface, puis pour chaque nouveau profil.
-- **GET sans effet de bord** : le nettoyage des doublons d'autorisations bancaires n'est plus déclenché par une lecture. Il s'exécute après une synchronisation BoursoBank ou via `POST /api/portfolio/transactions/cleanup-duplicates`.
-- **Coffre de secrets** : les clés API Gemini, Binance, Etherscan, CoinGecko et OpenSea, ainsi que les identifiants du sidecar BoursoBank, ne sont plus stockés dans le navigateur ni dans `user_settings`. Ils sont chiffrés au repos en **AES-256-GCM** dans la table `user_secrets`, rattachés au profil, et ne sont jamais renvoyés en clair par l'API. Les appels authentifiés Gemini, Etherscan, CoinGecko, Binance et OpenSea passent par des proxies serveur.
+- **GET sans effet de bord** : le nettoyage des doublons d'autorisations bancaires n'est plus déclenché par une lecture. Il s'exécute après une synchronisation bancaire (BoursoBank, BNP, Fortuneo) ou via `POST /api/portfolio/transactions/cleanup-duplicates`.
+- **Coffre de secrets** : les clés API Gemini, Binance, Etherscan, CoinGecko et OpenSea, ainsi que les identifiants BoursoBank, le numéro client BNP et l'identifiant Fortuneo, ne sont pas stockés dans le navigateur ni dans `user_settings`. Ils sont chiffrés au repos en **AES-256-GCM** dans la table `user_secrets`, rattachés au profil, et ne sont jamais renvoyés en clair par l'API. Les mots de passe et codes secrets BNP/Fortuneo ne sont jamais enregistrés : ils sont saisis à chaque synchronisation. Les appels authentifiés Gemini, Etherscan, CoinGecko, Binance et OpenSea passent par des proxies serveur.
 - **Administration** : la configuration globale Enable Banking (Application ID, clé PEM, URL de retour) n'est modifiable que par les profils listés dans `ADMIN_USERS` (séparés par des virgules). Si la variable est absente, le profil le plus ancien fait office d'administrateur ; `canManage=false` est renvoyé aux autres profils et l'API répond `403` sur toute mutation.
 - **En-têtes de sécurité** : Express applique une CSP **Report-Only** par défaut et collecte les violations sur `/api/csp-report`. Après analyse, `CSP_MODE=enforce` active le blocage. Caddy ne duplique pas la CSP : Express reste la source unique pour que le mode soit réellement appliqué. Les autres en-têtes (HSTS, `X-Frame-Options`, `Permissions-Policy`, COOP/CORP) sont posés par les deux couches.
 - **Clés locales** : `data/.portfolio-secret` (chiffrement des secrets) et `data/.portfolio-session-secret` (signature des sessions) sont générés automatiquement en `0600`. Sauvegardez-les avec la base : sans eux, les secrets et sessions existants ne peuvent plus être déchiffrés/validés. On peut aussi fournir `PORTFOLIO_SECRET_KEY` et `PORTFOLIO_SESSION_SECRET`.
@@ -131,6 +132,49 @@ Cette commande démarre simultanément :
 
 > [!NOTE]
 > La configuration globale Enable Banking est partagée par tous les profils mais sa modification est réservée aux administrateurs définis par `ADMIN_USERS` (par exemple `ADMIN_USERS=Romain,Sophie`). Sans cette variable, le profil créé en premier est administrateur. Les autres profils peuvent connecter leurs banques et synchroniser leurs comptes, mais ne peuvent ni modifier ni supprimer les identifiants de l'application.
+
+---
+
+## 🔌 Sidecars Bancaires Locaux (BoursoBank, BNP, Fortuneo)
+
+Pour trois banques, l'application peut utiliser un **sidecar local en lecture seule** à la place d'Enable Banking. Le sidecar contourne les limites DSP2 (historique de 90 jours, PEA/CTO exclus) et importe l'intégralité des comptes, opérations et positions.
+
+| Banque | Dépôt | Commande détectée | Identifiants |
+| :--- | :--- | :--- | :--- |
+| **BoursoBank** | `bourso-cli` | `bourso-cli` (`BOURSO_CLI_PATH`) | identifiant + mot de passe mémorisables dans le coffre chiffré |
+| **BNP Paribas** | [Romaindujardin/bnp-cli](https://github.com/Romaindujardin/bnp-cli) | `bnp-direct` (`BNP_CLI_PATH`) | numéro client mémorisable ; code secret 6 chiffres saisi à chaque synchro |
+| **Fortuneo** | [Romaindujardin/fortuneo-cli](https://github.com/Romaindujardin/fortuneo-cli) | `fortuneo-sidecar` (`FORTUNEO_CLI_PATH`) | identifiant mémorisable ; mot de passe saisi à chaque synchro |
+
+### Priorité et non-régression
+
+- Dès qu'une connexion sidecar existe pour une banque, **Enable Banking n'est plus utilisé pour cette banque** : les connexions DSP2 correspondantes sont marquées `sidecarLinked` et leurs comptes sont archivés pour éviter les doublons.
+- Une synchronisation Enable Banking forcée sur une banque remplacée est refusée avec le code `SIDECAR_PRIORITY`.
+- Si le sidecar est retiré, les connexions Enable Banking redeviennent disponibles.
+- **« Tout synchroniser »** exécute les sidecars BoursoBank. BNP et Fortuneo exigent un code secret à chaque exécution : ils renvoient `CREDENTIALS_REQUIRED` et l'interface invite à saisir les identifiants dans le modal sidecar.
+
+### Installation
+
+```bash
+# BNP Paribas
+pipx install "git+https://github.com/Romaindujardin/bnp-cli.git"
+pipx inject bnp-cli curl-cffi
+
+# Fortuneo
+pipx install "git+https://github.com/Romaindujardin/fortuneo-cli.git"
+```
+
+Installez BoursoBank selon son propre dépôt, puis vérifiez que la commande est dans le `PATH` ou définissez `BOURSO_CLI_PATH`, `BNP_CLI_PATH` et `FORTUNEO_CLI_PATH` dans `.env`.
+
+### Validation forte BNP
+
+Le serveur crée un répertoire privé `0700` pour chaque job. Le CLI BNP y écrit `mfa-request.json` (`0600`) et attend `mfa-response.json`. L'interface affiche le type de validation (SMS ou approbation dans l'application BNP), puis transmet uniquement le code ou l'action choisie. Aucune valeur de formulaire, aucun cookie et aucun jeton CSRF ne quitte le CLI. Le mot de passe BNP n'est jamais stocké ni réutilisé entre deux connexions.
+
+### Fortuneo et 2FA
+
+Le mot de passe Fortuneo est transmis sur `stdin` au CLI. Si Fortuneo demande un code SMS, l'API répond `OTP_REQUIRED` ; l'interface demande le code et relance la synchronisation. Seul l'identifiant peut être mémorisé (`fortuneoLogin`), jamais le mot de passe ni le code. Les cookies de session Fortuneo ne sont pas persistés sur disque.
+
+> [!IMPORTANT]
+> Les sidecars exécutent des CLI Python locaux : ils nécessitent un accès réseau à la banque et ne fonctionnent pas dans le conteneur Docker par défaut, sauf si les CLI et leurs dépendances y sont installés. Toutes les commandes sont strictement en lecture seule : aucun paiement, virement ou ordre n'est exposé.
 
 ---
 
@@ -159,10 +203,10 @@ prochains chantiers portent sur la robustesse et l'exploitation :
 
 ## 🧪 Tests & Qualité
 
-Le projet dispose d'une suite de tests complète (248 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement, des sessions et des synchronisations :
+Le projet dispose d'une suite de tests complète (277 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement, des sessions et des synchronisations :
 
 ```bash
-npm test              # Exécute l'ensemble des 248 tests
+npm test              # Exécute l'ensemble des 277 tests
 npm run test:watch    # Mode surveillance interactif
 npm run test:coverage # Rapport de couverture de code
 npm run type-check    # Vérification stricte TypeScript

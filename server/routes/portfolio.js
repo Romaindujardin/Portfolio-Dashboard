@@ -75,6 +75,19 @@ import {
   syncBoursoSidecar,
 } from "../services/boursoSidecarService.js";
 import {
+  cancelBnpJob,
+  deleteBnpCredentials,
+  getBnpJob,
+  getBnpStatus,
+  startBnpSidecarSync,
+  submitBnpMfa,
+} from "../services/bnpSidecarService.js";
+import {
+  deleteFortuneoCredentials,
+  getFortuneoStatus,
+  syncFortuneoSidecar,
+} from "../services/fortuneoSidecarService.js";
+import {
   computePortfolioEtfBreakdown,
   ETF_CATALOG,
   resolveHoldingProfile,
@@ -138,6 +151,9 @@ const SENSITIVE_ACCOUNT_METADATA = new Set([
   "apiSecret",
   "binanceApiKey",
   "binanceSecretKey",
+  "bnpCustomerId",
+  "fortuneoLogin",
+  "login",
   "password",
   "customerId",
   "privateKey",
@@ -163,6 +179,9 @@ const publicAccount = (account) =>
 
 const SENSITIVE_CONNECTION_METADATA = new Set([
   "customerId",
+  "bnpCustomerId",
+  "fortuneoLogin",
+  "login",
   "password",
   "credentialsEncrypted",
   "apiKey",
@@ -356,6 +375,23 @@ export function createPortfolioRouter({
     windowMs: statusWindowMs,
     max: statusMax,
     keyPrefix: "auth-status",
+  });
+
+  // Les identifiants bancaires transitent par ces routes : limite par IP et
+  // profil pour ralentir les tentatives répétées sans gêner le polling MFA.
+  const sidecarCredentialLimiter = createRateLimiter({
+    windowMs: 5 * 60 * 1000,
+    max: 12,
+    keyPrefix: "sidecar-credentials",
+    keyGenerator: (req) =>
+      `${req.ip || req.socket?.remoteAddress || "unknown"}:${req.sessionUser || req.body?.user_id || req.query?.user_id || ""}`,
+  });
+  const sidecarMfaLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 30,
+    keyPrefix: "sidecar-mfa",
+    keyGenerator: (req) =>
+      `${req.ip || req.socket?.remoteAddress || "unknown"}:${req.sessionUser || ""}`,
   });
 
   router.get(
@@ -1676,6 +1712,139 @@ export function createPortfolioRouter({
       const userId = requireSessionUserId(req);
       const deleted = deleteBoursoCredentials(repository, userId);
       res.json({ deleted });
+    }),
+  );
+
+  // ─── Sidecar BNP Paribas ──────────────────────────────────────────────────
+
+  router.get(
+    "/sidecar/bnp/status",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      res.json(getBnpStatus(repository, userId));
+    }),
+  );
+
+  router.post(
+    "/sidecar/bnp/connect",
+    sidecarCredentialLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = bodyUserId(req);
+      const job = startBnpSidecarSync({
+        repository,
+        userId,
+        connectionId: asOptionalString(
+          req.body?.connectionId || req.body?.connection_id,
+        ),
+        customerId: asOptionalString(
+          req.body?.customerId || req.body?.customer_id,
+          10,
+        ),
+        password: asOptionalString(req.body?.password, 64),
+        saveCustomerId: toBool(
+          req.body?.saveCustomerId ?? req.body?.save_customer_id,
+          true,
+        ),
+        since: asOptionalString(req.body?.since, 10),
+      });
+      res.status(202).json(job);
+    }),
+  );
+
+  router.get(
+    "/sidecar/bnp/jobs/:jobId",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const job = getBnpJob(userId, req.params.jobId);
+      if (!job) {
+        throw httpErrorWithCode(
+          404,
+          "Tâche de synchronisation BNP introuvable",
+          "JOB_NOT_FOUND",
+        );
+      }
+      res.json({
+        ...job,
+        result: job.result ? publicSyncResult(job.result) : null,
+      });
+    }),
+  );
+
+  router.post(
+    "/sidecar/bnp/jobs/:jobId/mfa",
+    sidecarMfaLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const result = submitBnpMfa(userId, req.params.jobId, {
+        code: req.body?.code,
+        action: Number.isInteger(req.body?.action)
+          ? req.body.action
+          : undefined,
+        cancel: toBool(req.body?.cancel),
+      });
+      res.json(result);
+    }),
+  );
+
+  router.delete(
+    "/sidecar/bnp/jobs/:jobId",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      res.json(cancelBnpJob(userId, req.params.jobId));
+    }),
+  );
+
+  router.delete(
+    "/sidecar/bnp/credentials",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      res.json({ deleted: deleteBnpCredentials(repository, userId) });
+    }),
+  );
+
+  // ─── Sidecar Fortuneo ─────────────────────────────────────────────────────
+
+  router.get(
+    "/sidecar/fortuneo/status",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      res.json(getFortuneoStatus(repository, userId));
+    }),
+  );
+
+  const fortuneoSyncHandler = asyncHandler(async (req, res) => {
+    const userId = bodyUserId(req);
+    const result = await syncFortuneoSidecar({
+      repository,
+      userId,
+      connectionId: asOptionalString(
+        req.body?.connectionId || req.body?.connection_id,
+      ),
+      login: asOptionalString(req.body?.login, 120),
+      password: asOptionalString(req.body?.password, 200),
+      otp: asOptionalString(req.body?.otp, 8),
+      saveLogin: toBool(req.body?.saveLogin ?? req.body?.save_login, true),
+      since: asOptionalString(req.body?.since, 10),
+    });
+    res.json(publicSyncResult(result));
+  });
+
+  router.post(
+    "/sidecar/fortuneo/connect",
+    sidecarCredentialLimiter,
+    fortuneoSyncHandler,
+  );
+  router.post(
+    "/sidecar/fortuneo/sync",
+    sidecarCredentialLimiter,
+    fortuneoSyncHandler,
+  );
+
+  router.delete(
+    "/sidecar/fortuneo/credentials",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      res.json({ deleted: deleteFortuneoCredentials(repository, userId) });
     }),
   );
 

@@ -19,6 +19,8 @@ export const SECRET_KEYS = Object.freeze({
   openSeaApiKey: "OpenSea",
   boursoCustomerId: "BoursoBank (identifiant client)",
   boursoPassword: "BoursoBank (mot de passe)",
+  bnpCustomerId: "BNP Paribas (numéro client)",
+  fortuneoLogin: "Fortuneo (identifiant)",
 });
 
 export const SECRET_KEY_NAMES = Object.keys(SECRET_KEYS);

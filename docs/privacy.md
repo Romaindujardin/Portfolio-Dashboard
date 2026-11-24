@@ -19,8 +19,8 @@ L'application peut traiter les catégories de données suivantes :
   comptes, positions et parts de propriété.
 - **Données de marché** : identifiants de titres, tickers, cours et devises.
 - **Secrets d'intégration** : clés API Gemini, Binance, Etherscan, CoinGecko
-  et OpenSea, ainsi que les identifiants du sidecar BoursoBank, uniquement si
-  vous les configurez.
+  et OpenSea, ainsi que les identifiants BoursoBank, le numéro client BNP et
+  l'identifiant Fortuneo, uniquement si vous les configurez.
 - **Données techniques** : journaux d'erreurs et informations nécessaires au
   fonctionnement de l'application, dont un cookie de session
   `portfolio_session` (HttpOnly, SameSite=Lax, 7 jours).
@@ -34,6 +34,13 @@ passe BoursoBank. Ils sont chiffrés côté serveur en AES-256-GCM, rattachés a
 profil concerné, utilisés uniquement pour exécuter le CLI local de
 synchronisation et ne sont jamais renvoyés en clair par l'API. Ils peuvent être
 supprimés à tout moment depuis l'application.
+
+Les sidecars BNP Paribas et Fortuneo optionnels mémorisent uniquement le numéro
+client BNP ou l'identifiant Fortuneo dans le coffre chiffré. Le code secret BNP
+et le mot de passe Fortuneo sont demandés à chaque synchronisation, transmis au
+CLI local et **jamais enregistrés**. La validation forte BNP utilise des
+fichiers privés éphémères (`0600`) supprimés à la fin du job ; les codes SMS
+Fortuneo sont également effacés après usage.
 
 ## 3. Finalités et bases légales
 

@@ -527,6 +527,17 @@ export const syncAccount = (accountId: string, userId: string) =>
 
 // ─── Sidecar BoursoBank ─────────────────────────────────────────────────────
 
+export interface SidecarSyncResult {
+  status: string;
+  accountsSynced: number;
+  transactionsImported: number;
+  holdingsSynced?: number;
+  archivedAccounts?: number;
+  connection: Connection;
+  errors?: Array<{ account?: string; error: string; code?: string }>;
+  message?: string;
+}
+
 export interface BoursoSidecarStatus {
   available: boolean;
   configured: boolean;
@@ -573,6 +584,113 @@ export const syncBoursoSidecar = (
 
 export const deleteBoursoSidecarCredentials = () =>
   request<{ deleted: boolean }>("/sidecar/bourso/credentials", {
+    method: "DELETE",
+  });
+
+// ─── Sidecar BNP Paribas ────────────────────────────────────────────────────
+
+export interface BnpSidecarStatus {
+  available: boolean;
+  configured: boolean;
+  customerIdSaved: boolean;
+  passwordRequired: boolean;
+  mfa: string;
+}
+
+export interface BnpMfaAction {
+  index: number;
+  label: string;
+  kind: string;
+}
+
+export interface BnpMfaChallenge {
+  kind: string;
+  page: { host: string; path: string; queryKeys: string[] };
+  codeRequired: boolean;
+  actions: BnpMfaAction[];
+}
+
+export interface BnpSidecarJob {
+  id: string;
+  status: "running" | "mfa_required" | "success" | "error";
+  createdAt: string;
+  updatedAt: string;
+  challenge: BnpMfaChallenge | null;
+  result: SidecarSyncResult | null;
+  error: string | null;
+  code: string | null;
+}
+
+export const getBnpSidecarStatus = () =>
+  request<BnpSidecarStatus>("/sidecar/bnp/status");
+
+export const startBnpSidecarSync = (
+  userId: string,
+  payload: {
+    connectionId?: string;
+    customerId?: string;
+    password: string;
+    saveCustomerId?: boolean;
+    since?: string;
+  },
+) =>
+  request<{ jobId: string; status: string }>("/sidecar/bnp/connect", {
+    ...json({ user_id: userId, ...payload }),
+  });
+
+export const getBnpSidecarJob = (jobId: string) =>
+  request<BnpSidecarJob>(`/sidecar/bnp/jobs/${encodeURIComponent(jobId)}`);
+
+export const submitBnpSidecarMfa = (
+  jobId: string,
+  payload: { code?: string; action?: number; cancel?: boolean },
+) =>
+  request<{ accepted: boolean; cancelled?: boolean; jobId: string }>(
+    `/sidecar/bnp/jobs/${encodeURIComponent(jobId)}/mfa`,
+    { ...json(payload) },
+  );
+
+export const cancelBnpSidecarJob = (jobId: string) =>
+  request<{ cancelled: boolean; status?: string }>(
+    `/sidecar/bnp/jobs/${encodeURIComponent(jobId)}`,
+    { method: "DELETE" },
+  );
+
+export const deleteBnpSidecarCredentials = () =>
+  request<{ deleted: boolean }>("/sidecar/bnp/credentials", {
+    method: "DELETE",
+  });
+
+// ─── Sidecar Fortuneo ───────────────────────────────────────────────────────
+
+export interface FortuneoSidecarStatus {
+  available: boolean;
+  configured: boolean;
+  loginSaved: boolean;
+  passwordRequired: boolean;
+  otpSupported: boolean;
+}
+
+export const getFortuneoSidecarStatus = () =>
+  request<FortuneoSidecarStatus>("/sidecar/fortuneo/status");
+
+export const syncFortuneoSidecar = (
+  userId: string,
+  payload: {
+    connectionId?: string;
+    login?: string;
+    password: string;
+    otp?: string;
+    saveLogin?: boolean;
+    since?: string;
+  },
+) =>
+  request<SidecarSyncResult>("/sidecar/fortuneo/sync", {
+    ...json({ user_id: userId, ...payload }),
+  });
+
+export const deleteFortuneoSidecarCredentials = () =>
+  request<{ deleted: boolean }>("/sidecar/fortuneo/credentials", {
     method: "DELETE",
   });
 
