@@ -8,6 +8,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { randomUUID } from "crypto";
 import { fileURLToPath } from "url";
 import { PROVIDERS } from "../connectors/types.js";
 import { nowIso, round2 } from "../lib/validate.js";
@@ -40,6 +41,8 @@ const FORTUNEO_LOGIN_KEY = "fortuneoLogin";
 const FORTUNEO_LEGACY_PASSWORD_KEY = "fortuneoPassword";
 const SINCE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{10}$/i;
+const OTP_REQUEST_SCHEMA = "fortuneo-sidecar/otp-request/v1";
+const OTP_RESPONSE_SCHEMA = "fortuneo-sidecar/otp-response/v1";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = path.resolve(MODULE_DIR, "../..");
@@ -50,10 +53,18 @@ const positiveNumber = (value, fallback) => {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 };
 
+const FORTUNEO_OTP_TIMEOUT_SECONDS = Math.min(
+  Math.max(positiveNumber(process.env.FORTUNEO_OTP_TIMEOUT_SECONDS, 180), 10),
+  900,
+);
 const FORTUNEO_TIMEOUT_MS = Math.max(
-  positiveNumber(process.env.FORTUNEO_TIMEOUT_MS, 180_000),
+  positiveNumber(
+    process.env.FORTUNEO_TIMEOUT_MS,
+    (FORTUNEO_OTP_TIMEOUT_SECONDS + 120) * 1000,
+  ),
   30_000,
 );
+const FORTUNEO_JOB_TTL_MS = 15 * 60 * 1000;
 
 const fortuneoError = (
   message,
@@ -142,6 +153,7 @@ export const getFortuneoStatus = (repository, userId) => {
     loginSaved: Boolean(saved?.login),
     passwordRequired: true,
     otpSupported: true,
+    otp: "file-broker",
   };
 };
 
@@ -514,6 +526,7 @@ const parseSidecarError = (stderr) => {
 
 const errorStatusForCode = (code) => {
   if (code === "OTP_REQUIRED" || code === "ACTION_REQUIRED") return 428;
+  if (code === "OTP_CANCELLED") return 409;
   if (code === "ACCOUNT_LOCKED") return 423;
   if (code === "PASSWORD_REQUIRED" || code === "CREDENTIALS_MISSING") {
     return 400;
@@ -522,79 +535,210 @@ const errorStatusForCode = (code) => {
   return 502;
 };
 
-const runFortuneoCli = async ({
-  login,
-  password,
-  otp,
-  since,
-}) => {
-  const cliPath = resolveFortuneoCliPath();
-  // Pas de `--state` : les cookies de session Fortuneo ne doivent pas être
-  // persistés sur disque. Le CLI réauthentifie à chaque synchronisation.
-  const args = ["export", "--password-stdin", "--no-interactive"];
-  if (since) args.push("--since", since);
-
-  let otpDirectory = null;
-  const extraEnv = {};
-  if (login) extraEnv.FORTUNEO_LOGIN = login;
-  if (process.env.FORTUNEO_SIDECAR_HOME) {
-    extraEnv.FORTUNEO_SIDECAR_HOME = process.env.FORTUNEO_SIDECAR_HOME;
+const readOtpRequestFile = (directory) => {
+  if (!directory) return null;
+  const requestPath = path.join(directory, "otp-request.json");
+  let raw;
+  try {
+    raw = fs.readFileSync(requestPath, "utf8");
+  } catch {
+    return null;
   }
-  if (otp) {
-    otpDirectory = createPrivateTempDir("portfolio-fortuneo-otp-");
-    const otpPath = path.join(otpDirectory, "otp.txt");
-    fs.writeFileSync(otpPath, `${String(otp).trim()}\n`, {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || parsed.schema !== OTP_REQUEST_SCHEMA || !parsed.id) {
+    return null;
+  }
+  return {
+    id: String(parsed.id),
+    kind: String(parsed.kind || "sms"),
+    label: String(parsed.label || "Entrez le code reçu par SMS").slice(0, 200),
+    codeRequired: parsed.codeRequired !== false,
+  };
+};
+
+const writeOtpResponseFile = (directory, payload) => {
+  const target = path.join(directory, "otp-response.json");
+  if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) {
+    throw fortuneoError("Fichier de réponse OTP non sûr.", {
+      status: 400,
+      code: "UNSAFE_OTP_FILE",
+    });
+  }
+  const temporary = path.join(directory, `.otp-response-${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(payload), {
       mode: 0o600,
       flag: "wx",
     });
-    fs.chmodSync(otpPath, 0o600);
-    args.push("--otp-file", otpPath);
+    fs.chmodSync(temporary, 0o600);
+    fs.renameSync(temporary, target);
+  } catch (error) {
+    try {
+      fs.rmSync(temporary, { force: true });
+    } catch {
+      // Nettoyage best-effort.
+    }
+    throw error;
   }
+};
 
+const publicOtpChallenge = (challenge) => {
+  if (!challenge) return null;
+  return {
+    kind: challenge.kind,
+    label: challenge.label,
+    codeRequired: challenge.codeRequired,
+  };
+};
+
+const fortuneoJobs = new Map();
+const activeFortuneoJobsByUser = new Map();
+
+const pruneJobs = () => {
+  const now = Date.now();
+  for (const [id, job] of fortuneoJobs.entries()) {
+    if (job.status === "running") continue;
+    const updated = new Date(job.updatedAt || job.createdAt).getTime();
+    if (Number.isFinite(updated) && now - updated > FORTUNEO_JOB_TTL_MS) {
+      fortuneoJobs.delete(id);
+    }
+  }
+};
+
+const executeFortuneoJob = async ({
+  job,
+  repository,
+  userId,
+  connection,
+  login,
+  password,
+  since,
+}) => {
+  const runId = repository.startSyncRun(
+    userId,
+    connection.id,
+    FORTUNEO_PROVIDER,
+  );
+  let runFinished = false;
+  let secret = password;
   try {
+    const cliPath = resolveFortuneoCliPath();
+    // Le broker garde la même session Woob ouverte entre la demande SMS et la
+    // soumission du code : le code saisi correspond donc à ce SMS précis.
+    const args = [
+      "export",
+      "--password-stdin",
+      "--no-interactive",
+      "--otp-broker-dir",
+      job.dir,
+      "--otp-timeout",
+      String(FORTUNEO_OTP_TIMEOUT_SECONDS),
+    ];
+    if (since) args.push("--since", since);
+
+    const home = path.join(job.dir, "home");
+    fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+    const env = buildSidecarEnv({
+      extraEnv: { FORTUNEO_LOGIN: login },
+      home,
+    });
+
     const result = await runSidecarProcess({
       command: cliPath,
       args,
-      env: buildSidecarEnv({ extraEnv }),
-      input: `${password}\n`,
+      env,
+      input: `${secret}\n`,
       timeoutMs: FORTUNEO_TIMEOUT_MS,
-      redact: [password, login, otp].filter(Boolean),
+      redact: [secret, login],
+      onSpawn: (child) => {
+        job.child = child;
+      },
     });
+    secret = "";
+    job.child = null;
+
     if (result.code !== 0) {
       const parsed = parseSidecarError(result.stderr);
-      const code = parsed?.code || "FORTUNEO_SIDECAR_ERROR";
-      const rawMessage =
-        code === "OTP_REQUIRED"
-          ? "Fortuneo demande un code de validation 2FA. Saisissez le code reçu par SMS, puis relancez la synchronisation."
-          : parsed?.message ||
+      throw fortuneoError(
+        redactSecrets(
+          parsed?.message ||
             redactSecrets(result.stderr, [login]).trim() ||
-            `fortuneo-sidecar exit ${result.code}`;
-      const message = redactSecrets(
-        rawMessage,
-        [password, login, otp].filter(Boolean),
+            `fortuneo-sidecar exit ${result.code}`,
+          [password, login],
+        ),
+        {
+          status: errorStatusForCode(parsed?.code),
+          code: parsed?.code || "FORTUNEO_SIDECAR_ERROR",
+          details: parsed?.details || null,
+        },
       );
-      throw fortuneoError(message, {
-        status: errorStatusForCode(code),
-        code,
-        details: parsed?.details || null,
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(result.stdout);
+    } catch {
+      throw fortuneoError(
+        "Sortie JSON invalide du sidecar Fortuneo (export interrompu ou illisible).",
+        { status: 502, code: "FORTUNEO_INVALID_OUTPUT" },
+      );
+    }
+
+    const summary = applyFortuneoExport({
+      repository,
+      userId,
+      connection,
+      payload,
+      runId,
+    });
+    runFinished = true;
+    job.status = "success";
+    job.result = summary;
+    job.error = null;
+    job.code = null;
+  } catch (error) {
+    if (!runFinished) {
+      repository.finishSyncRun(runId, {
+        status: "error",
+        error: error.message,
       });
     }
-    return result;
+    repository.updateConnector(connection.id, userId, {
+      status: "error",
+      lastError: error.message,
+    });
+    job.status = "error";
+    job.code = job.cancelled ? "CANCELLED" : error.code || "FORTUNEO_SYNC_ERROR";
+    job.error = job.cancelled
+      ? "Synchronisation Fortuneo annulée."
+      : error.message;
   } finally {
-    removePrivateDir(otpDirectory);
+    secret = "";
+    job.child = null;
+    job.updatedAt = nowIso();
+    activeFortuneoJobsByUser.delete(userId);
+    removePrivateDir(job.dir);
+    job.dir = null;
+    const timer = setTimeout(() => fortuneoJobs.delete(job.id), FORTUNEO_JOB_TTL_MS);
+    timer.unref?.();
   }
 };
 
 /**
- * Synchronise les comptes Fortuneo via le CLI. Le mot de passe est requis à
- * chaque appel : il n'est jamais enregistré par le dashboard.
+ * Démarre une synchronisation Fortuneo en tâche de fond.
+ * Retourne immédiatement un identifiant de job : le challenge SMS est récupéré
+ * par polling puis le code est soumis sans relancer de nouvelle session.
  */
-export const syncFortuneoSidecar = async ({
+export const startFortuneoSidecarSync = ({
   repository,
   userId,
   login = null,
   password = null,
-  otp = null,
   connectionId = null,
   saveLogin = true,
   since = null,
@@ -603,6 +747,16 @@ export const syncFortuneoSidecar = async ({
     throw fortuneoError("Profil requis pour la synchronisation Fortuneo.", {
       status: 400,
       code: "USER_REQUIRED",
+    });
+  }
+  pruneJobs();
+
+  const saved = getFortuneoSavedCredentials(repository, userId);
+  const resolvedLogin = String(login || saved?.login || "").trim() || null;
+  if (!resolvedLogin) {
+    throw fortuneoError("Identifiant Fortuneo requis.", {
+      status: 400,
+      code: "LOGIN_REQUIRED",
     });
   }
   const secret = String(password || "").trim();
@@ -621,10 +775,15 @@ export const syncFortuneoSidecar = async ({
     );
   }
 
-  const saved = getFortuneoSavedCredentials(repository, userId);
-  const resolvedLogin = String(login || saved?.login || "").trim() || null;
   if (saveLogin && login) {
     saveFortuneoLogin(repository, userId, resolvedLogin);
+  }
+
+  if (activeFortuneoJobsByUser.has(userId)) {
+    throw fortuneoError(
+      "Une synchronisation Fortuneo est déjà en cours pour ce profil. Terminez-la ou annulez-la avant de réessayer.",
+      { status: 409, code: "JOB_ALREADY_RUNNING" },
+    );
   }
 
   const connection = ensureFortuneoConnection({
@@ -632,49 +791,159 @@ export const syncFortuneoSidecar = async ({
     userId,
     connectionId,
   });
-  const runId = repository.startSyncRun(
+  const job = {
+    id: randomUUID(),
     userId,
-    connection.id,
-    FORTUNEO_PROVIDER,
-  );
-  let finished = false;
+    connectionId: connection.id,
+    status: "running",
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    dir: createPrivateTempDir("portfolio-fortuneo-otp-"),
+    child: null,
+    result: null,
+    error: null,
+    code: null,
+    cancelled: false,
+  };
+  fortuneoJobs.set(job.id, job);
+  activeFortuneoJobsByUser.set(userId, job.id);
 
+  void executeFortuneoJob({
+    job,
+    repository,
+    userId,
+    connection,
+    login: resolvedLogin,
+    password: secret,
+    since: sinceValue,
+  }).catch((error) => {
+    // Filet de sécurité : executeFortuneoJob gère déjà ses erreurs, mais une
+    // erreur inattendue ne doit jamais laisser le job bloqué en "running".
+    job.status = "error";
+    job.code = job.code || "FORTUNEO_SYNC_ERROR";
+    job.error = job.error || error.message;
+    job.updatedAt = nowIso();
+    activeFortuneoJobsByUser.delete(userId);
+    removePrivateDir(job.dir);
+    job.dir = null;
+    console.warn("⚠️ Synchronisation Fortuneo interrompue:", error.message);
+  });
+
+  return { jobId: job.id, status: "PENDING" };
+};
+
+export const getFortuneoJob = (userId, jobId) => {
+  pruneJobs();
+  const job = fortuneoJobs.get(String(jobId || ""));
+  if (!job || job.userId !== userId) return null;
+  const challenge =
+    job.status === "running" && job.dir
+      ? readOtpRequestFile(job.dir)
+      : null;
+  return {
+    id: job.id,
+    status: challenge ? "otp_required" : job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    challenge: publicOtpChallenge(challenge),
+    result: job.result,
+    error: job.error,
+    code: job.code,
+  };
+};
+
+export const submitFortuneoOtp = (userId, jobId, payload = {}) => {
+  const job = fortuneoJobs.get(String(jobId || ""));
+  if (!job || job.userId !== userId) {
+    throw fortuneoError("Tâche de synchronisation Fortuneo introuvable.", {
+      status: 404,
+      code: "JOB_NOT_FOUND",
+    });
+  }
+  if (job.status !== "running" || !job.dir) {
+    throw fortuneoError(
+      "La synchronisation Fortuneo n'attend plus de code SMS.",
+      { status: 409, code: "JOB_NOT_RUNNING" },
+    );
+  }
+  const challenge = readOtpRequestFile(job.dir);
+  if (!challenge) {
+    throw fortuneoError("Aucune demande de code SMS Fortuneo en attente.", {
+      status: 409,
+      code: "OTP_NOT_REQUESTED",
+    });
+  }
+
+  if (payload.cancel) {
+    writeOtpResponseFile(job.dir, {
+      schema: OTP_RESPONSE_SCHEMA,
+      id: challenge.id,
+      cancel: true,
+    });
+    job.cancelled = true;
+    return { accepted: true, cancelled: true, jobId: job.id };
+  }
+
+  const code = String(payload.code || "").trim();
+  if (!/^[0-9]{4,8}$/.test(code)) {
+    throw fortuneoError(
+      "Le code de validation Fortuneo doit contenir 4 à 8 chiffres.",
+      { status: 400, code: "INVALID_OTP_CODE" },
+    );
+  }
+  writeOtpResponseFile(job.dir, {
+    schema: OTP_RESPONSE_SCHEMA,
+    id: challenge.id,
+    code,
+  });
+  return { accepted: true, jobId: job.id };
+};
+
+export const cancelFortuneoJob = (userId, jobId) => {
+  const job = fortuneoJobs.get(String(jobId || ""));
+  if (!job || job.userId !== userId) {
+    throw fortuneoError("Tâche de synchronisation Fortuneo introuvable.", {
+      status: 404,
+      code: "JOB_NOT_FOUND",
+    });
+  }
+  if (job.status !== "running") {
+    return { cancelled: false, status: job.status };
+  }
+  job.cancelled = true;
   try {
-    const result = await runFortuneoCli({
-      login: resolvedLogin,
-      password: secret,
-      otp,
-      since: sinceValue,
-    });
-    let payload;
-    try {
-      payload = JSON.parse(result.stdout);
-    } catch {
-      throw fortuneoError(
-        "Sortie JSON invalide du sidecar Fortuneo (export interrompu ou illisible).",
-        { status: 502, code: "FORTUNEO_INVALID_OUTPUT" },
-      );
-    }
-    const summary = applyFortuneoExport({
-      repository,
-      userId,
-      connection,
-      payload,
-      runId,
-    });
-    finished = true;
-    return summary;
-  } catch (error) {
-    if (!finished) {
-      repository.finishSyncRun(runId, {
-        status: "error",
-        error: error.message,
+    const challenge = job.dir ? readOtpRequestFile(job.dir) : null;
+    if (challenge) {
+      writeOtpResponseFile(job.dir, {
+        schema: OTP_RESPONSE_SCHEMA,
+        id: challenge.id,
+        cancel: true,
       });
     }
-    repository.updateConnector(connection.id, userId, {
-      status: "error",
-      lastError: error.message,
-    });
-    throw error;
+  } catch {
+    // La tâche sera tuée ci-dessous.
   }
+  const child = job.child;
+  const timer = setTimeout(() => {
+    try {
+      child?.kill("SIGKILL");
+    } catch {
+      // Processus déjà terminé.
+    }
+  }, 500);
+  timer.unref?.();
+  return { cancelled: true, status: job.status };
+};
+
+export const resetFortuneoJobsForTests = () => {
+  for (const job of fortuneoJobs.values()) {
+    try {
+      job.child?.kill("SIGKILL");
+    } catch {
+      // Ignore.
+    }
+    removePrivateDir(job.dir);
+  }
+  fortuneoJobs.clear();
+  activeFortuneoJobsByUser.clear();
 };

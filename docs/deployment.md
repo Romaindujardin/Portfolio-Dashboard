@@ -182,7 +182,8 @@ BNP_CLI_PATH=/home/portfolio/.local/bin/bnp-direct
 FORTUNEO_CLI_PATH=/home/portfolio/.local/bin/fortuneo-sidecar
 BNP_MFA_TIMEOUT_SECONDS=180
 BNP_TIMEOUT_MS=300000
-FORTUNEO_TIMEOUT_MS=180000
+FORTUNEO_OTP_TIMEOUT_SECONDS=180
+FORTUNEO_TIMEOUT_MS=300000
 ```
 
 Avec Docker, montez les binaires et leurs dépendances dans le conteneur, ou

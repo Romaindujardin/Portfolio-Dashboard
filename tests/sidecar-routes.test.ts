@@ -34,6 +34,7 @@ describe("Sidecar BNP/Fortuneo routes", () => {
     expect(body).toMatchObject({
       passwordRequired: true,
       otpSupported: true,
+      otp: "file-broker",
     });
     expect(body).not.toHaveProperty("password");
     expect(JSON.stringify(body)).not.toContain("fortuneoPassword");
@@ -73,6 +74,14 @@ describe("Sidecar BNP/Fortuneo routes", () => {
   it("renvoie 404 pour un job BNP inconnu", async () => {
     const { status, body } = await apiJson<{ code?: string }>(
       "/portfolio/sidecar/bnp/jobs/job-inconnu",
+    );
+    expect(status).toBe(404);
+    expect(body.code).toBe("JOB_NOT_FOUND");
+  });
+
+  it("renvoie 404 pour un job Fortuneo inconnu", async () => {
+    const { status, body } = await apiJson<{ code?: string }>(
+      "/portfolio/sidecar/fortuneo/jobs/job-inconnu",
     );
     expect(status).toBe(404);
     expect(body.code).toBe("JOB_NOT_FOUND");

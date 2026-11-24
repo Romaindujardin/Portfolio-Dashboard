@@ -171,7 +171,9 @@ Le serveur crée un répertoire privé `0700` pour chaque job. Le CLI BNP y écr
 
 ### Fortuneo et 2FA
 
-Le mot de passe Fortuneo est transmis sur `stdin` au CLI. Si Fortuneo demande un code SMS, l'API répond `OTP_REQUIRED` ; l'interface demande le code et relance la synchronisation. Seul l'identifiant peut être mémorisé (`fortuneoLogin`), jamais le mot de passe ni le code. Les cookies de session Fortuneo ne sont pas persistés sur disque.
+Le mot de passe Fortuneo est transmis sur `stdin` au CLI. La synchronisation s'exécute en tâche de fond : si Fortuneo demande un code SMS, l'API expose un challenge `otp_required` et l'interface saisit le code **sans relancer la synchronisation**. Le CLI garde la même session ouverte et échange le code via `otp-request.json` / `otp-response.json` dans un répertoire privé `0700` ; le code appartient donc bien au SMS qui vient d'être envoyé. Seul l'identifiant peut être mémorisé (`fortuneoLogin`), jamais le mot de passe ni le code. Les cookies de session Fortuneo ne sont pas persistés sur disque.
+
+Le délai de saisie du code est réglable avec `FORTUNEO_OTP_TIMEOUT_SECONDS` (défaut : 180 s, bornes 10–900 s). `FORTUNEO_TIMEOUT_MS` doit rester supérieur à ce délai (défaut : `(FORTUNEO_OTP_TIMEOUT_SECONDS + 120) × 1000`).
 
 > [!IMPORTANT]
 > Les sidecars exécutent des CLI Python locaux : ils nécessitent un accès réseau à la banque et ne fonctionnent pas dans le conteneur Docker par défaut, sauf si les CLI et leurs dépendances y sont installés. Toutes les commandes sont strictement en lecture seule : aucun paiement, virement ou ordre n'est exposé.
@@ -203,10 +205,10 @@ prochains chantiers portent sur la robustesse et l'exploitation :
 
 ## 🧪 Tests & Qualité
 
-Le projet dispose d'une suite de tests complète (277 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement, des sessions et des synchronisations :
+Le projet dispose d'une suite de tests complète (280 tests automatisés avec Vitest) garantissant la fiabilité des calculs financiers, du chiffrement, des sessions et des synchronisations :
 
 ```bash
-npm test              # Exécute l'ensemble des 277 tests
+npm test              # Exécute l'ensemble des 280 tests
 npm run test:watch    # Mode surveillance interactif
 npm run test:coverage # Rapport de couverture de code
 npm run type-check    # Vérification stricte TypeScript

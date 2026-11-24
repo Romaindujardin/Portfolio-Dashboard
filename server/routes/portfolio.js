@@ -83,9 +83,12 @@ import {
   submitBnpMfa,
 } from "../services/bnpSidecarService.js";
 import {
+  cancelFortuneoJob,
   deleteFortuneoCredentials,
+  getFortuneoJob,
   getFortuneoStatus,
-  syncFortuneoSidecar,
+  startFortuneoSidecarSync,
+  submitFortuneoOtp,
 } from "../services/fortuneoSidecarService.js";
 import {
   computePortfolioEtfBreakdown,
@@ -1812,9 +1815,9 @@ export function createPortfolioRouter({
     }),
   );
 
-  const fortuneoSyncHandler = asyncHandler(async (req, res) => {
+  const fortuneoStartHandler = asyncHandler(async (req, res) => {
     const userId = bodyUserId(req);
-    const result = await syncFortuneoSidecar({
+    const job = startFortuneoSidecarSync({
       repository,
       userId,
       connectionId: asOptionalString(
@@ -1822,22 +1825,61 @@ export function createPortfolioRouter({
       ),
       login: asOptionalString(req.body?.login, 120),
       password: asOptionalString(req.body?.password, 200),
-      otp: asOptionalString(req.body?.otp, 8),
       saveLogin: toBool(req.body?.saveLogin ?? req.body?.save_login, true),
       since: asOptionalString(req.body?.since, 10),
     });
-    res.json(publicSyncResult(result));
+    res.status(202).json(job);
   });
 
   router.post(
     "/sidecar/fortuneo/connect",
     sidecarCredentialLimiter,
-    fortuneoSyncHandler,
+    fortuneoStartHandler,
   );
   router.post(
     "/sidecar/fortuneo/sync",
     sidecarCredentialLimiter,
-    fortuneoSyncHandler,
+    fortuneoStartHandler,
+  );
+
+  router.get(
+    "/sidecar/fortuneo/jobs/:jobId",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const job = getFortuneoJob(userId, req.params.jobId);
+      if (!job) {
+        throw httpErrorWithCode(
+          404,
+          "Tâche de synchronisation Fortuneo introuvable",
+          "JOB_NOT_FOUND",
+        );
+      }
+      res.json({
+        ...job,
+        result: job.result ? publicSyncResult(job.result) : null,
+      });
+    }),
+  );
+
+  router.post(
+    "/sidecar/fortuneo/jobs/:jobId/otp",
+    sidecarMfaLimiter,
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      const result = submitFortuneoOtp(userId, req.params.jobId, {
+        code: req.body?.code,
+        cancel: toBool(req.body?.cancel),
+      });
+      res.json(result);
+    }),
+  );
+
+  router.delete(
+    "/sidecar/fortuneo/jobs/:jobId",
+    asyncHandler(async (req, res) => {
+      const userId = requireSessionUserId(req);
+      res.json(cancelFortuneoJob(userId, req.params.jobId));
+    }),
   );
 
   router.delete(

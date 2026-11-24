@@ -669,25 +669,62 @@ export interface FortuneoSidecarStatus {
   loginSaved: boolean;
   passwordRequired: boolean;
   otpSupported: boolean;
+  otp?: string;
+}
+
+export interface FortuneoOtpChallenge {
+  kind: string;
+  label: string;
+  codeRequired: boolean;
+}
+
+export interface FortuneoSidecarJob {
+  id: string;
+  status: "running" | "otp_required" | "success" | "error";
+  createdAt: string;
+  updatedAt: string;
+  challenge: FortuneoOtpChallenge | null;
+  result: SidecarSyncResult | null;
+  error: string | null;
+  code: string | null;
 }
 
 export const getFortuneoSidecarStatus = () =>
   request<FortuneoSidecarStatus>("/sidecar/fortuneo/status");
 
-export const syncFortuneoSidecar = (
+export const startFortuneoSidecarSync = (
   userId: string,
   payload: {
     connectionId?: string;
     login?: string;
     password: string;
-    otp?: string;
     saveLogin?: boolean;
     since?: string;
   },
 ) =>
-  request<SidecarSyncResult>("/sidecar/fortuneo/sync", {
+  request<{ jobId: string; status: string }>("/sidecar/fortuneo/connect", {
     ...json({ user_id: userId, ...payload }),
   });
+
+export const getFortuneoSidecarJob = (jobId: string) =>
+  request<FortuneoSidecarJob>(
+    `/sidecar/fortuneo/jobs/${encodeURIComponent(jobId)}`,
+  );
+
+export const submitFortuneoSidecarOtp = (
+  jobId: string,
+  payload: { code?: string; cancel?: boolean },
+) =>
+  request<{ accepted: boolean; cancelled?: boolean; jobId: string }>(
+    `/sidecar/fortuneo/jobs/${encodeURIComponent(jobId)}/otp`,
+    { ...json(payload) },
+  );
+
+export const cancelFortuneoSidecarJob = (jobId: string) =>
+  request<{ cancelled: boolean; status?: string }>(
+    `/sidecar/fortuneo/jobs/${encodeURIComponent(jobId)}`,
+    { method: "DELETE" },
+  );
 
 export const deleteFortuneoSidecarCredentials = () =>
   request<{ deleted: boolean }>("/sidecar/fortuneo/credentials", {

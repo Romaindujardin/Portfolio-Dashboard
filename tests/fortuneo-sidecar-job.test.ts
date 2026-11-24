@@ -6,14 +6,21 @@ import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initializePortfolioSchema } from "../server/db/portfolioSchema.js";
 import { PortfolioRepository } from "../server/services/portfolioRepository.js";
-import { syncFortuneoSidecar } from "../server/services/fortuneoSidecarService.js";
+import {
+  getFortuneoJob,
+  resetFortuneoJobsForTests,
+  startFortuneoSidecarSync,
+  submitFortuneoOtp,
+} from "../server/services/fortuneoSidecarService.js";
 
 const USER = "TestFortuneoJob";
 const LOGIN = "mon-login-fortuneo";
 const PASSWORD = "mot-de-passe-fortuneo";
+const OTP = "123456";
 
 const fakeCli = `#!/usr/bin/env node
 const fs = require("fs");
+const path = require("path");
 let input = "";
 process.stdin.on("data", (chunk) => { input += chunk; });
 process.stdin.on("end", () => {
@@ -25,40 +32,80 @@ process.stdin.on("end", () => {
   if (input.trim() !== ${JSON.stringify(PASSWORD)}) fail("AUTH_FAILED", "mot de passe invalide");
   if (process.env.FORTUNEO_LOGIN !== ${JSON.stringify(LOGIN)}) fail("AUTH_FAILED", "identifiant absent");
   if (args.some((arg) => arg.includes(${JSON.stringify(PASSWORD)}))) fail("SECRET_LEAK", "secret dans argv");
-  const otpIndex = args.indexOf("--otp-file");
-  if (otpIndex < 0) fail("OTP_REQUIRED", "validation 2FA requise");
-  const otpPath = args[otpIndex + 1];
-  const content = fs.readFileSync(otpPath, "utf8").trim();
-  if (content !== "123456") fail("OTP_REQUIRED", "code 2FA invalide");
-  const mode = fs.statSync(otpPath).mode & 0o777;
-  if (mode !== 0o600) fail("UNSAFE_OTP_FILE", "fichier OTP non privé");
-  process.stdout.write(JSON.stringify({
-    schema: "fortuneo-sidecar/export/v1",
-    status: "ok",
-    accounts: [{
-      id: "fortuneo-checking-1",
-      label: "Compte Fortuneo",
-      kind: "banking",
-      type: "checking",
-      typeLabel: "Compte courant",
-      balance: 500,
-      currency: "EUR",
-      transactions: [{
-        id: "ftx-1",
-        dedupKey: "fortuneo:fortuneo-checking-1:ftx-1",
-        date: "2026-03-02",
-        amount: -20,
+  const dirIndex = args.indexOf("--otp-broker-dir");
+  if (dirIndex < 0) fail("OTP_REQUIRED", "broker OTP absent");
+  const dir = args[dirIndex + 1];
+  if ((fs.statSync(dir).mode & 0o777) !== 0o700) fail("UNSAFE_OTP_DIR", "répertoire OTP non privé");
+
+  const requestId = "req-" + process.pid;
+  fs.writeFileSync(
+    path.join(dir, "otp-request.json"),
+    JSON.stringify({
+      schema: "fortuneo-sidecar/otp-request/v1",
+      id: requestId,
+      kind: "sms",
+      field: "code",
+      label: "Code reçu par SMS",
+      codeRequired: true
+    }),
+    { mode: 0o600, flag: "wx" }
+  );
+
+  const responsePath = path.join(dir, "otp-response.json");
+  const deadline = Date.now() + 10000;
+  const wait = () => {
+    if (Date.now() > deadline) fail("OTP_REQUIRED", "délai OTP dépassé");
+    if (!fs.existsSync(responsePath)) return setTimeout(wait, 20);
+    if ((fs.statSync(responsePath).mode & 0o777) !== 0o600) fail("UNSAFE_OTP_FILE", "fichier OTP non privé");
+    const response = JSON.parse(fs.readFileSync(responsePath, "utf8"));
+    if (response.id !== requestId) return setTimeout(wait, 20);
+    if (response.cancel) fail("OTP_CANCELLED", "saisie annulée");
+    if (response.code !== ${JSON.stringify(OTP)}) fail("AUTH_FAILED", "code SMS incorrect");
+    fs.unlinkSync(responsePath);
+    process.stdout.write(JSON.stringify({
+      schema: "fortuneo-sidecar/export/v1",
+      status: "ok",
+      accounts: [{
+        id: "fortuneo-checking-1",
+        label: "Compte Fortuneo",
+        kind: "banking",
+        type: "checking",
+        typeLabel: "Compte courant",
+        balance: 500,
         currency: "EUR",
-        label: "Achat"
+        transactions: [{
+          id: "ftx-1",
+          dedupKey: "fortuneo:fortuneo-checking-1:ftx-1",
+          date: "2026-03-02",
+          amount: -20,
+          currency: "EUR",
+          label: "Achat"
+        }],
+        positions: []
       }],
-      positions: []
-    }],
-    errors: []
-  }));
+      errors: []
+    }));
+  };
+  wait();
 });
 `;
 
-describe("Fortuneo Sidecar sync", () => {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const waitForJob = async (
+  jobId: string,
+  predicate: (job: any) => boolean,
+) => {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const job = getFortuneoJob(USER, jobId);
+    if (!job) throw new Error("Tâche Fortuneo introuvable pendant le polling.");
+    if (predicate(job)) return job;
+    await sleep(20);
+  }
+  throw new Error("Délai de polling Fortuneo dépassé.");
+};
+
+describe("Fortuneo Sidecar job", () => {
   let db: any;
   let repository: any;
   let tempDir: string;
@@ -74,42 +121,106 @@ describe("Fortuneo Sidecar sync", () => {
   });
 
   afterEach(() => {
+    resetFortuneoJobsForTests();
     delete process.env.FORTUNEO_CLI_PATH;
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("transmet le mot de passe sur stdin et le code 2FA via un fichier 0600", async () => {
-    const result = await syncFortuneoSidecar({
+  it("expose le challenge SMS puis applique l'export après validation", async () => {
+    const started = startFortuneoSidecarSync({
       repository,
       userId: USER,
       login: LOGIN,
       password: PASSWORD,
-      otp: "123456",
       saveLogin: true,
     });
+    expect(started.status).toBe("PENDING");
 
-    expect(result).toMatchObject({
+    const waiting = await waitForJob(
+      started.jobId,
+      (job) => job.status === "otp_required",
+    );
+    expect(waiting.challenge).toMatchObject({
+      kind: "sms",
+      label: "Code reçu par SMS",
+      codeRequired: true,
+    });
+
+    const submitted = submitFortuneoOtp(USER, started.jobId, { code: OTP });
+    expect(submitted.accepted).toBe(true);
+
+    const finished = await waitForJob(
+      started.jobId,
+      (job) => job.status === "success" || job.status === "error",
+    );
+    expect(finished.status).toBe("success");
+    expect(finished.error).toBeNull();
+    expect(finished.result).toMatchObject({
       accountsSynced: 1,
       transactionsImported: 1,
       errors: [],
     });
+
     const accounts = repository.listAccounts(USER);
     expect(accounts).toHaveLength(1);
     expect(accounts[0].name).toBe("Compte Fortuneo");
   });
 
-  it("propage OTP_REQUIRED avec un statut 428", async () => {
-    await expect(
-      syncFortuneoSidecar({
+  it("annule la tâche sans créer de nouveau SMS", async () => {
+    const started = startFortuneoSidecarSync({
+      repository,
+      userId: USER,
+      login: LOGIN,
+      password: PASSWORD,
+      saveLogin: false,
+    });
+    await waitForJob(started.jobId, (job) => job.status === "otp_required");
+
+    const cancelled = submitFortuneoOtp(USER, started.jobId, { cancel: true });
+    expect(cancelled).toMatchObject({ accepted: true, cancelled: true });
+
+    const finished = await waitForJob(
+      started.jobId,
+      (job) => job.status === "error",
+    );
+    expect(finished.code).toBe("CANCELLED");
+    expect(finished.error).toBe("Synchronisation Fortuneo annulée.");
+    expect(repository.listAccounts(USER)).toHaveLength(0);
+  });
+
+  it("refuse deux synchronisations simultanées pour le même profil", async () => {
+    const started = startFortuneoSidecarSync({
+      repository,
+      userId: USER,
+      login: LOGIN,
+      password: PASSWORD,
+      saveLogin: false,
+    });
+    await waitForJob(started.jobId, (job) => job.status === "otp_required");
+
+    expect(() =>
+      startFortuneoSidecarSync({
         repository,
         userId: USER,
         login: LOGIN,
         password: PASSWORD,
+        saveLogin: false,
       }),
-    ).rejects.toMatchObject({
-      status: 428,
-      code: "OTP_REQUIRED",
+    ).toThrowError(/déjà en cours/);
+  });
+
+  it("refuse un code qui ne respecte pas le format SMS", async () => {
+    const started = startFortuneoSidecarSync({
+      repository,
+      userId: USER,
+      login: LOGIN,
+      password: PASSWORD,
+      saveLogin: false,
     });
-    expect(repository.listAccounts(USER)).toHaveLength(0);
+    await waitForJob(started.jobId, (job) => job.status === "otp_required");
+
+    expect(() =>
+      submitFortuneoOtp(USER, started.jobId, { code: "12ab" }),
+    ).toThrowError(/4 à 8 chiffres/);
   });
 });

@@ -25,9 +25,10 @@ import {
   BoursoSidecarStatus,
   BnpSidecarJob,
   BnpSidecarStatus,
+  FortuneoSidecarJob,
   FortuneoSidecarStatus,
-  PortfolioApiError,
   cancelBnpSidecarJob,
+  cancelFortuneoSidecarJob,
   completeConnection,
   connectBoursoSidecar,
   deleteBnpSidecarCredentials,
@@ -39,15 +40,17 @@ import {
   getBnpSidecarStatus,
   getBoursoSidecarStatus,
   getCountries,
+  getFortuneoSidecarJob,
   getFortuneoSidecarStatus,
   saveIntegrationSettings,
   searchInstitutions,
   startBnpSidecarSync,
   startConnection,
+  startFortuneoSidecarSync,
   submitBnpSidecarMfa,
+  submitFortuneoSidecarOtp,
   syncAllConnections,
   syncConnection,
-  syncFortuneoSidecar,
 } from "../../services/portfolioApi";
 import { getDefaultEnableBankingCallbackUrl } from "../../utils/apiBase";
 import {
@@ -196,13 +199,14 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   const [fortuneoForm, setFortuneoForm] = useState({
     login: "",
     password: "",
-    otp: "",
     saveLogin: true,
     since: "",
   });
   const [fortuneoBusy, setFortuneoBusy] = useState(false);
   const [fortuneoError, setFortuneoError] = useState("");
-  const [fortuneoOtpRequired, setFortuneoOtpRequired] = useState(false);
+  const [fortuneoJobId, setFortuneoJobId] = useState<string | null>(null);
+  const [fortuneoJob, setFortuneoJob] = useState<FortuneoSidecarJob | null>(null);
+  const [fortuneoOtpCode, setFortuneoOtpCode] = useState("");
 
   const reloadBnpStatus = () => {
     void getBnpSidecarStatus()
@@ -271,6 +275,58 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     // Le polling ne doit pas redémarrer si les callbacks du parent changent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bnpJobId]);
+
+  // Polling du job Fortuneo : le code SMS est soumis dans la session qui a
+  // déclenché l'envoi du SMS, sans relancer la synchronisation.
+  useEffect(() => {
+    if (!fortuneoJobId) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      try {
+        const job = await getFortuneoSidecarJob(fortuneoJobId);
+        if (!active) return;
+        setFortuneoJob(job);
+        if (job.status === "success") {
+          setFortuneoBusy(false);
+          setFortuneoJobId(null);
+          setFortuneoModalOpen(false);
+          setFortuneoForm((prev) => ({ ...prev, password: "" }));
+          setFortuneoOtpCode("");
+          setFortuneoTargetConnectionId(null);
+          reloadFortuneoStatus();
+          await onReload();
+          const result = job.result;
+          notify(
+            "success",
+            `Fortuneo synchronisé via le sidecar ! ${result?.accountsSynced ?? 0} compte(s), ${result?.transactionsImported ?? 0} transaction(s), ${result?.holdingsSynced ?? 0} position(s).`,
+          );
+          return;
+        }
+        if (job.status === "error") {
+          setFortuneoBusy(false);
+          setFortuneoJobId(null);
+          setFortuneoError(job.error || "Synchronisation Fortuneo interrompue.");
+          return;
+        }
+        timer = setTimeout(tick, job.status === "otp_required" ? 1500 : 900);
+      } catch (err) {
+        if (!active) return;
+        setFortuneoError(
+          err instanceof Error
+            ? err.message
+            : "Impossible de suivre la synchronisation Fortuneo.",
+        );
+        timer = setTimeout(tick, 2500);
+      }
+    };
+    void tick();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fortuneoJobId]);
 
   const reloadBoursoStatus = () => {
     void getBoursoSidecarStatus()
@@ -501,19 +557,31 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   const openFortuneoModal = (connectionId: string | null = null) => {
     setFortuneoTargetConnectionId(connectionId);
     setFortuneoError("");
-    setFortuneoOtpRequired(false);
+    setFortuneoJobId(null);
+    setFortuneoJob(null);
+    setFortuneoOtpCode("");
     reloadFortuneoStatus();
     setFortuneoModalOpen(true);
   };
 
-  const closeFortuneoModal = () => {
+  const closeFortuneoModal = async () => {
+    if (fortuneoJobId) {
+      try {
+        await cancelFortuneoSidecarJob(fortuneoJobId);
+      } catch {
+        // La tâche est peut-être déjà terminée.
+      }
+    }
+    setFortuneoJobId(null);
+    setFortuneoJob(null);
+    setFortuneoBusy(false);
     setFortuneoModalOpen(false);
     setFortuneoError("");
-    setFortuneoOtpRequired(false);
-    setFortuneoForm((prev) => ({ ...prev, password: "", otp: "" }));
+    setFortuneoOtpCode("");
+    setFortuneoForm((prev) => ({ ...prev, password: "" }));
   };
 
-  const handleSyncFortuneo = async () => {
+  const handleStartFortuneo = async () => {
     const login = fortuneoForm.login.trim();
     if (!fortuneoStatus?.configured && !login) {
       setFortuneoError("Identifiant Fortuneo requis.");
@@ -523,42 +591,48 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       setFortuneoError("Mot de passe Fortuneo requis pour chaque synchronisation.");
       return;
     }
-    const otp = fortuneoForm.otp.trim();
-    if (otp && !/^[0-9]{4,8}$/.test(otp)) {
-      setFortuneoError("Le code de validation Fortuneo doit contenir 4 à 8 chiffres.");
-      return;
-    }
     setFortuneoBusy(true);
     setFortuneoError("");
+    setFortuneoJob(null);
+    setFortuneoOtpCode("");
     try {
-      const res = await syncFortuneoSidecar(userId, {
+      const job = await startFortuneoSidecarSync(userId, {
         login: login || undefined,
         password: fortuneoForm.password,
-        otp: otp || undefined,
         saveLogin: fortuneoForm.saveLogin,
         since: fortuneoForm.since || undefined,
         connectionId: fortuneoTargetConnectionId || undefined,
       });
-      setFortuneoModalOpen(false);
-      setFortuneoOtpRequired(false);
-      setFortuneoForm((prev) => ({ ...prev, password: "", otp: "" }));
-      setFortuneoTargetConnectionId(null);
-      reloadFortuneoStatus();
-      await onReload();
-      notify(
-        "success",
-        `Fortuneo synchronisé via le sidecar ! ${res.accountsSynced} compte(s), ${res.transactionsImported} transaction(s), ${res.holdingsSynced ?? 0} position(s).`,
-      );
+      setFortuneoJobId(job.jobId);
+      setFortuneoForm((prev) => ({ ...prev, password: "" }));
     } catch (err) {
-      const code = err instanceof PortfolioApiError ? err.code : undefined;
-      if (code === "OTP_REQUIRED" || code === "ACTION_REQUIRED" || code === "UNSUPPORTED_AUTH") {
-        setFortuneoOtpRequired(true);
-      }
-      setFortuneoError(
-        err instanceof Error ? err.message : "Synchronisation Fortuneo impossible.",
-      );
-    } finally {
       setFortuneoBusy(false);
+      setFortuneoError(
+        err instanceof Error
+          ? err.message
+          : "Impossible de lancer la synchronisation Fortuneo.",
+      );
+    }
+  };
+
+  const handleFortuneoOtpSubmit = async (payload: { code?: string }) => {
+    if (!fortuneoJobId) return;
+    if (payload.code != null && !/^[0-9]{4,8}$/.test(payload.code.trim())) {
+      setFortuneoError(
+        "Le code de validation Fortuneo doit contenir 4 à 8 chiffres.",
+      );
+      return;
+    }
+    setFortuneoError("");
+    try {
+      await submitFortuneoSidecarOtp(fortuneoJobId, {
+        ...(payload.code != null ? { code: payload.code.trim() } : {}),
+      });
+      setFortuneoOtpCode("");
+    } catch (err) {
+      setFortuneoError(
+        err instanceof Error ? err.message : "Validation Fortuneo impossible.",
+      );
     }
   };
 
@@ -1557,15 +1631,25 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       <Modal
         open={fortuneoModalOpen}
         title="Connexion Sidecar Fortuneo"
-        onClose={closeFortuneoModal}
+        onClose={() => {
+          void closeFortuneoModal();
+        }}
         footer={
           <>
-            <Button onClick={closeFortuneoModal}>Annuler</Button>
+            <Button
+              onClick={() => {
+                void closeFortuneoModal();
+              }}
+            >
+              Annuler
+            </Button>
             <Button
               variant="primary"
-              onClick={handleSyncFortuneo}
+              onClick={handleStartFortuneo}
               loading={fortuneoBusy}
               disabled={
+                fortuneoBusy ||
+                Boolean(fortuneoJobId) ||
                 !fortuneoForm.password ||
                 (!fortuneoStatus?.configured && !fortuneoForm.login.trim())
               }
@@ -1632,24 +1716,49 @@ const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
             />
           </Field>
 
-          <Field
-            label="Code de validation 2FA"
-            hint="Facultatif. À saisir si Fortuneo envoie un code par SMS."
-          >
-            <Input
-              value={fortuneoForm.otp}
-              onChange={(e) => setFortuneoForm({ ...fortuneoForm, otp: e.target.value })}
-              placeholder="4 à 8 chiffres"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-            />
-          </Field>
+          {fortuneoJobId && !fortuneoJob?.challenge && (
+            <Spinner label="Connexion Fortuneo et extraction des comptes en cours…" />
+          )}
 
-          {fortuneoOtpRequired && (
-            <p className="rounded-lg border border-[#c8a55e]/25 bg-[#c8a55e]/5 px-3 py-2 text-[11px] text-[#d4d4d4]">
-              Fortuneo a demandé une validation 2FA. Saisissez le code reçu par SMS,
-              puis relancez la synchronisation avec votre mot de passe.
-            </p>
+          {fortuneoJob?.challenge && (
+            <div className="rounded-lg border border-[#c8a55e]/30 bg-[#141414] p-3">
+              <p className="text-xs font-semibold text-[#c8a55e]">
+                Validation SMS demandée par Fortuneo
+              </p>
+              <p className="mt-0.5 text-[11px] text-[#8a8a8a]">
+                {fortuneoJob.challenge.label}
+              </p>
+              <p className="mt-1 text-[11px] text-[#a0a0a0]">
+                Saisissez le code reçu par SMS. La session reste ouverte : inutile de
+                relancer la synchronisation ou de ressaisir le mot de passe.
+              </p>
+              <div className="mt-2 flex items-end gap-2">
+                <Field label="Code reçu par SMS" className="flex-1">
+                  <Input
+                    value={fortuneoOtpCode}
+                    onChange={(e) => setFortuneoOtpCode(e.target.value)}
+                    placeholder="4 à 8 chiffres"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                  />
+                </Field>
+                <Button
+                  variant="primary"
+                  onClick={() => handleFortuneoOtpSubmit({ code: fortuneoOtpCode })}
+                >
+                  Valider
+                </Button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void closeFortuneoModal();
+                }}
+                className="mt-2 text-[11px] text-red-400 hover:text-red-300"
+              >
+                Annuler cette synchronisation
+              </button>
+            </div>
           )}
 
           {fortuneoStatus?.configured && (
