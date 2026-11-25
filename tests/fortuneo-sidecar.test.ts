@@ -199,6 +199,120 @@ describe("Fortuneo Sidecar Service", () => {
     ).toBe(true);
   });
 
+  it("traite les liquidités Fortuneo comme du cash sans créer de position", () => {
+    const connection = repository.createConnector(USER, {
+      provider: FORTUNEO_PROVIDER,
+      label: "Fortuneo (Sidecar)",
+      status: "active",
+      aspspName: "Fortuneo",
+    });
+    const account = repository.upsertSyncedAccount(USER, {
+      provider: FORTUNEO_PROVIDER,
+      externalId: "fortuneo-fortuneo-pea-cash",
+      connectionId: connection.id,
+      name: "PEA Fortuneo",
+      type: "PEA",
+      currency: "EUR",
+      balance: 0,
+    });
+    // Simule la ligne héritée des versions précédentes.
+    repository.upsertHolding(USER, account.id, {
+      ticker: "XX-liquidity",
+      name: "Liquidités",
+      quantity: 0,
+      price: null,
+      currency: "EUR",
+    });
+
+    const result = applyFortuneoExport({
+      repository,
+      userId: USER,
+      connection,
+      payload: {
+        schema: "fortuneo-sidecar/export/v1",
+        status: "ok",
+        accounts: [
+          {
+            id: "fortuneo-pea-cash",
+            label: "PEA Fortuneo",
+            kind: "trading",
+            type: "pea",
+            typeLabel: "PEA",
+            balance: 2500,
+            currency: "EUR",
+            transactions: [],
+            positions: [
+              {
+                label: "Fonds Exemple Monde",
+                code: "EXM",
+                codeType: "TICKER",
+                stockSymbol: "EXM",
+                quantity: 10,
+                unitPrice: 100,
+                unitValue: 100,
+                valuation: 1000,
+                currency: "EUR",
+                assetCategory: "action",
+              },
+              {
+                label: "Fonds Exemple Émergent",
+                code: "EXE",
+                codeType: "TICKER",
+                stockSymbol: "EXE",
+                quantity: 20,
+                unitPrice: 50,
+                unitValue: 50,
+                valuation: 1000,
+                currency: "EUR",
+                assetCategory: "action",
+              },
+              {
+                label: "Fonds Exemple Europe",
+                code: "EXU",
+                codeType: "TICKER",
+                stockSymbol: "EXU",
+                quantity: 5,
+                unitPrice: 40,
+                unitValue: 40,
+                valuation: 200,
+                currency: "EUR",
+                assetCategory: "action",
+              },
+              {
+                label: "Liquidités",
+                code: "XX-liquidity",
+                valuation: 300,
+                currency: "EUR",
+              },
+            ],
+          },
+        ],
+        errors: [],
+      },
+    });
+
+    expect(result.holdingsSynced).toBe(3);
+
+    const pea = repository
+      .listAccounts(USER)
+      .find((entry: any) => entry.name === "PEA Fortuneo");
+    expect(pea.balance).toBe(2500);
+    expect(pea.cashBalance).toBe(300);
+
+    const holdings = repository.listHoldings(pea.id, USER);
+    expect(holdings).toHaveLength(3);
+    expect(
+      holdings.some(
+        (holding: any) =>
+          String(holding.ticker || "").toLowerCase() === "xx-liquidity",
+      ),
+    ).toBe(false);
+
+    const overview = repository.getOverview(USER);
+    expect(overview.totals.assets).toBe(2500);
+    expect(overview.accounts[0].cashBalance).toBe(300);
+  });
+
   it("mémorise l'identifiant mais jamais le mot de passe", () => {
     saveFortuneoLogin(repository, USER, "mon-identifiant");
     expect(getFortuneoSavedCredentials(repository, USER)).toEqual({

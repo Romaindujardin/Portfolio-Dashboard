@@ -232,6 +232,22 @@ export const mapFortuneoTransaction = (transaction = {}, accountId = "") => {
   };
 };
 
+/**
+ * La ligne « Liquidités » de Woob (code XX-liquidity) est une position
+ * synthétique sans quantité ni prix : elle représente le cash non investi.
+ * Elle ne doit pas être importée comme un instrument.
+ */
+export const isFortuneoLiquidityPosition = (position = {}) => {
+  const code = String(position.code || "").trim().toLowerCase();
+  if (code === "xx-liquidity") return true;
+  if (code) return false;
+  const label = decodeHtmlEntities(position.label || position.description || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return label === "liquidites";
+};
+
 export const mapFortuneoPosition = (position = {}, account = {}) => {
   const code = position.code ? String(position.code).trim() : null;
   const codeType = String(position.codeType || "").toUpperCase();
@@ -370,13 +386,26 @@ export const applyFortuneoExport = ({
       const positions = Array.isArray(rawAccount.positions)
         ? rawAccount.positions
         : [];
+      const investedPositions = positions.filter(
+        (position) => !isFortuneoLiquidityPosition(position),
+      );
       let totalHoldingsValue = 0;
-      for (const rawPosition of positions) {
+      for (const rawPosition of investedPositions) {
         const holding = mapFortuneoPosition(rawPosition, rawAccount);
         repository.upsertHolding(userId, account.id, holding);
         holdingsSynced += 1;
         totalHoldingsValue += finiteNumber(holding.value, 0);
       }
+
+      // Supprime l'ancienne ligne synthétique « XX-liquidity » importée par
+      // les versions précédentes. Les liquidités sont désormais représentées
+      // uniquement par le cash_balance du compte.
+      for (const existing of repository.listHoldings(account.id, userId)) {
+        if (String(existing.ticker || "").trim().toLowerCase() === "xx-liquidity") {
+          repository.deleteHolding(existing.id, account.id, userId);
+        }
+      }
+
       if (positions.length > 0) {
         const cashPart = Math.max(
           0,
